@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+server/node_modules/
+
+# Build output (rebuilt on deploy)
+dist/
+server/dist/
+
+# Database (recreated on first run, seeded with default admin)
+server/data/
+
+# Logs
+*.log
+npm-debug.log*
+server/logs/
+
+# Env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local tools
+cloudflared.exe
+public-access.cjs
+公网访问.bat
+tunnel-server.cjs
+
+# 移交包（重复副本，非部署所需）
+业绩管理系统-移交包/
+
+# 旧的前端构建副本（部署时重新构建 app/dist）
+server/public/

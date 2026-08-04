@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: performance-manager
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: npm run build:all
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: PORT
+        value: "10000"
