@@ -37,17 +37,18 @@ app.use("/api/products", productRoutes);
 app.use("/api/sales-records", salesRecordRoutes);
 app.use("/api/cost-records", costRecordRoutes);
 app.use("/api/migrate", migrateRoutes);
-app.use("/api", extraRoutes);
+
+// 健康检查与占位接口需在 /api 通配路由之前注册，避免被 extra 的鉴权中间件拦截
+app.get("/api/health", (_req, res) => {
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
 
 // 生态圈同步订单（占位：当前返回空列表，真实同步逻辑可在后续接入）
 app.get("/api/synced-orders", (_req, res) => {
   res.json({ success: true, orders: [] });
 });
 
-// 健康检查
-app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", timestamp: new Date().toISOString() });
-});
+app.use("/api", extraRoutes);
 
 // ===================== 静态文件服务（生产环境） =====================
 // 优先从 dist（vite 构建输出）提供静态文件
