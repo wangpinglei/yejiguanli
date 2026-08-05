@@ -1,7 +1,8 @@
 // ===================== API 客户端 =====================
 // 封装所有后端 API 调用，管理 JWT token
 
-const API_BASE = import.meta.env.VITE_API_BASE || "/api";
+// 优先级：.env.production 的 VITE_API_BASE（/yeji/api）> 自动按 Vite base 拼接（/yeji/api）> 兜底 /api
+export const API_BASE = import.meta.env.VITE_API_BASE || (import.meta.env.BASE_URL + "api");
 
 // ===================== Token 管理 =====================
 
@@ -40,11 +41,12 @@ async function apiRequest<T>(
     body: body ? JSON.stringify(body) : undefined,
   });
 
-  // 401 → 清除 token，跳转登录
+  // 401 → 清除 token，跳转登录（基于 Vite base，兼容 /yeji/ 子路径）
   if (res.status === 401) {
     removeToken();
-    if (window.location.pathname !== "/login") {
-      window.location.href = "/login";
+    const loginPath = import.meta.env.BASE_URL + "login";
+    if (window.location.pathname !== loginPath) {
+      window.location.href = loginPath;
     }
     throw new Error("登录已过期，请重新登录");
   }

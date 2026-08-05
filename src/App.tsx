@@ -27,7 +27,7 @@ export default function App() {
   return (
     <AuthProvider>
       <DataProvider>
-        <BrowserRouter>
+        <BrowserRouter basename="/yeji">
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route

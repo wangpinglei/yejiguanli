@@ -37,6 +37,11 @@ app.use("/api/sales-records", salesRecordRoutes);
 app.use("/api/cost-records", costRecordRoutes);
 app.use("/api/migrate", migrateRoutes);
 
+// 生态圈同步订单（占位：当前返回空列表，真实同步逻辑可在后续接入）
+app.get("/api/synced-orders", (_req, res) => {
+  res.json({ success: true, orders: [] });
+});
+
 // 健康检查
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });

@@ -24,6 +24,7 @@ import type {
   UnitProductSettlement,
   ProductPersonCommission,
 } from "@/types";
+import { API_BASE } from "@/lib/api";
 
 // ===================== Context 定义 =====================
 interface DataContextType {
@@ -238,7 +239,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const refreshSyncedOrders = useCallback(async () => {
     setSyncedLoading(true);
     try {
-      const resp = await fetch("/api/synced-orders");
+      const resp = await fetch(`${API_BASE}/synced-orders`);
       if (resp.ok) {
         const data = await resp.json();
         if (data.success) {

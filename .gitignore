@@ -33,3 +33,7 @@ tunnel-server.cjs
 
 # 旧的前端构建副本（部署时重新构建 app/dist）
 server/public/
+
+# Webhook 部署密钥（切勿提交；仅在服务器本地生成）
+.webhook_secret
+
