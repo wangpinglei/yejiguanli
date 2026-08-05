@@ -1,14 +1,15 @@
 import { useState, useMemo, useEffect } from "react";
+import { Link } from "react-router-dom";
 import { useData } from "@/context/DataContext";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, formatDate, formatDateTime, getYearMonth } from "@/lib/format";
 import { getTotalSalaryCost, calcLeaveDeduction, MONTHLY_WORK_DAYS } from "@/lib/salary";
-import type { CostRecord, CostItem, IncomeRecord, IncomeItem, Product } from "@/types";
+import type { CostRecord, CostItem, IncomeRecord, IncomeItem } from "@/types";
 import {
   Plus, Search, Pencil, Trash2, Wallet, X, ChevronDown, ChevronRight, Clock,
-  Users, Calculator, History, Percent, CalendarDays, Save, TrendingUp, Repeat, AlertTriangle, Package, DollarSign,
+  Users, Calculator, History, Percent, CalendarDays, Save, TrendingUp, Repeat, AlertTriangle, Scale,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,9 +37,9 @@ const costCategories = ["人力成本", "办公租金", "营销推广", "差旅�
 const incomeCategories = ["服务费收入", "咨询费收入", "技术支持费", "培训费收入", "退款收入", "其他收入"];
 
 export default function CostManagement() {
-  const { addCostRecord, updateCostRecord, deleteCostRecord, costChangeLogs, products, monthlyAdjustments, upsertMonthlyAdjustment, addIncomeRecord, updateIncomeRecord, deleteIncomeRecord, batchUpsertUnitProductSettlements } = useData();
+  const { addCostRecord, updateCostRecord, deleteCostRecord, costChangeLogs, products, monthlyAdjustments, upsertMonthlyAdjustment, addIncomeRecord, updateIncomeRecord, deleteIncomeRecord } = useData();
   const { user } = useAuth();
-  const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleCostRecords: costRecords, visibleIncomeRecords: incomeRecords, visibleSalesRecords: salesRecords, visibleUnitProductSettlements, canEditCost, canEditProduct, isReadOnly, role } = usePermissions();
+  const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleCostRecords: costRecords, visibleIncomeRecords: incomeRecords, visibleSalesRecords: salesRecords, canEditCost, isReadOnly, role } = usePermissions();
   const [search, setSearch] = useState("");
   const [filterUnit, setFilterUnit] = useState("all");
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // "2026-08"
@@ -84,92 +85,6 @@ export default function CostManagement() {
   const [deleteReason, setDeleteReason] = useState("");
 
   const isSuperadmin = role === "superadmin";
-
-  // ===================== 产品结算比例录入（按销售单位×产品矩阵） =====================
-  const [settlementSearch, setSettlementSearch] = useState("");
-  const [settlementEditMode, setSettlementEditMode] = useState(false);
-  const [settlementBatchForm, setSettlementBatchForm] = useState<Record<string, {
-    settlementType: "percentage" | "fixed";
-    settlementRate: number;
-    settlementAmount: number;
-    note: string;
-  }>>({});
-
-  const filteredSettlementProducts = useMemo(() => {
-    return products.filter(
-      (p) =>
-        p.name.toLowerCase().includes(settlementSearch.toLowerCase()) ||
-        p.category.toLowerCase().includes(settlementSearch.toLowerCase())
-    );
-  }, [products, settlementSearch]);
-
-  // 获取某个单位×产品的结算设置
-  const getSettlement = (unitId: string, productId: string) => {
-    return visibleUnitProductSettlements.find(
-      (s) => s.salesUnitId === unitId && s.productId === productId
-    );
-  };
-
-  // 计算单件结算金额
-  const calcSettlementAmount = (unitId: string, product: Product) => {
-    const s = getSettlement(unitId, product.id);
-    if (!s) return 0;
-    if (s.settlementType === "fixed") return s.settlementAmount || 0;
-    if (s.settlementType === "percentage") return product.unitPrice * ((s.settlementRate || 0) / 100);
-    return 0;
-  };
-
-  // 进入编辑模式时，加载当前所有结算数据到 batchForm
-  const enterSettlementEditMode = () => {
-    const form: Record<string, { settlementType: "percentage" | "fixed"; settlementRate: number; settlementAmount: number; note: string }> = {};
-    products.forEach((p) => {
-      salesUnits.forEach((u) => {
-        const existing = getSettlement(u.id, p.id);
-        const key = `${u.id}__${p.id}`;
-        form[key] = {
-          settlementType: existing?.settlementType || "percentage",
-          settlementRate: existing?.settlementRate || 0,
-          settlementAmount: existing?.settlementAmount || 0,
-          note: existing?.note || "",
-        };
-      });
-    });
-    setSettlementBatchForm(form);
-    setSettlementEditMode(true);
-  };
-
-  // 保存所有编辑
-  const handleSettlementBatchSave = async () => {
-    const items = Object.entries(settlementBatchForm)
-      .filter(([, val]) => val.settlementRate > 0 || val.settlementAmount > 0)
-      .map(([key, val]) => {
-        const [salesUnitId, productId] = key.split("__");
-        return {
-          salesUnitId,
-          productId,
-          settlementType: val.settlementType,
-          settlementRate: val.settlementType === "percentage" ? val.settlementRate : undefined,
-          settlementAmount: val.settlementType === "fixed" ? val.settlementAmount : undefined,
-          note: val.note || undefined,
-        };
-      });
-    try {
-      await batchUpsertUnitProductSettlements(items);
-      setSettlementEditMode(false);
-      setSettlementBatchForm({});
-    } catch (error: any) {
-      alert("保存失败: " + (error.message || "未知错误"));
-    }
-  };
-
-  // 更新 batchForm 中的某个单元格
-  const updateBatchCell = (unitId: string, productId: string, field: string, value: string | number) => {
-    const key = `${unitId}__${productId}`;
-    setSettlementBatchForm((prev) => ({
-      ...prev,
-      [key]: { ...prev[key], [field]: value },
-    }));
-  };
 
   // ===================== 自动薪酬成本计算（按月度） =====================
   const salaryCosts = useMemo(() => {
@@ -982,234 +897,23 @@ export default function CostManagement() {
         </CardContent>
       </Card>
 
-      {/* ===================== 产品结算比例（按销售单位×产品矩阵） ===================== */}
-      <div className="mt-8 mb-4 flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-2">
-          <DollarSign className="h-5 w-5 text-cyan-600" />
-          <h3 className="text-base font-semibold">产品结算比例（按销售单位）</h3>
-          <Badge variant="outline" className="ml-1 border-cyan-200 text-cyan-700">{filteredSettlementProducts.length} 产品 × {salesUnits.length} 单位</Badge>
-        </div>
-        <div className="flex items-center gap-2">
-          {settlementEditMode ? (
-            <>
-              <Button variant="outline" size="sm" onClick={() => { setSettlementEditMode(false); setSettlementBatchForm({}); }}>
-                <X className="h-4 w-4 mr-1" />取消
-              </Button>
-              <Button size="sm" onClick={handleSettlementBatchSave}>
-                <Save className="h-4 w-4 mr-1" />保存全部
-              </Button>
-            </>
-          ) : (
-            canEditProduct && !isReadOnly && (
-              <Button variant="outline" size="sm" onClick={enterSettlementEditMode}>
-                <Pencil className="h-4 w-4 mr-1" />批量编辑
-              </Button>
-            )
-          )}
-        </div>
-      </div>
-
-      <Card>
-        <CardContent className="p-0">
-          {/* 搜索 + 说明 */}
-          <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input placeholder="搜索产品名称或分类..." value={settlementSearch} onChange={(e) => setSettlementSearch(e.target.value)} className="pl-10 h-9" />
+      {/* 结算与提成已统一到独立页面 */}
+      <Card className="mt-8 border-dashed">
+        <CardContent className="flex flex-wrap items-center justify-between gap-4 p-5">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-50 shrink-0">
+              <Scale className="h-5 w-5 text-cyan-600" />
             </div>
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <AlertTriangle className="h-3.5 w-3.5" />
-              <span>利润 = 实收 × 结算比例 - 实收 × 提成比例。每个单位对各产品的结算比例独立设置，系统自动计算结算收入和利润</span>
+            <div>
+              <p className="font-medium">结算与提成</p>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                单位×产品结算比例、人员管理/个人提成已统一到「结算与提成」页配置，成本页不再维护结算矩阵。
+              </p>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <Table className="min-w-full">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="sticky left-0 z-10 bg-card min-w-[160px]">产品名称</TableHead>
-                  <TableHead className="min-w-[80px]">分类</TableHead>
-                  <TableHead className="text-right min-w-[90px]">售价</TableHead>
-                  <TableHead className="text-right min-w-[80px]">提成</TableHead>
-                  {settlementEditMode && (
-                    <TableHead className="min-w-[100px]">结算方式</TableHead>
-                  )}
-                  {salesUnits.map((unit) => (
-                    <TableHead key={unit.id} className="text-center min-w-[130px]">
-                      <div className="flex flex-col items-center gap-0.5">
-                        <span className="text-xs font-medium">{unit.name}</span>
-                      </div>
-                    </TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredSettlementProducts.map((product) => {
-                  return (
-                    <TableRow key={product.id} className="hover:bg-muted/40">
-                      <TableCell className="sticky left-0 z-10 bg-card">
-                        <div className="flex items-center gap-2">
-                          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-cyan-50 shrink-0">
-                            <Package className="h-3.5 w-3.5 text-cyan-600" />
-                          </div>
-                          <span className="font-medium text-sm">{product.name}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell><Badge variant="outline" className="text-xs">{product.category || "-"}</Badge></TableCell>
-                      <TableCell className="text-right font-medium text-blue-600 text-sm">{formatCurrency(product.unitPrice)}</TableCell>
-                      <TableCell className="text-right text-sm">
-                        {product.commissionType === "fixed" ? (
-                          <span className="text-violet-600">{formatCurrency(product.commissionAmount)}/件</span>
-                        ) : (product.commissionRate || 0) > 0 ? (
-                          <span className="text-violet-600">{product.commissionRate}%</span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">-</span>
-                        )}
-                      </TableCell>
-                      {settlementEditMode && (
-                        <TableCell>
-                          <Select
-                            value={settlementBatchForm[`${salesUnits[0]?.id}__${product.id}`]?.settlementType || "percentage"}
-                            onValueChange={(v) => {
-                              // 切换该产品所有单位的结算方式
-                              salesUnits.forEach((u) => {
-                                const key = `${u.id}__${product.id}`;
-                                setSettlementBatchForm((prev) => ({
-                                  ...prev,
-                                  [key]: { ...prev[key], settlementType: v as "percentage" | "fixed" },
-                                }));
-                              });
-                            }}
-                          >
-                            <SelectTrigger className="h-8 w-24 text-xs"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="percentage">按比例%</SelectItem>
-                              <SelectItem value="fixed">固定金额</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                      )}
-                      {salesUnits.map((unit) => {
-                        const key = `${unit.id}__${product.id}`;
-                        const existing = getSettlement(unit.id, product.id);
-                        const batchVal = settlementBatchForm[key];
-
-                        if (settlementEditMode) {
-                          const stype = batchVal?.settlementType || "percentage";
-                          return (
-                            <TableCell key={unit.id} className="text-center">
-                              <div className="flex items-center justify-center gap-0.5">
-                                {stype === "percentage" ? (
-                                  <>
-                                    <Input
-                                      type="number"
-                                      step="0.1"
-                                      value={batchVal?.settlementRate || ""}
-                                      onChange={(e) => updateBatchCell(unit.id, product.id, "settlementRate", Number(e.target.value))}
-                                      className="h-8 w-16 text-right text-sm"
-                                      placeholder="0"
-                                    />
-                                    <span className="text-xs text-muted-foreground">%</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <span className="text-xs text-muted-foreground">¥</span>
-                                    <Input
-                                      type="number"
-                                      value={batchVal?.settlementAmount || ""}
-                                      onChange={(e) => updateBatchCell(unit.id, product.id, "settlementAmount", Number(e.target.value))}
-                                      className="h-8 w-20 text-right text-sm"
-                                      placeholder="0"
-                                    />
-                                  </>
-                                )}
-                              </div>
-                              {/* 实时预览结算额和利润 */}
-                              {((stype === "percentage" && (batchVal?.settlementRate || 0) > 0) || (stype === "fixed" && (batchVal?.settlementAmount || 0) > 0)) && (
-                                <div className="text-[10px] mt-0.5 space-y-0.5">
-                                  <div className="text-cyan-600">
-                                    结算 {formatCurrency(
-                                      stype === "percentage"
-                                        ? product.unitPrice * ((batchVal?.settlementRate || 0) / 100)
-                                        : batchVal?.settlementAmount || 0
-                                    )}
-                                  </div>
-                                  {(() => {
-                                    const settleAmt = stype === "percentage"
-                                      ? product.unitPrice * ((batchVal?.settlementRate || 0) / 100)
-                                      : batchVal?.settlementAmount || 0;
-                                    const commPerUnit = product.commissionType === "fixed"
-                                      ? (product.commissionAmount || 0)
-                                      : product.unitPrice * ((product.commissionRate || 0) / 100);
-                                    const profit = settleAmt - commPerUnit;
-                                    return <div className={profit >= 0 ? "text-emerald-600" : "text-red-600"}>利润 {formatCurrency(profit)}</div>;
-                                  })()}
-                                </div>
-                              )}
-                            </TableCell>
-                          );
-                        }
-
-                        // 只读模式
-                        if (!existing) {
-                          return <TableCell key={unit.id} className="text-center text-muted-foreground text-sm">-</TableCell>;
-                        }
-                        const settlementAmt = calcSettlementAmount(unit.id, product);
-                        // 计算单件提成
-                        const commissionPerUnit = product.commissionType === "fixed"
-                          ? (product.commissionAmount || 0)
-                          : product.unitPrice * ((product.commissionRate || 0) / 100);
-                        const profitPerUnit = settlementAmt - commissionPerUnit;
-                        return (
-                          <TableCell key={unit.id} className="text-center">
-                            <div className="flex flex-col items-center gap-0.5">
-                              <span className="font-medium text-sm">
-                                {existing.settlementType === "percentage"
-                                  ? `${existing.settlementRate}%`
-                                  : formatCurrency(existing.settlementAmount || 0)}
-                              </span>
-                              <span className="text-[10px] text-cyan-600">结算 {formatCurrency(settlementAmt)}</span>
-                              <span className="text-[10px] text-emerald-600">利润 {formatCurrency(profitPerUnit)}</span>
-                            </div>
-                          </TableCell>
-                        );
-                      })}
-                    </TableRow>
-                  );
-                })}
-                {filteredSettlementProducts.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={5 + salesUnits.length} className="text-center py-12 text-muted-foreground">
-                      暂无产品数据，请先在产品管理中添加产品
-                    </TableCell>
-                  </TableRow>
-                )}
-                {filteredSettlementProducts.length > 0 && salesUnits.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={5} className="text-center py-12 text-muted-foreground">
-                      暂无销售单位，请先在单位管理中添加
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-          {/* 汇总统计（只读模式） */}
-          {!settlementEditMode && filteredSettlementProducts.length > 0 && salesUnits.length > 0 && (
-            <div className="border-t px-4 py-3 bg-muted/30">
-              <div className="flex flex-wrap items-center gap-4 text-xs">
-                <span className="text-muted-foreground">汇总：</span>
-                {salesUnits.map((unit) => {
-                  const count = visibleUnitProductSettlements.filter((s) => s.salesUnitId === unit.id).length;
-                  return (
-                    <div key={unit.id} className="flex items-center gap-1">
-                      <span className="text-muted-foreground">{unit.name}：</span>
-                      <Badge variant="outline" className="text-xs">{count} 项已配置</Badge>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+          <Button asChild variant="outline" size="sm">
+            <Link to="/product-settlement">前往结算与提成</Link>
+          </Button>
         </CardContent>
       </Card>
 

@@ -101,7 +101,7 @@ export function usePermissions() {
   const canEditPersonnelDates = canEdit("personnel");
   const canEditSales = canEdit("sales_records");
   const canEditCost = canEdit("cost_management") || canEdit("profit_analysis");
-  const canEditProduct = canEdit("products") || canEdit("product_settlement");
+  const canEditProduct = canEdit("product_settlement");
   const canManageUsers = canEdit("users");
 
   // 无任何编辑权限时视为只读

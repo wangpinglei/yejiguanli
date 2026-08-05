@@ -4,7 +4,6 @@ export type ModuleKey =
   | "dashboard"
   | "sales_units"
   | "personnel"
-  | "products"
   | "sales_records"
   | "cost_management"
   | "profit_analysis"
@@ -23,7 +22,6 @@ const MODULE_KEYS: ModuleKey[] = [
   "dashboard",
   "sales_units",
   "personnel",
-  "products",
   "sales_records",
   "cost_management",
   "profit_analysis",
@@ -35,7 +33,6 @@ const MODULE_KEYS: ModuleKey[] = [
 const EDITABLE = new Set<ModuleKey>([
   "sales_units",
   "personnel",
-  "products",
   "sales_records",
   "cost_management",
   "profit_analysis",
@@ -87,7 +84,7 @@ export function permissionsFromLegacyRole(role: string): UserPermissions {
     case "unit_manager":
       MODULE_KEYS.forEach((key) => {
         if (key === "users") empty[key] = { view: false, edit: false };
-        else if (key === "products" || key === "product_settlement") {
+        else if (key === "product_settlement") {
           empty[key] = { view: true, edit: false };
         } else {
           empty[key] = { view: true, edit: EDITABLE.has(key) };
@@ -101,7 +98,7 @@ export function permissionsFromLegacyRole(role: string): UserPermissions {
 }
 
 export function normalizePermissions(
-  raw: Partial<UserPermissions> | null | undefined,
+  raw: (Partial<UserPermissions> & { products?: ModulePermission }) | null | undefined,
   role?: string
 ): UserPermissions {
   if (role === "superadmin") return createFullPermissions();
@@ -117,6 +114,16 @@ export function normalizePermissions(
     } else {
       result[key] = base[key];
     }
+  }
+  // 兼容旧「产品管理」权限 → 合并进结算与提成
+  const legacyProducts = raw.products;
+  if (legacyProducts) {
+    result.product_settlement = {
+      view: Boolean(
+        result.product_settlement.view || legacyProducts.view || legacyProducts.edit
+      ),
+      edit: Boolean(result.product_settlement.edit || legacyProducts.edit),
+    };
   }
   return result;
 }

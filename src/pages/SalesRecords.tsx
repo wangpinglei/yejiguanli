@@ -661,8 +661,8 @@ export default function SalesRecords() {
     setImportRows([]);
     setImportStep("input");
     const productTip = createdProductCount > 0
-      ? `\n已自动新建 ${createdProductCount} 个产品，请到「产品管理 / 产品结算」配置结算比例与销售提成。`
-      : "\n可在「产品结算」中配置各单位结算比例与人员提成。";
+      ? `\n已自动新建 ${createdProductCount} 个产品，请到「结算与提成」配置结算比例与销售提成。`
+      : "\n可在「结算与提成」中配置各单位结算比例与人员提成。";
     alert(`导入完成：成功 ${successCount} 条${failCount > 0 ? `，失败 ${failCount} 条` : ""}${productTip}`);
   };
 
@@ -1022,7 +1022,7 @@ export default function SalesRecords() {
                   产品类别仅用于导入识别，列表中不展示。
                   系统会自动按名称匹配已有的销售单位、人员和产品。
                   <strong className="text-foreground">未匹配到的产品名将在导入时自动建档</strong>，
-                  随后可在「产品管理 / 产品结算」配置结算比例与销售提成。
+                  随后可在「结算与提成」配置结算比例与销售提成。
                 </p>
                 <Button variant="link" size="sm" onClick={handleDownloadTemplate} className="p-0 h-auto text-emerald-700">
                   下载导入模板
@@ -1181,9 +1181,9 @@ export default function SalesRecords() {
                 <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 text-xs text-amber-700">
                   <p className="font-medium">部分数据未完全匹配，说明：</p>
                   <ul className="list-disc list-inside mt-1 space-y-0.5">
-                    <li>带「将自动创建」的产品会在导入时自动进入产品管理</li>
+                    <li>带「将自动创建」的产品会在导入时自动建档</li>
                     <li>销售单位/人员建议名称与系统一致，否则提成归属可能不完整</li>
-                    <li>导入后请到「产品结算」配置各单位结算比例与人员销售提成</li>
+                    <li>导入后请到「结算与提成」配置各单位结算比例与人员销售提成</li>
                   </ul>
                 </div>
               )}

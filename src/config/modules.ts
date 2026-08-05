@@ -3,7 +3,6 @@ export type ModuleKey =
   | "dashboard"
   | "sales_units"
   | "personnel"
-  | "products"
   | "sales_records"
   | "cost_management"
   | "profit_analysis"
@@ -30,12 +29,11 @@ export const MODULE_DEFS: ModuleDef[] = [
   { key: "dashboard", label: "数据看板", path: "/", canEdit: false },
   { key: "sales_units", label: "销售单位", path: "/sales-units", canEdit: true },
   { key: "personnel", label: "人员管理", path: "/personnel", canEdit: true },
-  { key: "products", label: "产品管理", path: "/products", canEdit: true },
   { key: "sales_records", label: "销售记录", path: "/sales-records", canEdit: true },
   { key: "cost_management", label: "成本管理", path: "/cost-management", canEdit: true },
   { key: "profit_analysis", label: "收支利润", path: "/profit-analysis", canEdit: true },
   { key: "sales_battle_report", label: "单位战报", path: "/sales-battle-report", canEdit: false },
-  { key: "product_settlement", label: "产品结算比例", path: "/product-settlement", canEdit: true },
+  { key: "product_settlement", label: "结算与提成", path: "/product-settlement", canEdit: true },
   { key: "users", label: "权限分配", path: "/users", canEdit: true },
 ];
 
@@ -84,13 +82,12 @@ export function permissionsFromLegacyRole(role: string): UserPermissions {
     case "unit_leader":
     case "unit_manager":
       MODULE_DEFS.forEach((m) => {
-        if (m.key === "users" || m.key === "products" || m.key === "product_settlement") {
+        if (m.key === "users" || m.key === "product_settlement") {
           empty[m.key] = { view: m.key !== "users", edit: false };
         } else {
           empty[m.key] = { view: true, edit: m.canEdit };
         }
       });
-      empty.products = { view: true, edit: false };
       empty.product_settlement = { view: true, edit: false };
       return empty;
     default:
@@ -100,7 +97,7 @@ export function permissionsFromLegacyRole(role: string): UserPermissions {
 }
 
 export function normalizePermissions(
-  raw: Partial<UserPermissions> | null | undefined,
+  raw: Partial<UserPermissions> & { products?: ModulePermission } | null | undefined,
   role?: string
 ): UserPermissions {
   if (role === "superadmin") return createFullPermissions();
@@ -117,6 +114,16 @@ export function normalizePermissions(
       result[def.key] = base[def.key];
     }
   }
+  // 兼容旧「产品管理」权限 → 合并进结算与提成
+  const legacyProducts = (raw as { products?: ModulePermission }).products;
+  if (legacyProducts) {
+    result.product_settlement = {
+      view: Boolean(
+        result.product_settlement.view || legacyProducts.view || legacyProducts.edit
+      ),
+      edit: Boolean(result.product_settlement.edit || legacyProducts.edit),
+    };
+  }
   return result;
 }
 
@@ -132,6 +139,7 @@ export function hasModuleEdit(perms: UserPermissions, key: ModuleKey, isSuperadm
 
 export function pathToModuleKey(pathname: string): ModuleKey | null {
   const normalized = pathname.replace(/\/+$/, "") || "/";
+  if (normalized === "/products") return "product_settlement";
   const found = MODULE_DEFS.find((m) => m.path === normalized);
   return found?.key ?? null;
 }

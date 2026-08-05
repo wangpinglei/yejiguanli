@@ -60,7 +60,7 @@ export default function ProductSettlement() {
 
   const [searchParams] = useSearchParams();
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
-  // 从产品管理跳转过来时，自动按产品名预筛（?product=<id>）
+  // 从旧链接或销售记录跳转过来时，按产品名预筛（?product=<id>）
   const [search, setSearch] = useState(() => {
     const pid = searchParams.get("product");
     if (!pid) return "";
@@ -84,13 +84,19 @@ export default function ProductSettlement() {
   // 按月过滤销售记录
   const monthlySales = useMemo(() => filterByMonth(salesRecords, selectedMonth), [salesRecords, selectedMonth]);
 
+  // 仅展示销售记录里出现过的产品（配置来源 = 销售）
+  const productsFromSales = useMemo(() => {
+    const idSet = new Set(salesRecords.map((s) => s.productId).filter(Boolean));
+    return products.filter((p) => idSet.has(p.id));
+  }, [products, salesRecords]);
+
   // 产品列表（搜索过滤）
   const filteredProducts = useMemo(() => {
     const kw = search.trim().toLowerCase();
-    return products.filter(
-      (p) => !kw || p.name.toLowerCase().includes(kw) || p.category.toLowerCase().includes(kw)
+    return productsFromSales.filter(
+      (p) => !kw || p.name.toLowerCase().includes(kw) || (p.category || "").toLowerCase().includes(kw)
     );
-  }, [products, search]);
+  }, [productsFromSales, search]);
 
   // 某产品×某单位的已配置结算
   const findUps = (productId: string, unitId: string) =>
@@ -99,6 +105,32 @@ export default function ProductSettlement() {
   // 某产品×某单位×某人员的已配置提成
   const findPpc = (productId: string, unitId: string, personnelId: string) =>
     ppcList.find((x) => x.salesUnitId === unitId && x.productId === productId && x.personnelId === personnelId);
+
+  // 某产品有过销售（或已配置结算）的单位
+  function getUnitsForProduct(productId: string): SalesUnit[] {
+    const unitIdSet = new Set<string>();
+    salesRecords.forEach((s) => {
+      if (s.productId === productId && s.salesUnitId) unitIdSet.add(s.salesUnitId);
+    });
+    upsList.forEach((u) => {
+      if (u.productId === productId) unitIdSet.add(u.salesUnitId);
+    });
+    return units.filter((u) => unitIdSet.has(u.id));
+  }
+
+  // 某产品×单位有过销售（或已配置提成）的人员
+  function getPeopleForProductUnit(productId: string, unitId: string): Personnel[] {
+    const personIdSet = new Set<string>();
+    salesRecords.forEach((s) => {
+      if (s.productId === productId && s.salesUnitId === unitId && s.personnelId) {
+        personIdSet.add(s.personnelId);
+      }
+    });
+    ppcList.forEach((p) => {
+      if (p.productId === productId && p.salesUnitId === unitId) personIdSet.add(p.personnelId);
+    });
+    return personnel.filter((p) => personIdSet.has(p.id) && p.status === "active");
+  }
 
   // 某产品×某单位的本月结算收入预览
   const calcUnitIncome = (productId: string, unitId: string): number => {
@@ -124,10 +156,10 @@ export default function ProductSettlement() {
   const totalMonthIncome = useMemo(() => {
     let total = 0;
     filteredProducts.forEach((p) => {
-      units.forEach((u) => { total += calcUnitIncome(p.id, u.id); });
+      getUnitsForProduct(p.id).forEach((u) => { total += calcUnitIncome(p.id, u.id); });
     });
     return total;
-  }, [filteredProducts, units, monthlySales, upsList]);
+  }, [filteredProducts, units, monthlySales, upsList, salesRecords]);
 
   // 按产品分组的人员提成配置（用于展示）
   const productPersonGroups = useMemo(() =>
@@ -139,10 +171,8 @@ export default function ProductSettlement() {
         personSales: number;
         teamSales: number;
       }[] = [];
-      units.forEach((unit) => {
-        const unitPeople = personnel.filter(
-          (p) => p.salesUnitId === unit.id && p.status === "active"
-        );
+      getUnitsForProduct(product.id).forEach((unit) => {
+        const unitPeople = getPeopleForProductUnit(product.id, unit.id);
         const teamSales = calcTeamSales(unit.id);
         unitPeople.forEach((person) => {
           const ppc = findPpc(product.id, unit.id, person.id);
@@ -152,7 +182,7 @@ export default function ProductSettlement() {
       });
       return { product, rows };
     }),
-  [filteredProducts, units, personnel, ppcList, monthlySales]);
+  [filteredProducts, units, personnel, ppcList, monthlySales, salesRecords, upsList]);
 
   // ---- 结算编辑 ----
   const openSettleEdit = (productId: string, unitId: string) => {
@@ -261,8 +291,8 @@ export default function ProductSettlement() {
   return (
     <div>
       <PageHeader
-        title="产品结算比例（按销售单位）"
-        description="先导入销售订单自动生成产品，再在此配置：① 各销售单位结算比例 ② 各销售人员管理/个人提成。"
+        title="结算与提成"
+        description="产品来自销售记录。在此配置：① 单位×产品结算比例 ② 人员管理/个人提成。本月金额仅作预览。"
         action={
           <Select value={selectedMonth} onValueChange={setSelectedMonth}>
             <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
@@ -273,13 +303,14 @@ export default function ProductSettlement() {
         }
       />
 
-      {products.length === 0 && (
+      {productsFromSales.length === 0 && (
         <Card className="mb-6 border-dashed">
           <CardContent className="p-6 text-sm text-muted-foreground">
-            暂无产品。请先到「销售记录」导入/同步销售订单，系统会按产品名称自动建档，再回到本页配置结算比例与销售提成。
+            暂无来自销售的产品。请先到「销售记录」导入或录入订单，产品会按名称自动出现后再配置结算与提成。
           </CardContent>
         </Card>
       )}
+
       {/* 汇总卡片 */}
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
@@ -299,7 +330,7 @@ export default function ProductSettlement() {
               <Package className="h-6 w-6 text-blue-600" />
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">产品数量</p>
+              <p className="text-sm text-muted-foreground">销售中的产品</p>
               <p className="text-xl font-bold text-blue-600">{filteredProducts.length}</p>
             </div>
           </CardContent>
@@ -340,7 +371,7 @@ export default function ProductSettlement() {
       {/* ==================== 第一部分：产品 × 单位 结算配置 ==================== */}
       <div className="mb-8 space-y-4">
         {filteredProducts.map((product: Product) => {
-          const defaultUnit = product.salesUnitId ? units.find((u) => u.id === product.salesUnitId) : undefined;
+          const productUnits = getUnitsForProduct(product.id);
           return (
             <Card key={product.id}>
               <CardContent className="p-0">
@@ -351,12 +382,10 @@ export default function ProductSettlement() {
                   <div className="flex-1">
                     <p className="font-medium">{product.name}</p>
                     <p className="text-xs text-muted-foreground">
-                      {product.category}
-                      {defaultUnit && (
-                        <span className="ml-2 inline-flex items-center gap-1 text-cyan-600">
-                          <Building2 className="h-3 w-3" />默认单位：{defaultUnit.name}
-                        </span>
-                      )}
+                      {product.category || "未分类"}
+                      <span className="ml-2 text-muted-foreground">
+                        · {productUnits.length} 个有销售的单位
+                      </span>
                     </p>
                   </div>
                 </div>
@@ -372,7 +401,7 @@ export default function ProductSettlement() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {units.map((unit: SalesUnit) => {
+                      {productUnits.map((unit: SalesUnit) => {
                         const ups = findUps(product.id, unit.id);
                         const income = calcUnitIncome(product.id, unit.id);
                         return (
@@ -422,8 +451,12 @@ export default function ProductSettlement() {
                           </TableRow>
                         );
                       })}
-                      {units.length === 0 && (
-                        <TableRow><TableCell colSpan={5} className="text-center py-6 text-muted-foreground">暂无销售单位</TableCell></TableRow>
+                      {productUnits.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={5} className="text-center py-6 text-muted-foreground">
+                            该产品暂无关联销售单位
+                          </TableCell>
+                        </TableRow>
                       )}
                     </TableBody>
                   </Table>
@@ -432,10 +465,10 @@ export default function ProductSettlement() {
             </Card>
           );
         })}
-        {filteredProducts.length === 0 && (
+        {filteredProducts.length === 0 && productsFromSales.length > 0 && (
           <Card>
             <CardContent className="py-12 text-center text-muted-foreground text-sm">
-              暂无产品。请先到「销售记录」导入/同步销售订单，产品会按名称自动出现后再配置结算比例与提成。
+              没有匹配的产品，请调整搜索条件。
             </CardContent>
           </Card>
         )}

@@ -313,7 +313,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return [...salesRecords, ...matchedSyncedRecords];
   }, [salesRecords, matchedSyncedRecords]);
 
-  // 销售订单自动录入产品：订单/记录中出现的产品名，若不存在则自动建档（售价/结算/提成默认 0，后续在产品管理配置）
+  // 销售订单自动录入产品：订单中出现的产品名若不存在则自动建档（后续在「结算与提成」配置）
   useEffect(() => {
     if (loading) return;
 

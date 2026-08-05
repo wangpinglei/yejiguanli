@@ -7,7 +7,6 @@ import {
   ShoppingCart,
   Wallet,
   TrendingUp,
-  Package,
   LogOut,
   Menu,
   ChevronDown,
@@ -47,12 +46,11 @@ const navItems: NavItem[] = [
   { path: "/", label: "数据看板", icon: LayoutDashboard, moduleKey: "dashboard" },
   { path: "/sales-units", label: "销售单位", icon: Building2, moduleKey: "sales_units" },
   { path: "/personnel", label: "人员管理", icon: Users, moduleKey: "personnel" },
-  { path: "/products", label: "产品管理", icon: Package, moduleKey: "products" },
   { path: "/sales-records", label: "销售记录", icon: ShoppingCart, moduleKey: "sales_records" },
   { path: "/cost-management", label: "成本管理", icon: Wallet, moduleKey: "cost_management" },
   { path: "/profit-analysis", label: "收支利润", icon: TrendingUp, moduleKey: "profit_analysis" },
   { path: "/sales-battle-report", label: "单位战报", icon: Swords, moduleKey: "sales_battle_report" },
-  { path: "/product-settlement", label: "产品结算比例", icon: Scale, moduleKey: "product_settlement" },
+  { path: "/product-settlement", label: "结算与提成", icon: Scale, moduleKey: "product_settlement" },
   { path: "/users", label: "权限分配", icon: ShieldCheck, moduleKey: "users" },
 ];
 
