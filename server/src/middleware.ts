@@ -42,7 +42,7 @@ export function getVisibleUnitIds(user: JwtPayload): string[] | null {
   const units = db.prepare("SELECT * FROM sales_units").all().map(rowToSalesUnit);
   const visibleIds = new Set<string>();
 
-  user.managedUnitIds.forEach((id) => visibleIds.add(id));
+  (user.managedUnitIds || []).forEach((id) => visibleIds.add(id));
 
   // 不依赖旧角色：凡在销售单位中被指派为管理人员即可看见该单位
   units.forEach((unit: any) => {
@@ -55,6 +55,12 @@ export function getVisibleUnitIds(user: JwtPayload): string[] | null {
       visibleIds.add(unit.id);
     }
   });
+
+  // 未配置任何单位范围时：视为可看全部（模块权限已控制能否进页面）
+  // 若配置了 managedUnitIds 或被挂到某单位管理人员，则只看这些单位
+  if (visibleIds.size === 0) {
+    return null;
+  }
 
   return Array.from(visibleIds);
 }

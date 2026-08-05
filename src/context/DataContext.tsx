@@ -24,6 +24,7 @@ import type {
   UnitProductSettlement,
   ProductPersonCommission,
 } from "@/types";
+import { useAuth } from "@/context/AuthContext";
 import {
   API_BASE,
   salesUnitsApi,
@@ -167,6 +168,7 @@ interface DataContextType {
 const DataContext = createContext<DataContextType | null>(null);
 
 export function DataProvider({ children }: { children: ReactNode }) {
+  const { user, loading: authLoading } = useAuth();
   const [salesUnits, setSalesUnits] = useState<SalesUnit[]>([]);
   const [personnel, setPersonnel] = useState<Personnel[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -243,8 +245,31 @@ export function DataProvider({ children }: { children: ReactNode }) {
   }, [refreshSyncedOrders]);
 
   useEffect(() => {
-    refreshAll();
-  }, [refreshAll]);
+    if (authLoading) return;
+
+    if (!user) {
+      setSalesUnits([]);
+      setPersonnel([]);
+      setProducts([]);
+      setSalesRecords([]);
+      setSyncedOrders([]);
+      setCostRecords([]);
+      setIncomeRecords([]);
+      setRevenueSettlements([]);
+      setUnitProductSettlements([]);
+      setProductPersonCommissions([]);
+      setCostChangeLogs([]);
+      setNotifications([]);
+      setMonthlyAdjustments([]);
+      setPerformanceTargets([]);
+      setPositionGroupLabels([]);
+      setLoading(false);
+      return;
+    }
+
+    // 登录成功或会话恢复后再拉业务数据（避免无 token 时空跑失败，登录后也不刷新）
+    void refreshAll();
+  }, [authLoading, user?.id, refreshAll]);
 
   const allSalesRecords = useMemo(() => {
     const syncedAsSales: SalesRecord[] = syncedOrders.map((o) => ({

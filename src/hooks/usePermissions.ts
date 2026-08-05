@@ -51,6 +51,10 @@ export function usePermissions() {
         ids.add(u.id);
       }
     });
+
+    // 未配置范围时与后端一致：可看全部（由模块权限控制入口）
+    if (ids.size === 0) return salesUnits.map((u) => u.id);
+
     return Array.from(ids).filter((id) => salesUnits.some((u) => u.id === id));
   }, [user, isSuperadmin, salesUnits]);
 
