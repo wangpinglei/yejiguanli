@@ -459,10 +459,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
       return [...prev, saved];
     });
   }, []);
-  const batchUpsertUnitProductSettlements = useCallback(async (items: Omit<UnitProductSettlement, "id" | "createdAt">[]) => {
-    const saved = await unitProductSettlementsApi.batch(items);
+  const batchUpsertUnitProductSettlements = useCallback(async (
+    items: Omit<UnitProductSettlement, "id" | "createdAt">[],
+  ) => {
+    await unitProductSettlementsApi.batch(items);
     setUnitProductSettlements(await unitProductSettlementsApi.list());
-    return saved;
   }, []);
   const deleteUnitProductSettlement = useCallback(async (id: string) => {
     await unitProductSettlementsApi.delete(id);
