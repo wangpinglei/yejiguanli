@@ -9,6 +9,7 @@ import {
   filterByMonth,
   getPersonalSales,
   isSalesBattlePosition,
+  wasEmployedInMonth,
   EMPTY_SALARY,
 } from "@/lib/salary";
 import type { Personnel } from "@/types";
@@ -85,10 +86,19 @@ export default function SalesBattleReport() {
     }
   }, [salesUnits, unitId]);
 
-  // 该单位的所有人员（在职）
+  // 该单位在「战报所选月份」处于在职期间的人员（含当月后才离职的）
   const unitPersonnel = useMemo(() => {
-    return personnel.filter((p) => p.salesUnitId === unitId && p.status === "active");
-  }, [personnel, unitId]);
+    const monthUnitSales = filterByMonth(salesRecords, yearMonth).filter(
+      (r) => r.salesUnitId === unitId
+    );
+    return personnel.filter((p) => {
+      if (p.salesUnitId !== unitId) return false;
+      // 按入职/离职日期判断该月是否在职
+      if (wasEmployedInMonth(p, yearMonth)) return true;
+      // 兜底：当月本单位确有业绩（离职日期未填/填错时仍能进战报）
+      return getPersonalSales(p.id, monthUnitSales, p.name) > 0;
+    });
+  }, [personnel, unitId, yearMonth, salesRecords]);
 
   // 战报仅展示销售相关岗位（排除组织部、售后等非销售岗）
   const battlePersonnel = useMemo(() => {
@@ -668,7 +678,7 @@ export default function SalesBattleReport() {
       {/* 战报表格 */}
       <Card className="overflow-hidden">
         <div className="border-b bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
-          仅展示销售相关岗位（岗位名含「销售 / 顾问 / 客户经理 / 外援」等）；
+          展示所选月份在职期间的销售相关岗位（含当月后才离职人员）；
           组织部、售后等非销售岗不显示。个人业绩按本单位销售记录归集。
         </div>
         <div className="overflow-x-auto">
@@ -860,7 +870,7 @@ export default function SalesBattleReport() {
               {battleRows.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={6} className="py-12 text-center text-muted-foreground">
-                    该单位暂无在职人员
+                    该单位该月暂无在职销售人员
                   </TableCell>
                 </TableRow>
               )}
@@ -920,7 +930,9 @@ export default function SalesBattleReport() {
               </div>
             ))}
             {battlePersonnel.length === 0 && (
-              <p className="py-8 text-center text-sm text-muted-foreground">该单位暂无销售岗位在职人员</p>
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                该单位该月暂无销售岗位在职人员
+              </p>
             )}
           </div>
           <DialogFooter>

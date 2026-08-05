@@ -93,6 +93,32 @@ export function isSalesBattlePosition(position?: string): boolean {
 }
 
 /**
+ * 人员在指定年月是否处于「在职期间」
+ * - 入职日晚于该月最后一天 → 未入职
+ * - 离职日早于该月第一天 → 已离职
+ * - 有离职日且离职日落在该月或之后 → 该月仍算在职（含月中离职）
+ * - 无离职日但 status=inactive → 不按在职算（由调用方结合当月业绩兜底）
+ */
+export function wasEmployedInMonth(
+  person: { hireDate?: string; resignDate?: string; status?: string },
+  yearMonth: string
+): boolean {
+  if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) return person.status !== "inactive";
+  const [y, m] = yearMonth.split("-").map(Number);
+  const monthStart = `${yearMonth}-01`;
+  const lastDay = new Date(y, m, 0).getDate();
+  const monthEnd = `${yearMonth}-${String(lastDay).padStart(2, "0")}`;
+
+  const hire = (person.hireDate || "").slice(0, 10);
+  const resign = (person.resignDate || "").slice(0, 10);
+
+  if (hire && hire > monthEnd) return false;
+  if (resign) return resign >= monthStart;
+  if (person.status === "inactive") return false;
+  return true;
+}
+
+/**
  * 计算团队销售额（给定单位下所有人员的销售记录）
  */
 export function getTeamSales(
