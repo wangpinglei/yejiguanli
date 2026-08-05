@@ -106,30 +106,14 @@ export default function ProductSettlement() {
   const findPpc = (productId: string, unitId: string, personnelId: string) =>
     ppcList.find((x) => x.salesUnitId === unitId && x.productId === productId && x.personnelId === personnelId);
 
-  // 某产品有过销售（或已配置结算）的单位
-  function getUnitsForProduct(productId: string): SalesUnit[] {
-    const unitIdSet = new Set<string>();
-    salesRecords.forEach((s) => {
-      if (s.productId === productId && s.salesUnitId) unitIdSet.add(s.salesUnitId);
-    });
-    upsList.forEach((u) => {
-      if (u.productId === productId) unitIdSet.add(u.salesUnitId);
-    });
-    return units.filter((u) => unitIdSet.has(u.id));
+  // 方案 A：每个产品下列出权限内全部销售单位，便于提前配置结算
+  function getUnitsForProduct(_productId: string): SalesUnit[] {
+    return units;
   }
 
-  // 某产品×单位有过销售（或已配置提成）的人员
-  function getPeopleForProductUnit(productId: string, unitId: string): Personnel[] {
-    const personIdSet = new Set<string>();
-    salesRecords.forEach((s) => {
-      if (s.productId === productId && s.salesUnitId === unitId && s.personnelId) {
-        personIdSet.add(s.personnelId);
-      }
-    });
-    ppcList.forEach((p) => {
-      if (p.productId === productId && p.salesUnitId === unitId) personIdSet.add(p.personnelId);
-    });
-    return personnel.filter((p) => personIdSet.has(p.id) && p.status === "active");
+  // 某产品×单位：列出该单位全部在职人员，便于提前配置提成
+  function getPeopleForProductUnit(_productId: string, unitId: string): Personnel[] {
+    return personnel.filter((p) => p.salesUnitId === unitId && p.status === "active");
   }
 
   // 某产品×某单位的本月结算收入预览
@@ -454,7 +438,7 @@ export default function ProductSettlement() {
                       {productUnits.length === 0 && (
                         <TableRow>
                           <TableCell colSpan={5} className="text-center py-6 text-muted-foreground">
-                            该产品暂无关联销售单位
+                            暂无销售单位，请先在「销售单位」中录入
                           </TableCell>
                         </TableRow>
                       )}
@@ -572,7 +556,7 @@ export default function ProductSettlement() {
                 </div>
               ) : (
                 <div className="py-6 text-center text-sm text-muted-foreground">
-                  该产品下暂无在职销售人员，或尚未创建销售单位。
+                  该产品下各单位暂无在职人员，请先在「人员管理」中录入。
                 </div>
               )}
             </CardContent>
