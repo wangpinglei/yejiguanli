@@ -34,28 +34,11 @@ export function usePermissions() {
     return hasModuleEdit(permissions, key, isSuperadmin);
   }
 
-  // ===================== 数据可见性 =====================
+  // 列表接口已按库中 managedUnitIds 过滤；前端以接口结果为准，避免 JWT 快照过期再滤空
   const accessibleUnitIds = useMemo(() => {
     if (!user) return [];
     if (isSuperadmin) return salesUnits.map((u) => u.id);
-
-    // 销售单位中指派的管理人员 + 历史 managedUnitIds
-    const ids = new Set<string>(user.managedUnitIds || []);
-    salesUnits.forEach((u) => {
-      if (
-        u.groupAdminId === user.id ||
-        u.militaryCadreId === user.id ||
-        u.orgDeptId === user.id ||
-        u.unitLeaderId === user.id
-      ) {
-        ids.add(u.id);
-      }
-    });
-
-    // 未配置范围时与后端一致：可看全部（由模块权限控制入口）
-    if (ids.size === 0) return salesUnits.map((u) => u.id);
-
-    return Array.from(ids).filter((id) => salesUnits.some((u) => u.id === id));
+    return salesUnits.map((u) => u.id);
   }, [user, isSuperadmin, salesUnits]);
 
   const canAccessUnit = (unitId: string): boolean => {
@@ -64,42 +47,26 @@ export function usePermissions() {
     return accessibleUnitIds.includes(unitId);
   };
 
-  const visibleSalesUnits = useMemo<SalesUnit[]>(() => {
-    if (isSuperadmin) return salesUnits;
-    return salesUnits.filter((u) => accessibleUnitIds.includes(u.id));
-  }, [salesUnits, accessibleUnitIds, isSuperadmin]);
+  const visibleSalesUnits = useMemo<SalesUnit[]>(() => salesUnits, [salesUnits]);
 
-  const visiblePersonnel = useMemo<Personnel[]>(() => {
-    if (isSuperadmin) return personnel;
-    return personnel.filter((p) => accessibleUnitIds.includes(p.salesUnitId));
-  }, [personnel, accessibleUnitIds, isSuperadmin]);
+  const visiblePersonnel = useMemo<Personnel[]>(() => personnel, [personnel]);
 
-  const visibleSalesRecords = useMemo<SalesRecord[]>(() => {
-    if (isSuperadmin) return salesRecords;
-    return salesRecords.filter((s) => accessibleUnitIds.includes(s.salesUnitId));
-  }, [salesRecords, accessibleUnitIds, isSuperadmin]);
+  const visibleSalesRecords = useMemo<SalesRecord[]>(() => salesRecords, [salesRecords]);
 
-  const visibleCostRecords = useMemo<CostRecord[]>(() => {
-    if (isSuperadmin) return costRecords;
-    return costRecords.filter((c) => accessibleUnitIds.includes(c.salesUnitId));
-  }, [costRecords, accessibleUnitIds, isSuperadmin]);
+  const visibleCostRecords = useMemo<CostRecord[]>(() => costRecords, [costRecords]);
 
-  const visibleIncomeRecords = useMemo<IncomeRecord[]>(() => {
-    if (isSuperadmin) return incomeRecords;
-    return incomeRecords.filter((r) => accessibleUnitIds.includes(r.salesUnitId));
-  }, [incomeRecords, accessibleUnitIds, isSuperadmin]);
+  const visibleIncomeRecords = useMemo<IncomeRecord[]>(() => incomeRecords, [incomeRecords]);
 
-  const visibleRevenueSettlements = useMemo<RevenueSettlement[]>(() => {
-    if (isSuperadmin) return revenueSettlements;
-    return revenueSettlements.filter((r) => accessibleUnitIds.includes(r.salesUnitId));
-  }, [revenueSettlements, accessibleUnitIds, isSuperadmin]);
+  const visibleRevenueSettlements = useMemo<RevenueSettlement[]>(
+    () => revenueSettlements,
+    [revenueSettlements]
+  );
 
-  const visibleUnitProductSettlements = useMemo<UnitProductSettlement[]>(() => {
-    if (isSuperadmin) return unitProductSettlements;
-    return unitProductSettlements.filter((s) => accessibleUnitIds.includes(s.salesUnitId));
-  }, [unitProductSettlements, accessibleUnitIds, isSuperadmin]);
+  const visibleUnitProductSettlements = useMemo<UnitProductSettlement[]>(
+    () => unitProductSettlements,
+    [unitProductSettlements]
+  );
 
-  // ===================== 模块编辑权限 =====================
   const canEditUnit = canEdit("sales_units");
   const canEditPersonnel = canEdit("personnel");
   const canEditPersonnelDates = canEdit("personnel");
@@ -108,7 +75,6 @@ export function usePermissions() {
   const canEditProduct = canEdit("product_settlement");
   const canManageUsers = canEdit("users");
 
-  // 无任何编辑权限时视为只读
   const isReadOnly = !isSuperadmin && !(
     canEditUnit || canEditPersonnel || canEditSales || canEditCost || canEditProduct || canManageUsers
   );

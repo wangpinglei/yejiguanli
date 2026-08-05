@@ -203,10 +203,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const refreshAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [
-        units, people, prods, sales, costs, incomes, rev,
-        ups, ppc, logs, notifs, adj, targets, labels,
-      ] = await Promise.all([
+      const results = await Promise.allSettled([
         salesUnitsApi.list(),
         personnelApi.list(),
         productsApi.list(),
@@ -222,19 +219,28 @@ export function DataProvider({ children }: { children: ReactNode }) {
         performanceTargetsApi.list(),
         positionGroupLabelsApi.list(),
       ]);
-      setSalesUnits(units);
-      setPersonnel(people);
-      setProducts(prods);
-      setSalesRecords(sales);
-      setCostRecords(costs);
-      setIncomeRecords(incomes);
-      setRevenueSettlements(rev);
-      setUnitProductSettlements(ups);
-      setProductPersonCommissions(ppc);
-      setCostChangeLogs(logs);
-      setNotifications(notifs);
-      setMonthlyAdjustments(adj);
-      setPerformanceTargets(targets);
+
+      function value<T>(i: number, fallback: T): T {
+        const r = results[i];
+        if (r.status === "fulfilled") return r.value as T;
+        console.error("[DataContext] refresh item failed", i, r.reason);
+        return fallback;
+      }
+
+      setSalesUnits(value(0, []));
+      setPersonnel(value(1, []));
+      setProducts(value(2, []));
+      setSalesRecords(value(3, []));
+      setCostRecords(value(4, []));
+      setIncomeRecords(value(5, []));
+      setRevenueSettlements(value(6, []));
+      setUnitProductSettlements(value(7, []));
+      setProductPersonCommissions(value(8, []));
+      setCostChangeLogs(value(9, []));
+      setNotifications(value(10, []));
+      setMonthlyAdjustments(value(11, []));
+      setPerformanceTargets(value(12, []));
+      const labels = value(13, [] as PositionGroupLabel[]);
       setPositionGroupLabels(labels.length ? labels : []);
       await refreshSyncedOrders();
     } catch (e) {
@@ -243,6 +249,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     }
   }, [refreshSyncedOrders]);
+
+  const managedUnitKey = (user?.managedUnitIds || []).join(",");
 
   useEffect(() => {
     if (authLoading) return;
@@ -267,9 +275,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // 登录成功或会话恢复后再拉业务数据（避免无 token 时空跑失败，登录后也不刷新）
+    // 登录成功、会话恢复、或可见单位变更后重新拉业务数据
     void refreshAll();
-  }, [authLoading, user?.id, refreshAll]);
+  }, [authLoading, user, managedUnitKey, refreshAll]);
 
   const allSalesRecords = useMemo(() => {
     const syncedAsSales: SalesRecord[] = syncedOrders.map((o) => ({

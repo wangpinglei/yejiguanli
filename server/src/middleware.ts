@@ -38,31 +38,24 @@ export function getVisibleUnitIds(user: JwtPayload): string[] | null {
     return null;
   }
 
+  // 以数据库为准：不信 JWT 快照，管理员改完立刻对下次请求生效
   const db = getDb();
-  const units = db.prepare("SELECT * FROM sales_units").all().map(rowToSalesUnit);
-  const visibleIds = new Set<string>();
-
-  (user.managedUnitIds || []).forEach((id) => visibleIds.add(id));
-
-  // 不依赖旧角色：凡在销售单位中被指派为管理人员即可看见该单位
-  units.forEach((unit: any) => {
-    if (
-      unit.groupAdminId === user.id ||
-      unit.militaryCadreId === user.id ||
-      unit.orgDeptId === user.id ||
-      unit.unitLeaderId === user.id
-    ) {
-      visibleIds.add(unit.id);
-    }
-  });
-
-  // 未配置任何单位范围时：视为可看全部（模块权限已控制能否进页面）
-  // 若配置了 managedUnitIds 或被挂到某单位管理人员，则只看这些单位
-  if (visibleIds.size === 0) {
-    return null;
+  const row = db.prepare("SELECT managed_unit_ids FROM users WHERE id = ?").get(user.id) as
+    | { managed_unit_ids?: string }
+    | undefined;
+  let managedIds: string[] = [];
+  try {
+    managedIds = JSON.parse(row?.managed_unit_ids || "[]");
+  } catch {
+    managedIds = [];
   }
+  if (!Array.isArray(managedIds)) managedIds = [];
 
-  return Array.from(visibleIds);
+  const existing = new Set(
+    (db.prepare("SELECT id FROM sales_units").all() as Array<{ id: string }>).map((u) => u.id)
+  );
+  // 只认权限分配勾选的单位；忽略销售单位上的管理人员挂靠
+  return managedIds.filter((id) => existing.has(id));
 }
 
 export function isReadOnly(user: JwtPayload): boolean {
