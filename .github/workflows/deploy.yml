@@ -36,7 +36,7 @@ jobs:
 
       # —— 传输：rsync 源码到服务器（排除依赖/构建产物/数据库/ git） ——
       - name: Rsync 源码到服务器
-        uses: easingthemes/ssh-deploy@v5
+        uses: easingthemes/ssh-deploy@v6.0.3
         with:
           SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           REMOTE_HOST: ${{ secrets.DEPLOY_HOST }}
