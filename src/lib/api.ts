@@ -74,6 +74,7 @@ export interface AuthUser {
   name: string;
   role: string;
   managedUnitIds: string[];
+  permissions?: import("@/config/modules").UserPermissions;
 }
 
 export interface LoginResponse {
@@ -99,15 +100,31 @@ export interface UserItem {
   name: string;
   role: string;
   managedUnitIds: string[];
+  permissions?: import("@/config/modules").UserPermissions;
   createdAt: string;
 }
 
 export const usersApi = {
   list: () => api.get<UserItem[]>("/users"),
-  create: (data: { username: string; password: string; name: string; role: string; managedUnitIds: string[] }) =>
-    api.post<UserItem>("/users", data),
-  update: (id: string, data: Partial<{ username: string; password: string; name: string; role: string; managedUnitIds: string[] }>) =>
-    api.put(`/users/${id}`, data),
+  create: (data: {
+    username: string;
+    password: string;
+    name: string;
+    role: string;
+    managedUnitIds: string[];
+    permissions: import("@/config/modules").UserPermissions;
+  }) => api.post<UserItem>("/users", data),
+  update: (
+    id: string,
+    data: Partial<{
+      username: string;
+      password: string;
+      name: string;
+      role: string;
+      managedUnitIds: string[];
+      permissions: import("@/config/modules").UserPermissions;
+    }>
+  ) => api.put(`/users/${id}`, data),
   delete: (id: string) => api.delete(`/users/${id}`),
 };
 

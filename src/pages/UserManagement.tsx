@@ -1,11 +1,16 @@
 import { useState } from "react";
 import { useAuth, type SystemUser } from "@/context/AuthContext";
-import { useData } from "@/context/DataContext";
 import { PageHeader } from "@/components/PageHeader";
 import type { UserRole } from "@/types";
 import {
-  Plus, Pencil, Trash2, Shield, UserCog, Lock, Eye, EyeOff, Building2, Users, UserCheck, Briefcase,
-} from "lucide-react";
+  MODULE_DEFS,
+  createEmptyPermissions,
+  createFullPermissions,
+  normalizePermissions,
+  type ModuleKey,
+  type UserPermissions,
+} from "@/config/modules";
+import { Plus, Pencil, Trash2, Lock, Eye, EyeOff, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,25 +25,20 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
-import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-const roleConfig: Record<UserRole, { label: string; color: string; icon: React.ComponentType<{ className?: string }>; desc: string }> = {
-  superadmin: { label: "超级管理员", color: "bg-violet-100 text-violet-700", icon: Shield, desc: "全部权限，管理所有数据和用户" },
-  group_admin: { label: "集团管理", color: "bg-indigo-100 text-indigo-700", icon: Building2, desc: "管理分配的销售单位，可增删改单位数据" },
-  military_cadre: { label: "军工干部", color: "bg-amber-100 text-amber-700", icon: UserCheck, desc: "只读查看管辖单位的业绩和人员" },
-  org_department: { label: "组织部", color: "bg-cyan-100 text-cyan-700", icon: Briefcase, desc: "管理入离职时间和成本录入" },
-  unit_leader: { label: "单位负责人", color: "bg-emerald-100 text-emerald-700", icon: Users, desc: "管理自己负责的销售单位" },
-  unit_manager: { label: "单位管理员", color: "bg-blue-100 text-blue-700", icon: UserCog, desc: "管理分配的销售单位数据" },
-};
+function summarizePermissions(perms: UserPermissions, role: string): string {
+  if (role === "superadmin") return "全部权限";
+  const viewCount = MODULE_DEFS.filter((m) => perms[m.key]?.view).length;
+  const editCount = MODULE_DEFS.filter((m) => perms[m.key]?.edit).length;
+  if (viewCount === 0 && editCount === 0) return "未分配";
+  return `查看 ${viewCount} · 编辑 ${editCount}`;
+}
 
 export default function UserManagement() {
   const { users, addUser, updateUser, deleteUser, user: currentUser } = useAuth();
-  const { salesUnits } = useData();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<SystemUser | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -47,14 +47,18 @@ export default function UserManagement() {
   const [form, setForm] = useState({
     username: "",
     password: "",
-    name: "",
-    role: "unit_manager" as UserRole,
-    managedUnitIds: [] as string[],
+    isSuperadmin: false,
+    permissions: createEmptyPermissions(),
   });
 
   const openAdd = () => {
     setEditingUser(null);
-    setForm({ username: "", password: "", name: "", role: "unit_manager", managedUnitIds: [] });
+    setForm({
+      username: "",
+      password: "",
+      isSuperadmin: false,
+      permissions: createEmptyPermissions(),
+    });
     setShowPassword(false);
     setDialogOpen(true);
   };
@@ -64,16 +68,72 @@ export default function UserManagement() {
     setForm({
       username: u.username,
       password: "",
-      name: u.name,
-      role: u.role,
-      managedUnitIds: u.managedUnitIds,
+      isSuperadmin: u.role === "superadmin",
+      permissions: normalizePermissions(u.permissions, u.role),
     });
     setShowPassword(false);
     setDialogOpen(true);
   };
 
+  function setModulePerm(key: ModuleKey, field: "view" | "edit", checked: boolean) {
+    setForm((prev) => {
+      const next = { ...prev.permissions };
+      const cur = { ...next[key] };
+      if (field === "edit") {
+        cur.edit = checked;
+        if (checked) cur.view = true;
+      } else {
+        cur.view = checked;
+        if (!checked) cur.edit = false;
+      }
+      next[key] = cur;
+      return { ...prev, permissions: next, isSuperadmin: false };
+    });
+  }
+
+  const allViewChecked = MODULE_DEFS.every((m) => form.permissions[m.key]?.view);
+  const editableModules = MODULE_DEFS.filter((m) => m.canEdit);
+  const allEditChecked =
+    editableModules.length > 0 &&
+    editableModules.every((m) => form.permissions[m.key]?.edit);
+
+  function handleSelectAllView(checked: boolean) {
+    setForm((prev) => {
+      const next = { ...prev.permissions };
+      for (const m of MODULE_DEFS) {
+        next[m.key] = {
+          view: checked,
+          edit: checked ? next[m.key].edit : false,
+        };
+      }
+      return { ...prev, permissions: next, isSuperadmin: false };
+    });
+  }
+
+  function handleSelectAllEdit(checked: boolean) {
+    setForm((prev) => {
+      const next = { ...prev.permissions };
+      for (const m of MODULE_DEFS) {
+        if (!m.canEdit) continue;
+        next[m.key] = {
+          view: checked ? true : next[m.key].view,
+          edit: checked,
+        };
+      }
+      return { ...prev, permissions: next, isSuperadmin: false };
+    });
+  }
+
+  function handleToggleSuperadmin(checked: boolean) {
+    setForm((prev) => ({
+      ...prev,
+      isSuperadmin: checked,
+      permissions: checked ? createFullPermissions() : createEmptyPermissions(),
+    }));
+  }
+
   const handleSubmit = async () => {
-    if (!form.username.trim() || !form.name.trim()) return;
+    if (!form.username.trim()) return;
     if (!editingUser && !form.password.trim()) return;
     const duplicate = users.find(
       (u) => u.username === form.username && u.id !== editingUser?.id
@@ -83,13 +143,30 @@ export default function UserManagement() {
       return;
     }
 
+    const role: UserRole = form.isSuperadmin ? "superadmin" : "user";
+    const permissions = form.isSuperadmin
+      ? createFullPermissions()
+      : form.permissions;
+
     try {
       if (editingUser) {
-        const updateData: any = { ...form };
-        if (!updateData.password) delete updateData.password;
+        const updateData: Record<string, unknown> = {
+          username: form.username.trim(),
+          name: form.username.trim(),
+          role,
+          permissions,
+        };
+        if (form.password) updateData.password = form.password;
         await updateUser(editingUser.id, updateData);
       } else {
-        await addUser(form);
+        await addUser({
+          username: form.username.trim(),
+          password: form.password,
+          name: form.username.trim(),
+          role,
+          managedUnitIds: [],
+          permissions,
+        });
       }
       setDialogOpen(false);
     } catch (error: any) {
@@ -108,51 +185,19 @@ export default function UserManagement() {
     }
   };
 
-  const toggleUnit = (unitId: string) => {
-    setForm((prev) => ({
-      ...prev,
-      managedUnitIds: prev.managedUnitIds.includes(unitId)
-        ? prev.managedUnitIds.filter((id) => id !== unitId)
-        : [...prev.managedUnitIds, unitId],
-    }));
-  };
-
-  const needsUnits = form.role !== "superadmin";
+  const isAdminLocked = editingUser?.id === "admin";
 
   return (
     <div>
       <PageHeader
-        title="用户管理"
-        description="管理系统用户和角色，分配销售单位管辖权限"
+        title="权限分配"
+        description="开通登录账号，按导航模块分配查看权限与编辑权限"
         action={
           <Button onClick={openAdd}>
-            <Plus className="mr-2 h-4 w-4" />新增用户
+            <Plus className="mr-2 h-4 w-4" />开通权限
           </Button>
         }
       />
-
-      {/* 权限说明 */}
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {(Object.keys(roleConfig) as UserRole[]).map((r) => {
-          const cfg = roleConfig[r];
-          const Icon = cfg.icon;
-          return (
-            <Card key={r}>
-              <CardContent className="flex items-start gap-3 p-4">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg" style={{ backgroundColor: undefined }}>
-                  <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${cfg.color}`}>
-                    <Icon className="h-4 w-4" />
-                  </div>
-                </div>
-                <div>
-                  <p className="font-semibold text-sm">{cfg.label}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{cfg.desc}</p>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
 
       <Card>
         <CardContent className="p-0">
@@ -160,23 +205,21 @@ export default function UserManagement() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>用户</TableHead>
+                  <TableHead>登录账号</TableHead>
                   <TableHead>用户名</TableHead>
-                  <TableHead>角色</TableHead>
-                  <TableHead>可管理单位</TableHead>
+                  <TableHead>权限概览</TableHead>
                   <TableHead className="text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {users.map((u) => {
-                  const cfg = roleConfig[u.role];
-                  const Icon = cfg.icon;
+                  const perms = normalizePermissions(u.permissions, u.role);
                   return (
                     <TableRow key={u.id}>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Avatar className="h-8 w-8">
-                            <AvatarFallback className={`${cfg.color} text-xs`}>
+                            <AvatarFallback className="bg-primary/10 text-xs text-primary">
                               {u.name[0]}
                             </AvatarFallback>
                           </Avatar>
@@ -190,23 +233,14 @@ export default function UserManagement() {
                       </TableCell>
                       <TableCell className="font-mono text-sm">{u.username}</TableCell>
                       <TableCell>
-                        <Badge className={cfg.color}>
-                          <Icon className="mr-1 h-3 w-3" />{cfg.label}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
                         {u.role === "superadmin" ? (
-                          <span className="text-sm text-muted-foreground">全部单位</span>
-                        ) : u.managedUnitIds.length > 0 ? (
-                          <div className="flex flex-wrap gap-1">
-                            {u.managedUnitIds.map((id) => (
-                              <Badge key={id} variant="outline" className="text-xs">
-                                {salesUnits.find((unit) => unit.id === id)?.name || "(已删除)"}
-                              </Badge>
-                            ))}
-                          </div>
+                          <Badge className="bg-violet-100 text-violet-700">
+                            <Shield className="mr-1 h-3 w-3" />超级管理员
+                          </Badge>
                         ) : (
-                          <span className="text-sm text-muted-foreground">未分配（可在单位中指定）</span>
+                          <span className="text-sm text-muted-foreground">
+                            {summarizePermissions(perms, u.role)}
+                          </span>
                         )}
                       </TableCell>
                       <TableCell className="text-right">
@@ -232,127 +266,146 @@ export default function UserManagement() {
                     </TableRow>
                   );
                 })}
+                {users.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-center py-12 text-muted-foreground">
+                      <p>暂无登录权限账号</p>
+                      <p className="mt-2 text-xs">请点击「开通权限」创建登录账号并分配模块权限。</p>
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </div>
         </CardContent>
       </Card>
 
-      {/* Add/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editingUser ? "编辑用户" : "新增用户"}</DialogTitle>
+            <DialogTitle>{editingUser ? "编辑权限" : "开通登录权限"}</DialogTitle>
             <DialogDescription>
-              {editingUser ? "修改用户信息和权限" : "创建新用户并分配角色和权限"}
+              配置登录账号，并为左侧导航各模块分配查看 / 编辑权限
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>姓名 *</Label>
-                <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="姓名" />
-              </div>
-              <div className="space-y-2">
-                <Label>用户名 *</Label>
+            <div className="space-y-2">
+              <Label>用户名 *</Label>
+              <Input
+                value={form.username}
+                onChange={(e) => setForm({ ...form, username: e.target.value })}
+                placeholder="登录用户名"
+                disabled={isAdminLocked}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>密码 {editingUser ? "（留空不修改）" : "*"}</Label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  value={form.username}
-                  onChange={(e) => setForm({ ...form, username: e.target.value })}
-                  placeholder="登录用户名"
-                  disabled={editingUser?.id === "admin"}
+                  type={showPassword ? "text" : "password"}
+                  value={form.password}
+                  onChange={(e) => setForm({ ...form, password: e.target.value })}
+                  placeholder="密码"
+                  className="pl-10 pr-10"
                 />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>密码 {editingUser ? "（留空不修改）" : "*"}</Label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    type={showPassword ? "text" : "password"}
-                    value={form.password}
-                    onChange={(e) => setForm({ ...form, password: e.target.value })}
-                    placeholder="密码"
-                    className="pl-10 pr-10"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>角色</Label>
-                <Select
-                  value={form.role}
-                  onValueChange={(v) => setForm({ ...form, role: v as UserRole, managedUnitIds: v === "superadmin" ? [] : form.managedUnitIds })}
-                  disabled={editingUser?.id === "admin"}
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 >
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {(Object.keys(roleConfig) as UserRole[]).map((r) => (
-                      <SelectItem key={r} value={r}>{roleConfig[r].label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
               </div>
             </div>
 
-            {/* 角色说明 */}
-            <div className={`rounded-lg p-3 text-sm ${form.role === "superadmin" ? "bg-violet-50 text-violet-700" : "bg-blue-50 text-blue-700"}`}>
-              <strong>{roleConfig[form.role].label}：</strong>{roleConfig[form.role].desc}
+            <div className="flex items-center space-x-3 rounded-lg border p-3">
+              <Checkbox
+                id="is-superadmin"
+                checked={form.isSuperadmin}
+                disabled={isAdminLocked}
+                onCheckedChange={(v) => handleToggleSuperadmin(Boolean(v))}
+              />
+              <Label htmlFor="is-superadmin" className="cursor-pointer font-normal">
+                <span className="font-medium">超级管理员</span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  拥有全部模块的查看与编辑权限
+                </span>
+              </Label>
             </div>
 
-            {/* 单位分配 - 非 superadmin 显示 */}
-            {needsUnits && (
-              <div className="space-y-3">
-                <Label>可管理的销售单位（备用分配）</Label>
+            {!form.isSuperadmin && (
+              <div className="space-y-2">
+                <Label>模块权限（对应左侧导航）</Label>
+                <div className="rounded-lg border overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>功能模块</TableHead>
+                        <TableHead className="w-28 text-center">
+                          <div className="flex flex-col items-center gap-1">
+                            <span>查看</span>
+                            <label className="flex items-center gap-1 text-xs font-normal text-muted-foreground cursor-pointer">
+                              <Checkbox
+                                checked={allViewChecked}
+                                onCheckedChange={(v) => handleSelectAllView(Boolean(v))}
+                              />
+                              全选
+                            </label>
+                          </div>
+                        </TableHead>
+                        <TableHead className="w-28 text-center">
+                          <div className="flex flex-col items-center gap-1">
+                            <span>编辑</span>
+                            <label className="flex items-center gap-1 text-xs font-normal text-muted-foreground cursor-pointer">
+                              <Checkbox
+                                checked={allEditChecked}
+                                onCheckedChange={(v) => handleSelectAllEdit(Boolean(v))}
+                              />
+                              全选
+                            </label>
+                          </div>
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {MODULE_DEFS.map((m) => {
+                        const perm = form.permissions[m.key];
+                        return (
+                          <TableRow key={m.key}>
+                            <TableCell className="text-sm">{m.label}</TableCell>
+                            <TableCell className="text-center">
+                              <Checkbox
+                                checked={perm.view}
+                                onCheckedChange={(v) => setModulePerm(m.key, "view", Boolean(v))}
+                              />
+                            </TableCell>
+                            <TableCell className="text-center">
+                              {m.canEdit ? (
+                                <Checkbox
+                                  checked={perm.edit}
+                                  onCheckedChange={(v) => setModulePerm(m.key, "edit", Boolean(v))}
+                                />
+                              ) : (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
                 <p className="text-xs text-muted-foreground">
-                  也可在"销售单位管理"中为单位指定对应角色人员。此处分配的单位同样生效。
+                  勾选编辑时会自动勾选查看。数据看板、单位战报仅支持查看。
                 </p>
-                {salesUnits.length === 0 ? (
-                  <div className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">
-                    暂无销售单位，请先在"销售单位管理"中添加
-                  </div>
-                ) : (
-                  <div className="space-y-2 rounded-lg border p-4 max-h-48 overflow-y-auto">
-                    {salesUnits.map((unit) => (
-                      <div key={unit.id} className="flex items-center space-x-3">
-                        <Checkbox
-                          id={`unit-${unit.id}`}
-                          checked={form.managedUnitIds.includes(unit.id)}
-                          onCheckedChange={() => toggleUnit(unit.id)}
-                        />
-                        <Label htmlFor={`unit-${unit.id}`} className="cursor-pointer text-sm font-normal">
-                          {unit.name}
-                          <span className="ml-2 text-xs text-muted-foreground">{unit.description}</span>
-                        </Label>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {form.managedUnitIds.length > 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    已选择 {form.managedUnitIds.length} 个单位
-                  </p>
-                )}
-              </div>
-            )}
-
-            {form.role === "superadmin" && (
-              <div className="rounded-lg bg-violet-50 p-3 text-sm text-violet-700">
-                <Shield className="mr-1 inline h-4 w-4" />
-                超级管理员可访问所有销售单位数据和管理所有用户
               </div>
             )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>取消</Button>
-            <Button onClick={handleSubmit}>{editingUser ? "保存" : "新增"}</Button>
+            <Button onClick={handleSubmit}>{editingUser ? "保存" : "开通"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -361,7 +414,7 @@ export default function UserManagement() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>确认删除</AlertDialogTitle>
-            <AlertDialogDescription>确定要删除该用户吗？此操作不可撤销。</AlertDialogDescription>
+            <AlertDialogDescription>确定要删除该登录权限账号吗？此操作不可撤销。</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>

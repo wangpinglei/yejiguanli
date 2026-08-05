@@ -37,13 +37,6 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -53,6 +46,30 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+
+function RoleNameInput({
+  label,
+  value,
+  onChange,
+  hint,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  hint?: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={`请输入${label}姓名`}
+      />
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+    </div>
+  );
+}
 
 export default function SalesUnits() {
   const navigate = useNavigate();
@@ -67,15 +84,35 @@ export default function SalesUnits() {
   const [form, setForm] = useState({
     name: "",
     description: "",
-    groupAdminId: "",
-    militaryCadreId: "",
-    orgDeptId: "",
-    unitLeaderId: "",
+    groupAdminName: "",
+    militaryCadreName: "",
+    orgDeptName: "",
+    unitLeaderName: "",
   });
 
   // 按角色筛选用户
-  const usersByRole = (role: string) => users.filter((u) => u.role === role);
-  const getUserName = (id?: string) => (id ? users.find((u) => u.id === id)?.name || "-" : "-");
+  const getUserName = (id?: string) => (id ? users.find((u) => u.id === id)?.name || users.find((u) => u.id === id)?.username || "-" : "-");
+  const getManagerDisplay = (name?: string, id?: string) => {
+    const n = (name || "").trim();
+    if (n) return n;
+    return getUserName(id);
+  };
+
+  // 录入人名后，若已有同名登录账号则自动关联用户ID（用于权限）
+  function resolveUserIdByName(personName: string, preferredRole?: string): string | undefined {
+    const key = personName.trim().toLowerCase();
+    if (!key) return undefined;
+    const matched = users.find((u) => {
+      const uname = (u.username || "").trim().toLowerCase();
+      const name = (u.name || "").trim().toLowerCase();
+      return uname === key || name === key;
+    });
+    if (!matched) return undefined;
+    if (preferredRole && matched.role !== preferredRole && matched.role !== "superadmin") {
+      return matched.id;
+    }
+    return matched.id;
+  }
 
   const filteredUnits = useMemo(() => {
     return salesUnits.filter((u) =>
@@ -95,10 +132,10 @@ export default function SalesUnits() {
     setForm({
       name: "",
       description: "",
-      groupAdminId: "",
-      militaryCadreId: "",
-      orgDeptId: "",
-      unitLeaderId: "",
+      groupAdminName: "",
+      militaryCadreName: "",
+      orgDeptName: "",
+      unitLeaderName: "",
     });
     setDialogOpen(true);
   };
@@ -108,16 +145,21 @@ export default function SalesUnits() {
     setForm({
       name: unit.name,
       description: unit.description,
-      groupAdminId: unit.groupAdminId || "",
-      militaryCadreId: unit.militaryCadreId || "",
-      orgDeptId: unit.orgDeptId || "",
-      unitLeaderId: unit.unitLeaderId || "",
+      groupAdminName: unit.groupAdminName || getUserName(unit.groupAdminId).replace(/^-$/, ""),
+      militaryCadreName: unit.militaryCadreName || getUserName(unit.militaryCadreId).replace(/^-$/, ""),
+      orgDeptName: unit.orgDeptName || getUserName(unit.orgDeptId).replace(/^-$/, ""),
+      unitLeaderName: unit.unitLeaderName || getUserName(unit.unitLeaderId).replace(/^-$/, ""),
     });
     setDialogOpen(true);
   };
 
   const handleSubmit = async () => {
     if (!form.name.trim()) return;
+    const groupAdminName = form.groupAdminName.trim();
+    const militaryCadreName = form.militaryCadreName.trim();
+    const orgDeptName = form.orgDeptName.trim();
+    const unitLeaderName = form.unitLeaderName.trim();
+
     // 类型/联系人/电话/地址已从界面移除，提交时保留兼容后端的默认值
     const data = {
       name: form.name,
@@ -126,10 +168,14 @@ export default function SalesUnits() {
       contact: editingUnit?.contact || "",
       contactPhone: editingUnit?.contactPhone || "",
       description: form.description,
-      groupAdminId: form.groupAdminId || undefined,
-      militaryCadreId: form.militaryCadreId || undefined,
-      orgDeptId: form.orgDeptId || undefined,
-      unitLeaderId: form.unitLeaderId || undefined,
+      groupAdminName,
+      militaryCadreName,
+      orgDeptName,
+      unitLeaderName,
+      groupAdminId: resolveUserIdByName(groupAdminName, "group_admin"),
+      militaryCadreId: resolveUserIdByName(militaryCadreName, "military_cadre"),
+      orgDeptId: resolveUserIdByName(orgDeptName, "org_department"),
+      unitLeaderId: resolveUserIdByName(unitLeaderName, "unit_leader"),
     };
     try {
       if (editingUnit) {
@@ -154,33 +200,11 @@ export default function SalesUnits() {
     }
   };
 
-  // 角色分配下拉组件
-  const RoleSelect = ({ label, role, value, onChange }: { label: string; role: string; value: string; onChange: (v: string) => void }) => {
-    const roleUsers = usersByRole(role);
-    return (
-      <div className="space-y-2">
-        <Label>{label}</Label>
-        <Select value={value || "none"} onValueChange={(v) => onChange(v === "none" ? "" : v)}>
-          <SelectTrigger><SelectValue placeholder={`选择${label}`} /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="none">未分配</SelectItem>
-            {roleUsers.map((u) => (
-              <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {roleUsers.length === 0 && (
-          <p className="text-xs text-muted-foreground">暂无{label}用户，请先在用户管理中创建</p>
-        )}
-      </div>
-    );
-  };
-
   return (
     <div>
       <PageHeader
         title="销售单位管理"
-        description="管理各销售单位，分配管理人员，查看业绩与成本"
+        description="管理各销售单位，录入管理人员人名；登录权限请在「权限分配」中开通"
         action={
           canEditUnit && (
             <Button onClick={openAdd}>
@@ -238,10 +262,10 @@ export default function SalesUnits() {
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm">{getUserName(unit.groupAdminId)}</TableCell>
-                      <TableCell className="text-sm">{getUserName(unit.militaryCadreId)}</TableCell>
-                      <TableCell className="text-sm">{getUserName(unit.orgDeptId)}</TableCell>
-                      <TableCell className="text-sm">{getUserName(unit.unitLeaderId)}</TableCell>
+                      <TableCell className="text-sm">{getManagerDisplay(unit.groupAdminName, unit.groupAdminId)}</TableCell>
+                      <TableCell className="text-sm">{getManagerDisplay(unit.militaryCadreName, unit.militaryCadreId)}</TableCell>
+                      <TableCell className="text-sm">{getManagerDisplay(unit.orgDeptName, unit.orgDeptId)}</TableCell>
+                      <TableCell className="text-sm">{getManagerDisplay(unit.unitLeaderName, unit.unitLeaderId)}</TableCell>
                       <TableCell className="text-right">
                         <span className="inline-flex items-center gap-1">
                           <Users className="h-3 w-3 text-muted-foreground" />
@@ -312,15 +336,33 @@ export default function SalesUnits() {
               />
             </div>
 
-            {/* 角色分配 */}
+            {/* 角色分配：录入人名 */}
             <div className="rounded-lg border p-4 space-y-4">
-              <p className="text-sm font-semibold">管理人员分配</p>
-              <p className="text-xs text-muted-foreground">为该销售单位分配各角色负责人，分配后对应角色用户可查看/管理本单位数据</p>
+              <p className="text-sm font-semibold">管理人员（录入人名）</p>
+              <p className="text-xs text-muted-foreground">
+                在此填写各角色负责人姓名。登录账号与操作权限请到「权限分配」中开通。
+              </p>
               <div className="grid grid-cols-2 gap-4">
-                <RoleSelect label="集团管理" role="group_admin" value={form.groupAdminId} onChange={(v) => setForm({ ...form, groupAdminId: v })} />
-                <RoleSelect label="军工干部" role="military_cadre" value={form.militaryCadreId} onChange={(v) => setForm({ ...form, militaryCadreId: v })} />
-                <RoleSelect label="组织部" role="org_department" value={form.orgDeptId} onChange={(v) => setForm({ ...form, orgDeptId: v })} />
-                <RoleSelect label="单位负责人" role="unit_leader" value={form.unitLeaderId} onChange={(v) => setForm({ ...form, unitLeaderId: v })} />
+                <RoleNameInput
+                  label="集团管理"
+                  value={form.groupAdminName}
+                  onChange={(v) => setForm({ ...form, groupAdminName: v })}
+                />
+                <RoleNameInput
+                  label="军工干部"
+                  value={form.militaryCadreName}
+                  onChange={(v) => setForm({ ...form, militaryCadreName: v })}
+                />
+                <RoleNameInput
+                  label="组织部"
+                  value={form.orgDeptName}
+                  onChange={(v) => setForm({ ...form, orgDeptName: v })}
+                />
+                <RoleNameInput
+                  label="单位负责人"
+                  value={form.unitLeaderName}
+                  onChange={(v) => setForm({ ...form, unitLeaderName: v })}
+                />
               </div>
             </div>
 

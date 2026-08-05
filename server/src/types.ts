@@ -1,7 +1,10 @@
 // ===================== 共享类型定义 =====================
 
+import type { UserPermissions } from "./permissions";
+
 export type UserRole =
   | "superadmin"
+  | "user" // 按模块权限分配
   | "group_admin"
   | "military_cadre"
   | "org_department"
@@ -15,6 +18,7 @@ export interface SystemUser {
   name: string;
   role: UserRole;
   managedUnitIds: string[];
+  permissions: UserPermissions;
   createdAt: string;
 }
 
@@ -25,6 +29,7 @@ export interface AuthUser {
   name: string;
   role: UserRole;
   managedUnitIds: string[];
+  permissions: UserPermissions;
 }
 
 export interface SalesUnit {
@@ -40,6 +45,10 @@ export interface SalesUnit {
   militaryCadreId?: string;
   orgDeptId?: string;
   unitLeaderId?: string;
+  groupAdminName?: string;
+  militaryCadreName?: string;
+  orgDeptName?: string;
+  unitLeaderName?: string;
 }
 
 export interface SalaryStructure {
@@ -117,4 +126,5 @@ export interface JwtPayload {
   name: string;
   role: UserRole;
   managedUnitIds: string[];
+  permissions: UserPermissions;
 }

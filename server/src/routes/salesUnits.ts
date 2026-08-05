@@ -24,7 +24,11 @@ router.get("/", (req, res) => {
 
 // POST /api/sales-units - 创建销售单位
 router.post("/", requireEditPermission, (req, res) => {
-  const { name, type, address, contact, contactPhone, description, groupAdminId, militaryCadreId, orgDeptId, unitLeaderId } = req.body;
+  const {
+    name, type, address, contact, contactPhone, description,
+    groupAdminId, militaryCadreId, orgDeptId, unitLeaderId,
+    groupAdminName, militaryCadreName, orgDeptName, unitLeaderName,
+  } = req.body;
   if (!name) {
     return res.status(400).json({ error: "单位名称不能为空" });
   }
@@ -32,9 +36,17 @@ router.post("/", requireEditPermission, (req, res) => {
   const id = generateId("unit");
   const db = getDb();
   db.prepare(`
-    INSERT INTO sales_units (id, name, type, address, contact, contact_phone, description, group_admin_id, military_cadre_id, org_dept_id, unit_leader_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, name, type || "company", address || "", contact || "", contactPhone || "", description || "", groupAdminId || null, militaryCadreId || null, orgDeptId || null, unitLeaderId || null);
+    INSERT INTO sales_units (
+      id, name, type, address, contact, contact_phone, description,
+      group_admin_id, military_cadre_id, org_dept_id, unit_leader_id,
+      group_admin_name, military_cadre_name, org_dept_name, unit_leader_name
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id, name, type || "company", address || "", contact || "", contactPhone || "", description || "",
+    groupAdminId || null, militaryCadreId || null, orgDeptId || null, unitLeaderId || null,
+    groupAdminName || "", militaryCadreName || "", orgDeptName || "", unitLeaderName || ""
+  );
 
   const row = db.prepare("SELECT * FROM sales_units WHERE id = ?").get(id);
   res.json(rowToSalesUnit(row));
@@ -43,10 +55,14 @@ router.post("/", requireEditPermission, (req, res) => {
 // PUT /api/sales-units/:id - 更新销售单位
 router.put("/:id", requireEditPermission, (req, res) => {
   const { id } = req.params;
-  const { name, type, address, contact, contactPhone, description, groupAdminId, militaryCadreId, orgDeptId, unitLeaderId } = req.body;
+  const {
+    name, type, address, contact, contactPhone, description,
+    groupAdminId, militaryCadreId, orgDeptId, unitLeaderId,
+    groupAdminName, militaryCadreName, orgDeptName, unitLeaderName,
+  } = req.body;
 
   const db = getDb();
-  const existing = db.prepare("SELECT * FROM sales_units WHERE id = ?").get(id);
+  const existing = db.prepare("SELECT * FROM sales_units WHERE id = ?").get(id) as any;
   if (!existing) {
     return res.status(404).json({ error: "销售单位不存在" });
   }
@@ -54,7 +70,8 @@ router.put("/:id", requireEditPermission, (req, res) => {
   db.prepare(`
     UPDATE sales_units SET
       name = ?, type = ?, address = ?, contact = ?, contact_phone = ?, description = ?,
-      group_admin_id = ?, military_cadre_id = ?, org_dept_id = ?, unit_leader_id = ?
+      group_admin_id = ?, military_cadre_id = ?, org_dept_id = ?, unit_leader_id = ?,
+      group_admin_name = ?, military_cadre_name = ?, org_dept_name = ?, unit_leader_name = ?
     WHERE id = ?
   `).run(
     name ?? existing.name,
@@ -63,10 +80,14 @@ router.put("/:id", requireEditPermission, (req, res) => {
     contact ?? existing.contact,
     contactPhone ?? existing.contact_phone,
     description ?? existing.description,
-    groupAdminId ?? existing.group_admin_id,
-    militaryCadreId ?? existing.military_cadre_id,
-    orgDeptId ?? existing.org_dept_id,
-    unitLeaderId ?? existing.unit_leader_id,
+    groupAdminId !== undefined ? (groupAdminId || null) : existing.group_admin_id,
+    militaryCadreId !== undefined ? (militaryCadreId || null) : existing.military_cadre_id,
+    orgDeptId !== undefined ? (orgDeptId || null) : existing.org_dept_id,
+    unitLeaderId !== undefined ? (unitLeaderId || null) : existing.unit_leader_id,
+    groupAdminName ?? existing.group_admin_name ?? "",
+    militaryCadreName ?? existing.military_cadre_name ?? "",
+    orgDeptName ?? existing.org_dept_name ?? "",
+    unitLeaderName ?? existing.unit_leader_name ?? "",
     id
   );
 

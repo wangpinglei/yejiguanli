@@ -1,34 +1,38 @@
 import { Router } from "express";
 import { getDb, rowToUser, generateId } from "../db";
 import { authMiddleware, hashPassword } from "../auth";
-import { requireRole } from "../middleware";
-import type { UserRole, SystemUser } from "../types";
+import { requireUsersManage } from "../middleware";
+import type { SystemUser, UserRole } from "../types";
+import { normalizePermissions, createFullPermissions } from "../permissions";
 
 const router = Router();
 
-// 所有路由都需要登录 + 超级管理员权限
-router.use(authMiddleware, requireRole("superadmin"));
+router.use(authMiddleware, requireUsersManage);
 
-// GET /api/users - 获取所有用户
-router.get("/", (_req, res) => {
-  const db = getDb();
-  const rows = db.prepare("SELECT * FROM users ORDER BY created_at").all();
-  const users = rows.map(rowToUser).map((u: SystemUser) => ({
+function toPublicUser(u: SystemUser) {
+  return {
     id: u.id,
     username: u.username,
     name: u.name,
     role: u.role,
     managedUnitIds: u.managedUnitIds,
+    permissions: u.permissions,
     createdAt: u.createdAt,
-  }));
-  res.json(users);
+  };
+}
+
+// GET /api/users - 获取所有用户
+router.get("/", (_req, res) => {
+  const db = getDb();
+  const rows = db.prepare("SELECT * FROM users ORDER BY created_at").all();
+  res.json(rows.map(rowToUser).map(toPublicUser));
 });
 
 // POST /api/users - 创建用户
 router.post("/", (req, res) => {
-  const { username, password, name, role, managedUnitIds } = req.body;
-  if (!username || !password || !name || !role) {
-    return res.status(400).json({ error: "用户名、密码、姓名、角色不能为空" });
+  const { username, password, name, role, managedUnitIds, permissions } = req.body;
+  if (!username || !password || !name) {
+    return res.status(400).json({ error: "用户名、密码、姓名不能为空" });
   }
 
   const db = getDb();
@@ -37,28 +41,34 @@ router.post("/", (req, res) => {
     return res.status(409).json({ error: "用户名已存在" });
   }
 
+  const nextRole = (role === "superadmin" ? "superadmin" : "user") as UserRole;
+  const nextPerms = nextRole === "superadmin"
+    ? createFullPermissions()
+    : normalizePermissions(permissions, nextRole);
+
   const id = generateId("user");
   const hashed = hashPassword(password);
   const unitIds = JSON.stringify(managedUnitIds || []);
 
   db.prepare(`
-    INSERT INTO users (id, username, password, name, role, managed_unit_ids)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, username, hashed, name, role, unitIds);
+    INSERT INTO users (id, username, password, name, role, managed_unit_ids, permissions)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(id, username, hashed, name, nextRole, unitIds, JSON.stringify(nextPerms));
 
   res.json({
     id,
     username,
     name,
-    role,
+    role: nextRole,
     managedUnitIds: managedUnitIds || [],
+    permissions: nextPerms,
   });
 });
 
 // PUT /api/users/:id - 更新用户
 router.put("/:id", (req, res) => {
   const { id } = req.params;
-  const { username, password, name, role, managedUnitIds } = req.body;
+  const { username, password, name, role, managedUnitIds, permissions } = req.body;
 
   const db = getDb();
   const existing = db.prepare("SELECT * FROM users WHERE id = ?").get(id);
@@ -66,7 +76,6 @@ router.put("/:id", (req, res) => {
     return res.status(404).json({ error: "用户不存在" });
   }
 
-  // 检查用户名唯一性
   if (username) {
     const dup = db.prepare("SELECT id FROM users WHERE username = ? AND id != ?").get(username, id);
     if (dup) {
@@ -80,8 +89,29 @@ router.put("/:id", (req, res) => {
   if (username) { updates.push("username = ?"); values.push(username); }
   if (password) { updates.push("password = ?"); values.push(hashPassword(password)); }
   if (name) { updates.push("name = ?"); values.push(name); }
-  if (role) { updates.push("role = ?"); values.push(role); }
-  if (managedUnitIds !== undefined) { updates.push("managed_unit_ids = ?"); values.push(JSON.stringify(managedUnitIds)); }
+
+  // 默认管理员账号不可降级
+  if (role && id !== "admin") {
+    updates.push("role = ?");
+    values.push(role === "superadmin" ? "superadmin" : "user");
+  }
+
+  if (managedUnitIds !== undefined) {
+    updates.push("managed_unit_ids = ?");
+    values.push(JSON.stringify(managedUnitIds));
+  }
+
+  if (permissions !== undefined) {
+    const willBeSuper =
+      id === "admin" ||
+      role === "superadmin" ||
+      (role === undefined && existing.role === "superadmin");
+    const nextPerms = willBeSuper
+      ? createFullPermissions()
+      : normalizePermissions(permissions, "user");
+    updates.push("permissions = ?");
+    values.push(JSON.stringify(nextPerms));
+  }
 
   if (updates.length > 0) {
     values.push(id);

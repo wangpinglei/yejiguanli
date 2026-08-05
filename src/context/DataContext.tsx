@@ -56,9 +56,14 @@ interface DataContextType {
   deletePersonnel: (id: string) => Promise<void>;
 
   // Product CRUD
-  addProduct: (p: Omit<Product, "id">) => Promise<void>;
+  addProduct: (p: Omit<Product, "id">) => Promise<Product>;
   updateProduct: (id: string, p: Partial<Product>) => Promise<void>;
   deleteProduct: (id: string) => Promise<void>;
+  /** 按名称确保产品存在：已有则返回，没有则自动建档 */
+  ensureProductByName: (
+    name: string,
+    extras?: Partial<Omit<Product, "id" | "name">>
+  ) => Promise<Product | null>;
 
   // SalesRecord CRUD
   addSalesRecord: (s: Omit<SalesRecord, "id" | "totalAmount">) => Promise<void>;
@@ -174,7 +179,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setSalesUnits(load(KEYS.salesUnits, []));
     setPersonnel(load(KEYS.personnel, []));
-    setProducts(load(KEYS.products, []));
     setSalesRecords(load(KEYS.salesRecords, []));
     setCostRecords(load(KEYS.costRecords, []));
     setIncomeRecords(load(KEYS.incomeRecords, []));
@@ -203,35 +207,29 @@ export function DataProvider({ children }: { children: ReactNode }) {
     } else {
       setPositionGroupLabels(savedLabels);
     }
-    // 默认产品列表（仅在首次使用时初始化）
+    // 产品不再预置默认清单：由销售订单/销售记录按名称自动录入后，再配置结算比例与提成
+    // 一次性清理历史内置产品（pr_default_*），避免残留占位数据
     const savedProducts = load(KEYS.products, [] as Product[]);
-    if (savedProducts.length === 0) {
-      const defaultProducts: Product[] = [
-        { id: "pr_default_01", name: "柜柜系列", category: "软件产品", unitPrice: 0, costType: "fixed", unitCost: 0, costRate: 0, description: "柜柜设计软件", commissionType: "percentage", commissionRate: 0, commissionAmount: 0, commissionNote: "" },
-        { id: "pr_default_02", name: "参数化调整", category: "软件产品", unitPrice: 0, costType: "fixed", unitCost: 0, costRate: 0, description: "", commissionType: "percentage", commissionRate: 0, commissionAmount: 0, commissionNote: "" },
-        { id: "pr_default_03", name: "老板仓-德龙定制包", category: "定制包", unitPrice: 0, costType: "fixed", unitCost: 0, costRate: 0, description: "", commissionType: "percentage", commissionRate: 0, commissionAmount: 0, commissionNote: "" },
-        { id: "pr_default_04", name: "好房子", category: "软件产品", unitPrice: 0, costType: "fixed", unitCost: 0, costRate: 0, description: "", commissionType: "percentage", commissionRate: 0, commissionAmount: 0, commissionNote: "" },
-        { id: "pr_default_05", name: "小凼风系列", category: "软件产品", unitPrice: 0, costType: "fixed", unitCost: 0, costRate: 0, description: "", commissionType: "percentage", commissionRate: 0, commissionAmount: 0, commissionNote: "" },
-        { id: "pr_default_06", name: "三体人", category: "软件产品", unitPrice: 0, costType: "fixed", unitCost: 0, costRate: 0, description: "", commissionType: "percentage", commissionRate: 0, commissionAmount: 0, commissionNote: "" },
-        { id: "pr_default_07", name: "测量大师-年费", category: "年费服务", unitPrice: 0, costType: "fixed", unitCost: 0, costRate: 0, description: "", commissionType: "percentage", commissionRate: 0, commissionAmount: 0, commissionNote: "" },
-        { id: "pr_default_08", name: "测量大师", category: "软件产品", unitPrice: 0, costType: "fixed", unitCost: 0, costRate: 0, description: "", commissionType: "percentage", commissionRate: 0, commissionAmount: 0, commissionNote: "" },
-        { id: "pr_default_09", name: "测测大师", category: "软件产品", unitPrice: 0, costType: "fixed", unitCost: 0, costRate: 0, description: "", commissionType: "percentage", commissionRate: 0, commissionAmount: 0, commissionNote: "" },
-        { id: "pr_default_10", name: "测官测测包", category: "定制包", unitPrice: 0, costType: "fixed", unitCost: 0, costRate: 0, description: "", commissionType: "percentage", commissionRate: 0, commissionAmount: 0, commissionNote: "" },
-        { id: "pr_default_11", name: "倒置包", category: "定制包", unitPrice: 0, costType: "fixed", unitCost: 0, costRate: 0, description: "", commissionType: "percentage", commissionRate: 0, commissionAmount: 0, commissionNote: "" },
-        { id: "pr_default_12", name: "工具箱", category: "工具产品", unitPrice: 0, costType: "fixed", unitCost: 0, costRate: 0, description: "", commissionType: "percentage", commissionRate: 0, commissionAmount: 0, commissionNote: "" },
-        { id: "pr_default_13", name: "老尺", category: "工具产品", unitPrice: 0, costType: "fixed", unitCost: 0, costRate: 0, description: "", commissionType: "percentage", commissionRate: 0, commissionAmount: 0, commissionNote: "" },
-        { id: "pr_default_14", name: "全景看机", category: "软件产品", unitPrice: 0, costType: "fixed", unitCost: 0, costRate: 0, description: "", commissionType: "percentage", commissionRate: 0, commissionAmount: 0, commissionNote: "" },
-        { id: "pr_default_15", name: "云排版-智慧秒系列", category: "软件产品", unitPrice: 0, costType: "fixed", unitCost: 0, costRate: 0, description: "", commissionType: "percentage", commissionRate: 0, commissionAmount: 0, commissionNote: "" },
-        { id: "pr_default_16", name: "熊家乐-平台版", category: "软件产品", unitPrice: 0, costType: "fixed", unitCost: 0, costRate: 0, description: "", commissionType: "percentage", commissionRate: 0, commissionAmount: 0, commissionNote: "" },
-        { id: "pr_default_17", name: "熊家乐-正反向对换", category: "软件产品", unitPrice: 0, costType: "fixed", unitCost: 0, costRate: 0, description: "", commissionType: "percentage", commissionRate: 0, commissionAmount: 0, commissionNote: "" },
-        { id: "pr_default_18", name: "神雕", category: "软件产品", unitPrice: 0, costType: "fixed", unitCost: 0, costRate: 0, description: "", commissionType: "percentage", commissionRate: 0, commissionAmount: 0, commissionNote: "" },
-        { id: "pr_default_19", name: "画门贸", category: "软件产品", unitPrice: 0, costType: "fixed", unitCost: 0, costRate: 0, description: "", commissionType: "percentage", commissionRate: 0, commissionAmount: 0, commissionNote: "" },
-        { id: "pr_default_20", name: "课程培训", category: "服务", unitPrice: 0, costType: "fixed", unitCost: 0, costRate: 0, description: "", commissionType: "percentage", commissionRate: 0, commissionAmount: 0, commissionNote: "" },
-        { id: "pr_default_21", name: "四仓结算/店铺破壁", category: "服务", unitPrice: 0, costType: "fixed", unitCost: 0, costRate: 0, description: "", commissionType: "percentage", commissionRate: 0, commissionAmount: 0, commissionNote: "" },
-      ];
-      setProducts(defaultProducts);
-      save(KEYS.products, defaultProducts);
+    const cleanedProducts = savedProducts.filter(
+      (p) => !String(p.id || "").startsWith("pr_default_")
+    );
+    if (cleanedProducts.length !== savedProducts.length) {
+      save(KEYS.products, cleanedProducts);
+      const removedIds = new Set(
+        savedProducts
+          .filter((p) => String(p.id || "").startsWith("pr_default_"))
+          .map((p) => p.id)
+      );
+      const cleanedSettlements = load(KEYS.unitProductSettlements, [] as UnitProductSettlement[])
+        .filter((s) => !removedIds.has(s.productId));
+      save(KEYS.unitProductSettlements, cleanedSettlements);
+      setUnitProductSettlements(cleanedSettlements);
+      const cleanedCommissions = load(KEYS.productPersonCommissions, [] as ProductPersonCommission[])
+        .filter((c) => !removedIds.has(c.productId));
+      save(KEYS.productPersonCommissions, cleanedCommissions);
+      setProductPersonCommissions(cleanedCommissions);
     }
+    setProducts(cleanedProducts);
     setLoading(false);
   }, []);
 
@@ -314,6 +312,95 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const allSalesRecords = useMemo<SalesRecord[]>(() => {
     return [...salesRecords, ...matchedSyncedRecords];
   }, [salesRecords, matchedSyncedRecords]);
+
+  // 销售订单自动录入产品：订单/记录中出现的产品名，若不存在则自动建档（售价/结算/提成默认 0，后续在产品管理配置）
+  useEffect(() => {
+    if (loading) return;
+
+    const existingNames = new Set(
+      products.map((p) => (p.name || "").trim().toLowerCase()).filter(Boolean)
+    );
+    const pending = new Map<string, { name: string; unitPrice: number; category: string }>();
+
+    function collectName(nameRaw?: string, unitPrice?: number, category?: string) {
+      const name = (nameRaw || "").trim();
+      if (!name) return;
+      const key = name.toLowerCase();
+      if (existingNames.has(key) || pending.has(key)) return;
+      pending.set(key, {
+        name,
+        unitPrice: unitPrice && unitPrice > 0 ? unitPrice : 0,
+        category: (category || "").trim(),
+      });
+    }
+
+    for (const order of syncedOrders) {
+      collectName(order.productName, order.unitPrice);
+    }
+    for (const record of salesRecords) {
+      const known = record.productId
+        ? products.find((p) => p.id === record.productId)
+        : undefined;
+      if (known) continue;
+      collectName(record.productName, record.unitPrice);
+    }
+
+    if (pending.size === 0) return;
+
+    setProducts((prev) => {
+      const names = new Set(
+        prev.map((p) => (p.name || "").trim().toLowerCase()).filter(Boolean)
+      );
+      const additions: Product[] = [];
+      pending.forEach((item) => {
+        const key = item.name.toLowerCase();
+        if (names.has(key)) return;
+        names.add(key);
+        additions.push({
+          id: genId("pr"),
+          name: item.name,
+          category: item.category,
+          unitPrice: item.unitPrice,
+          costType: "percentage",
+          unitCost: 0,
+          costRate: 0,
+          description: "由销售订单自动录入",
+          commissionType: "percentage",
+          commissionRate: 0,
+          commissionAmount: 0,
+          commissionNote: "",
+        });
+      });
+      if (additions.length === 0) return prev;
+      const updated = [...prev, ...additions];
+      save(KEYS.products, updated);
+      return updated;
+    });
+  }, [loading, syncedOrders, salesRecords, products]);
+
+  // 产品建档后，把销售记录里仅有产品名的行回填 productId，便于结算/提成匹配
+  useEffect(() => {
+    if (loading || products.length === 0) return;
+    setSalesRecords((prev) => {
+      let changed = false;
+      const updated = prev.map((record) => {
+        if (record.productId && products.some((p) => p.id === record.productId)) {
+          return record;
+        }
+        const name = (record.productName || "").trim().toLowerCase();
+        if (!name) return record;
+        const matched = products.find(
+          (p) => (p.name || "").trim().toLowerCase() === name
+        );
+        if (!matched || record.productId === matched.id) return record;
+        changed = true;
+        return { ...record, productId: matched.id, productName: matched.name };
+      });
+      if (!changed) return prev;
+      save(KEYS.salesRecords, updated);
+      return updated;
+    });
+  }, [loading, products]);
 
   // ===================== 通知 & 日志辅助 =====================
   const addChangeLog = useCallback(
@@ -412,6 +499,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       save(KEYS.products, updated);
       return updated;
     });
+    return newP;
   }, []);
 
   const updateProduct = useCallback(async (id: string, p: Partial<Product>) => {
@@ -429,6 +517,51 @@ export function DataProvider({ children }: { children: ReactNode }) {
       return updated;
     });
   }, []);
+
+  const ensureProductByName = useCallback(
+    async (name: string, extras?: Partial<Omit<Product, "id" | "name">>) => {
+      const trimmed = (name || "").trim();
+      if (!trimmed) return null;
+      const key = trimmed.toLowerCase();
+      let result: Product | null = null;
+
+      setProducts((prev) => {
+        const existing = prev.find(
+          (p) => (p.name || "").trim().toLowerCase() === key
+        );
+        if (existing) {
+          result = existing;
+          return prev;
+        }
+        const created: Product = {
+          id: genId("pr"),
+          name: trimmed,
+          category: extras?.category || "",
+          salesUnitId: extras?.salesUnitId,
+          unitPrice: extras?.unitPrice || 0,
+          costType: extras?.costType || "percentage",
+          unitCost: extras?.unitCost || 0,
+          costRate: extras?.costRate || 0,
+          description: extras?.description || "由销售订单自动录入",
+          commissionType: extras?.commissionType || "percentage",
+          commissionRate: extras?.commissionRate || 0,
+          commissionAmount: extras?.commissionAmount || 0,
+          commissionNote: extras?.commissionNote || "",
+          settlementType: extras?.settlementType,
+          settlementRate: extras?.settlementRate,
+          settlementAmount: extras?.settlementAmount,
+          settlementNote: extras?.settlementNote,
+        };
+        result = created;
+        const updated = [...prev, created];
+        save(KEYS.products, updated);
+        return updated;
+      });
+
+      return result;
+    },
+    []
+  );
 
   // ===================== SalesRecord CRUD =====================
   const addSalesRecord = useCallback(async (s: Omit<SalesRecord, "id" | "totalAmount">) => {
@@ -957,6 +1090,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         addProduct,
         updateProduct,
         deleteProduct,
+        ensureProductByName,
         addSalesRecord,
         updateSalesRecord,
         deleteSalesRecord,

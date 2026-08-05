@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import bcrypt from "bcryptjs";
 import path from "path";
 import type { SystemUser, UserRole } from "./types";
+import { createFullPermissions, normalizePermissions } from "./permissions";
 
 const DB_PATH = path.join(__dirname, "..", "data", "database.db");
 
@@ -28,6 +29,7 @@ function initSchema() {
       name TEXT NOT NULL,
       role TEXT NOT NULL,
       managed_unit_ids TEXT DEFAULT '[]',
+      permissions TEXT DEFAULT '{}',
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -43,6 +45,10 @@ function initSchema() {
       military_cadre_id TEXT,
       org_dept_id TEXT,
       unit_leader_id TEXT,
+      group_admin_name TEXT DEFAULT '',
+      military_cadre_name TEXT DEFAULT '',
+      org_dept_name TEXT DEFAULT '',
+      unit_leader_name TEXT DEFAULT '',
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -103,16 +109,39 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_sales_personnel ON sales_records(personnel_id);
     CREATE INDEX IF NOT EXISTS idx_cost_unit ON cost_records(sales_unit_id);
   `);
+
+  // 兼容旧库：销售单位管理人员人名列
+  const unitCols = db.prepare("PRAGMA table_info(sales_units)").all() as Array<{ name: string }>;
+  const unitColNames = new Set(unitCols.map((c) => c.name));
+  const nameCols = [
+    "group_admin_name",
+    "military_cadre_name",
+    "org_dept_name",
+    "unit_leader_name",
+  ];
+  for (const col of nameCols) {
+    if (!unitColNames.has(col)) {
+      db.exec(`ALTER TABLE sales_units ADD COLUMN ${col} TEXT DEFAULT ''`);
+    }
+  }
+
+  // 兼容旧库：用户模块权限列
+  const userCols = db.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>;
+  const userColNames = new Set(userCols.map((c) => c.name));
+  if (!userColNames.has("permissions")) {
+    db.exec(`ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT '{}'`);
+  }
 }
 
 function seedDefaultAdmin() {
   const count = db.prepare("SELECT COUNT(*) as c FROM users").get() as { c: number };
   if (count.c === 0) {
     const hashedPassword = bcrypt.hashSync("0720", 10);
+    const perms = JSON.stringify(createFullPermissions());
     db.prepare(`
-      INSERT INTO users (id, username, password, name, role, managed_unit_ids)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run("admin", "18115335268", hashedPassword, "管理员", "superadmin", "[]");
+      INSERT INTO users (id, username, password, name, role, managed_unit_ids, permissions)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run("admin", "18115335268", hashedPassword, "管理员", "superadmin", "[]", perms);
     console.log("[DB] 默认管理员账号已创建: 18115335268 / 0720");
   }
 }
@@ -120,6 +149,12 @@ function seedDefaultAdmin() {
 // ===================== 辅助函数：行 → 对象 =====================
 
 export function rowToUser(row: any): SystemUser {
+  let rawPerms: any = {};
+  try {
+    rawPerms = JSON.parse(row.permissions || "{}");
+  } catch {
+    rawPerms = {};
+  }
   return {
     id: row.id,
     username: row.username,
@@ -127,6 +162,7 @@ export function rowToUser(row: any): SystemUser {
     name: row.name,
     role: row.role as UserRole,
     managedUnitIds: JSON.parse(row.managed_unit_ids || "[]"),
+    permissions: normalizePermissions(rawPerms, row.role),
     createdAt: row.created_at,
   };
 }
@@ -145,6 +181,10 @@ export function rowToSalesUnit(row: any) {
     militaryCadreId: row.military_cadre_id || undefined,
     orgDeptId: row.org_dept_id || undefined,
     unitLeaderId: row.unit_leader_id || undefined,
+    groupAdminName: row.group_admin_name || "",
+    militaryCadreName: row.military_cadre_name || "",
+    orgDeptName: row.org_dept_name || "",
+    unitLeaderName: row.unit_leader_name || "",
   };
 }
 

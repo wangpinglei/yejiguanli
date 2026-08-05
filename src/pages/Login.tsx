@@ -164,7 +164,7 @@ export default function Login() {
             {/* Demo Accounts */}
             <div className="mt-6 border-t pt-4">
               <p className="mt-3 text-center text-xs text-muted-foreground">
-                登录后可在「用户管理」中创建单位管理员并分配权限
+                登录后可在「权限分配」中开通账号并分配可操作单位
               </p>
             </div>
           </div>

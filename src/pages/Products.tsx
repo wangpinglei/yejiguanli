@@ -423,7 +423,7 @@ export default function Products() {
     <div>
       <PageHeader
         title="产品管理"
-        description="管理产品信息与售价成本，自动匹配销售记录并测算各运营中心结算收入与毛利。"
+        description="产品由销售订单自动录入；在此配置结算比例与销售提成，系统按订单匹配测算各单位结算收入与毛利。"
         action={
           <div className="flex gap-2">
             <Select value={selectedMonth} onValueChange={setSelectedMonth}>
@@ -584,18 +584,29 @@ export default function Products() {
                           {totalSettlement > 0 ? formatCurrency(totalProfit) : "-"}
                         </TableCell>
                         <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                          {canEditProduct && !isReadOnly ? (
-                            <div className="flex justify-end gap-1">
-                              <Button variant="ghost" size="icon" onClick={() => openEdit(product)}>
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button variant="ghost" size="icon" onClick={() => setDeleteId(product.id)}>
-                                <Trash2 className="h-4 w-4 text-destructive" />
-                              </Button>
-                            </div>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">仅查看</span>
-                          )}
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 px-2 text-cyan-700"
+                              title="配置结算比例与销售提成"
+                              onClick={() => navigate(`/product-settlement?product=${product.id}`)}
+                            >
+                              <Calculator className="mr-1 h-3.5 w-3.5" />结算/提成
+                            </Button>
+                            {canEditProduct && !isReadOnly ? (
+                              <>
+                                <Button variant="ghost" size="icon" onClick={() => openEdit(product)}>
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" onClick={() => setDeleteId(product.id)}>
+                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                </Button>
+                              </>
+                            ) : (
+                              <span className="text-xs text-muted-foreground self-center">仅查看</span>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                       {/* 展开行：分单位明细 */}
@@ -686,7 +697,23 @@ export default function Products() {
                 })}
                 {filteredProducts.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center py-12 text-muted-foreground">暂无数据</TableCell>
+                    <TableCell colSpan={9} className="text-center py-12 text-muted-foreground">
+                      <p>暂无产品</p>
+                      <p className="mt-2 text-xs">
+                        请到「销售记录」导入/同步销售订单，系统会按产品名称自动建档；
+                        随后点击「结算/提成」配置各单位结算比例与人员销售提成。
+                      </p>
+                      <div className="mt-4 flex justify-center gap-2">
+                        <Button variant="outline" size="sm" onClick={() => navigate("/sales-records")}>
+                          去导入销售订单
+                        </Button>
+                        {canEditProduct && !isReadOnly && (
+                          <Button variant="outline" size="sm" onClick={handleImportFromSales}>
+                            从已有销售记录导入产品
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
                   </TableRow>
                 )}
               </TableBody>
@@ -945,18 +972,6 @@ export default function Products() {
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">设定后便于在「产品结算比例（按销售单位）」中按单位分组管理与测算结算收入。</p>
-              {editingProduct && (
-                <div className="mt-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => navigate(`/product-settlement?product=${editingProduct.id}`)}
-                  >
-                    <Calculator className="mr-1 h-3.5 w-3.5" />配置各销售单位结算比例
-                  </Button>
-                </div>
-              )}
             </div>
             <div className="space-y-2">
               <Label>售价 (¥)</Label>
@@ -967,7 +982,23 @@ export default function Products() {
               <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="产品描述" rows={2} />
             </div>
 
-            {/* 销售提成不在产品维度设置：提成按「产品 × 销售单位 × 销售人员」在「产品结算比例（按销售单位）」页配置 */}
+            {/* 销售提成按「产品 × 销售单位 × 销售人员」在产品结算页配置 */}
+            {editingProduct && (
+              <div className="rounded-lg border border-cyan-200 bg-cyan-50/60 p-3 space-y-2">
+                <p className="text-sm font-medium text-cyan-900">结算比例与销售提成</p>
+                <p className="text-xs text-cyan-800/80">
+                  结算比例按「产品 × 销售单位」配置；销售提成按「产品 × 单位 × 人员」配置管理提成与个人提成。
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate(`/product-settlement?product=${editingProduct.id}`)}
+                >
+                  <Calculator className="mr-1 h-3.5 w-3.5" />打开产品结算配置
+                </Button>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>取消</Button>

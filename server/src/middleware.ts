@@ -1,10 +1,10 @@
 import type { Request, Response, NextFunction } from "express";
-import type { JwtPayload, UserRole, SalesUnit } from "./types";
+import type { JwtPayload, UserRole } from "./types";
 import { getDb, rowToSalesUnit } from "./db";
+import { hasAnyEdit, hasModuleEdit } from "./permissions";
 
 // ===================== 角色权限中间件 =====================
 
-// 检查用户是否拥有指定角色之一
 export function requireRole(...roles: UserRole[]) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
@@ -17,30 +17,40 @@ export function requireRole(...roles: UserRole[]) {
   };
 }
 
+/** 可管理账号与模块权限（超管或拥有「权限分配」编辑权） */
+export function requireUsersManage(req: Request, res: Response, next: NextFunction) {
+  if (!req.user) {
+    return res.status(401).json({ error: "未登录" });
+  }
+  if (
+    req.user.role === "superadmin" ||
+    hasModuleEdit(req.user.permissions, "users", req.user.role)
+  ) {
+    return next();
+  }
+  return res.status(403).json({ error: "权限不足" });
+}
+
 // ===================== 数据可见性辅助 =====================
 
-// 获取用户可见的销售单位 ID 列表
 export function getVisibleUnitIds(user: JwtPayload): string[] | null {
-  // superadmin 可见所有单位
   if (user.role === "superadmin") {
-    return null; // null 表示全部可见
+    return null;
   }
 
   const db = getDb();
   const units = db.prepare("SELECT * FROM sales_units").all().map(rowToSalesUnit);
-
   const visibleIds = new Set<string>();
 
-  // managedUnitIds（unit_manager 用）
   user.managedUnitIds.forEach((id) => visibleIds.add(id));
 
-  // 根据角色字段匹配
+  // 不依赖旧角色：凡在销售单位中被指派为管理人员即可看见该单位
   units.forEach((unit: any) => {
     if (
-      (user.role === "group_admin" && unit.groupAdminId === user.id) ||
-      (user.role === "military_cadre" && unit.militaryCadreId === user.id) ||
-      (user.role === "org_department" && unit.orgDeptId === user.id) ||
-      (user.role === "unit_leader" && unit.unitLeaderId === user.id)
+      unit.groupAdminId === user.id ||
+      unit.militaryCadreId === user.id ||
+      unit.orgDeptId === user.id ||
+      unit.unitLeaderId === user.id
     ) {
       visibleIds.add(unit.id);
     }
@@ -49,33 +59,38 @@ export function getVisibleUnitIds(user: JwtPayload): string[] | null {
   return Array.from(visibleIds);
 }
 
-// 判断用户是否只读
-export function isReadOnly(role: UserRole): boolean {
-  return role === "military_cadre";
+export function isReadOnly(user: JwtPayload): boolean {
+  if (user.role === "superadmin") return false;
+  if (user.role === "military_cadre") return true;
+  return !hasAnyEdit(user.permissions, user.role);
 }
 
-// 判断用户是否可编辑某销售单位的数据
 export function canEditUnit(user: JwtPayload, unitId: string): boolean {
   if (user.role === "superadmin") return true;
-  if (isReadOnly(user.role)) return false;
+  if (isReadOnly(user)) return false;
+  if (!hasModuleEdit(user.permissions, "sales_units", user.role) &&
+      !hasModuleEdit(user.permissions, "personnel", user.role) &&
+      !hasModuleEdit(user.permissions, "sales_records", user.role) &&
+      !hasModuleEdit(user.permissions, "cost_management", user.role)) {
+    // 兼容旧角色编辑权
+    if (user.role === "military_cadre") return false;
+  }
 
   const visibleIds = getVisibleUnitIds(user);
   if (visibleIds === null) return true;
   return visibleIds.includes(unitId);
 }
 
-// 组织部特殊权限：可编辑人员入离职和成本录入
 export function isOrgDept(role: UserRole): boolean {
   return role === "org_department";
 }
 
-// 编辑权限检查中间件（非只读角色可放行，具体单位检查在路由内做）
 export function requireEditPermission(req: Request, res: Response, next: NextFunction) {
   if (!req.user) {
     return res.status(401).json({ error: "未登录" });
   }
-  if (isReadOnly(req.user.role)) {
-    return res.status(403).json({ error: "军工干部为只读角色，无编辑权限" });
+  if (isReadOnly(req.user)) {
+    return res.status(403).json({ error: "当前账号为只读权限，无法编辑" });
   }
   next();
 }

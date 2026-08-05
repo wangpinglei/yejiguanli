@@ -20,6 +20,8 @@ import {
 } from "lucide-react";
 import { useAuth, ROLE_LABELS } from "@/context/AuthContext";
 import { useData } from "@/context/DataContext";
+import { usePermissions } from "@/hooks/usePermissions";
+import { MODULE_DEFS, type ModuleKey } from "@/config/modules";
 import { formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -38,35 +40,32 @@ interface NavItem {
   path: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
-  superadminOnly?: boolean;
+  moduleKey: ModuleKey;
 }
 
 const navItems: NavItem[] = [
-  { path: "/", label: "数据看板", icon: LayoutDashboard },
-  { path: "/sales-units", label: "销售单位", icon: Building2 },
-  { path: "/personnel", label: "人员管理", icon: Users },
-  { path: "/products", label: "产品管理", icon: Package },
-  { path: "/sales-records", label: "销售记录", icon: ShoppingCart },
-  { path: "/cost-management", label: "成本管理", icon: Wallet },
-  { path: "/profit-analysis", label: "收支利润", icon: TrendingUp },
-  { path: "/sales-battle-report", label: "单位战报", icon: Swords },
-  { path: "/product-settlement", label: "产品结算比例", icon: Scale },
-  { path: "/users", label: "用户管理", icon: ShieldCheck, superadminOnly: true },
+  { path: "/", label: "数据看板", icon: LayoutDashboard, moduleKey: "dashboard" },
+  { path: "/sales-units", label: "销售单位", icon: Building2, moduleKey: "sales_units" },
+  { path: "/personnel", label: "人员管理", icon: Users, moduleKey: "personnel" },
+  { path: "/products", label: "产品管理", icon: Package, moduleKey: "products" },
+  { path: "/sales-records", label: "销售记录", icon: ShoppingCart, moduleKey: "sales_records" },
+  { path: "/cost-management", label: "成本管理", icon: Wallet, moduleKey: "cost_management" },
+  { path: "/profit-analysis", label: "收支利润", icon: TrendingUp, moduleKey: "profit_analysis" },
+  { path: "/sales-battle-report", label: "单位战报", icon: Swords, moduleKey: "sales_battle_report" },
+  { path: "/product-settlement", label: "产品结算比例", icon: Scale, moduleKey: "product_settlement" },
+  { path: "/users", label: "权限分配", icon: ShieldCheck, moduleKey: "users" },
 ];
 
-const roleAvatarColors: Record<string, string> = {
-  superadmin: "bg-violet-500 text-white",
-  group_admin: "bg-indigo-500 text-white",
-  military_cadre: "bg-amber-500 text-white",
-  org_department: "bg-cyan-500 text-white",
-  unit_leader: "bg-emerald-500 text-white",
-  unit_manager: "bg-blue-500 text-white",
-};
-
-function SidebarContent({ onNavigate, isSuperadmin }: { onNavigate?: () => void; isSuperadmin: boolean }) {
+function SidebarContent({
+  onNavigate,
+  canView,
+}: {
+  onNavigate?: () => void;
+  canView: (key: ModuleKey) => boolean;
+}) {
   const location = useLocation();
 
-  const visibleItems = navItems.filter((item) => !item.superadminOnly || isSuperadmin);
+  const visibleItems = navItems.filter((item) => canView(item.moduleKey));
 
   return (
     <div className="flex h-full flex-col">
@@ -81,34 +80,32 @@ function SidebarContent({ onNavigate, isSuperadmin }: { onNavigate?: () => void;
         </div>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4 scrollbar-thin">
+      <nav className="flex-1 space-y-1 overflow-y-auto p-3">
         {visibleItems.map((item) => {
-          const isActive = location.pathname === item.path;
           const Icon = item.icon;
+          const active =
+            item.path === "/"
+              ? location.pathname === "/" || location.pathname === ""
+              : location.pathname.startsWith(item.path);
           return (
             <Link
               key={item.path}
               to={item.path}
               onClick={onNavigate}
               className={cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-                isActive
+                "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors",
+                active
                   ? "bg-primary text-primary-foreground"
                   : "text-white/70 hover:bg-white/10 hover:text-white"
               )}
             >
               <Icon className="h-4 w-4 shrink-0" />
               <span>{item.label}</span>
-              {item.superadminOnly && (
-                <ShieldCheck className="ml-auto h-3 w-3 text-white/40" />
-              )}
             </Link>
           );
         })}
       </nav>
 
-      {/* Footer */}
       <div className="border-t border-white/10 p-4">
         <p className="text-xs text-white/40">© 2025 业绩管理系统</p>
       </div>
@@ -119,17 +116,22 @@ function SidebarContent({ onNavigate, isSuperadmin }: { onNavigate?: () => void;
 export default function Layout() {
   const { user, logout } = useAuth();
   const { notifications, unreadCount, markNotificationRead, markAllNotificationsRead } = useData();
+  const { canView, isSuperadmin, canManageUsers } = usePermissions();
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const isSuperadmin = user?.role === "superadmin";
-
   const pageTitle =
-    navItems.find((item) => item.path === location.pathname)?.label || "数据看板";
+    navItems.find((item) => item.path === location.pathname)?.label ||
+    MODULE_DEFS.find((m) => m.path === location.pathname)?.label ||
+    "数据看板";
 
-  const roleLabel = user ? ROLE_LABELS[user.role] : "";
-  const avatarColor = user ? (roleAvatarColors[user.role] || "bg-primary text-primary-foreground") : "";
+  const roleLabel = user
+    ? (user.role === "superadmin" ? "超级管理员" : (ROLE_LABELS[user.role] || "自定义权限"))
+    : "";
+  const avatarColor = isSuperadmin
+    ? "bg-violet-500 text-white"
+    : "bg-primary text-primary-foreground";
 
   const handleLogout = () => {
     logout();
@@ -138,21 +140,17 @@ export default function Layout() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-muted/30">
-      {/* Desktop Sidebar */}
       <aside className="hidden w-64 shrink-0 bg-sidebar lg:block">
-        <SidebarContent isSuperadmin={isSuperadmin} />
+        <SidebarContent canView={canView} />
       </aside>
 
-      {/* Mobile Sidebar */}
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetContent side="left" className="w-64 p-0 bg-sidebar">
-          <SidebarContent onNavigate={() => setMobileOpen(false)} isSuperadmin={isSuperadmin} />
+          <SidebarContent onNavigate={() => setMobileOpen(false)} canView={canView} />
         </SheetContent>
       </Sheet>
 
-      {/* Main Area */}
       <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Header */}
         <header className="flex h-16 shrink-0 items-center justify-between border-b bg-background px-4 lg:px-6">
           <div className="flex items-center gap-3">
             <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
@@ -166,8 +164,7 @@ export default function Layout() {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* 通知铃铛（仅超管） */}
-            {isSuperadmin && (
+            {(isSuperadmin || canManageUsers) && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="icon" className="relative">
@@ -260,7 +257,6 @@ export default function Layout() {
           </div>
         </header>
 
-        {/* Page Content */}
         <main className="flex-1 overflow-y-auto p-4 lg:p-6 scrollbar-thin">
           <div className="mx-auto max-w-7xl animate-fade-in">
             <Outlet />

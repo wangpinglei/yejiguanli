@@ -3,7 +3,8 @@
 // 用户角色
 export type UserRole =
   | "superadmin"
-  | "group_admin" // 集团管理
+  | "user"
+  | "group_admin" // 集团管理（兼容旧数据）
   | "military_cadre" // 军工干部（只读）
   | "org_department" // 组织部（人员入离职 + 成本录入）
   | "unit_leader" // 单位负责人
@@ -19,11 +20,15 @@ export interface SalesUnit {
   contactPhone: string;
   createdAt: string;
   description: string;
-  // 角色分配
-  groupAdminId?: string; // 集团管理
-  militaryCadreId?: string; // 军工干部
-  orgDeptId?: string; // 组织部
-  unitLeaderId?: string; // 单位负责人
+  // 角色分配（人名在创建单位时录入；登录权限在「权限分配」中开通）
+  groupAdminId?: string; // 集团管理用户ID（有登录账号时关联）
+  militaryCadreId?: string;
+  orgDeptId?: string;
+  unitLeaderId?: string;
+  groupAdminName?: string; // 集团管理人名
+  militaryCadreName?: string;
+  orgDeptName?: string;
+  unitLeaderName?: string;
 }
 
 // 薪资结构（月薪 = 底薪 + 绩效 + 岗位补贴 + 管理提成 + 个人提成）

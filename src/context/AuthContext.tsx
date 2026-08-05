@@ -7,6 +7,10 @@ import {
   type ReactNode,
 } from "react";
 import type { UserRole } from "@/types";
+import {
+  normalizePermissions,
+  type UserPermissions,
+} from "@/config/modules";
 import { authApi, usersApi, setToken, removeToken, getToken } from "@/lib/api";
 import type { AuthUser as ApiAuthUser, UserItem } from "@/lib/api";
 
@@ -17,6 +21,7 @@ export interface SystemUser {
   name: string;
   role: UserRole;
   managedUnitIds: string[];
+  permissions: UserPermissions;
   createdAt?: string;
 }
 
@@ -26,6 +31,7 @@ export interface AuthUser {
   name: string;
   role: UserRole;
   managedUnitIds: string[];
+  permissions: UserPermissions;
 }
 
 interface AuthContextType {
@@ -34,17 +40,34 @@ interface AuthContextType {
   loading: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
-  addUser: (u: { username: string; password: string; name: string; role: UserRole; managedUnitIds: string[] }) => Promise<void>;
-  updateUser: (id: string, u: Partial<{ username: string; password: string; name: string; role: UserRole; managedUnitIds: string[] }>) => Promise<void>;
+  addUser: (u: {
+    username: string;
+    password: string;
+    name: string;
+    role: UserRole;
+    managedUnitIds: string[];
+    permissions: UserPermissions;
+  }) => Promise<void>;
+  updateUser: (
+    id: string,
+    u: Partial<{
+      username: string;
+      password: string;
+      name: string;
+      role: UserRole;
+      managedUnitIds: string[];
+      permissions: UserPermissions;
+    }>
+  ) => Promise<void>;
   deleteUser: (id: string) => Promise<void>;
   refreshUsers: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-// 角色标签映射
-export const ROLE_LABELS: Record<UserRole, string> = {
+export const ROLE_LABELS: Record<string, string> = {
   superadmin: "超级管理员",
+  user: "自定义权限",
   group_admin: "集团管理",
   military_cadre: "军工干部",
   org_department: "组织部",
@@ -54,11 +77,16 @@ export const ROLE_LABELS: Record<UserRole, string> = {
 
 const AUTH_KEY = "pm5_auth_user";
 
-// sessionStorage：用户信息（关闭标签页清空）
 function loadAuthUser(): AuthUser | null {
   try {
     const raw = sessionStorage.getItem(AUTH_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        ...parsed,
+        permissions: normalizePermissions(parsed.permissions, parsed.role),
+      };
+    }
   } catch {}
   return null;
 }
@@ -77,8 +105,15 @@ function toAuthUser(u: ApiAuthUser): AuthUser {
     username: u.username,
     name: u.name,
     role: u.role as UserRole,
-    managedUnitIds: u.managedUnitIds,
+    managedUnitIds: u.managedUnitIds || [],
+    permissions: normalizePermissions(u.permissions, u.role),
   };
+}
+
+function canManageUsers(user: AuthUser | null): boolean {
+  if (!user) return false;
+  if (user.role === "superadmin") return true;
+  return Boolean(user.permissions?.users?.edit || user.permissions?.users?.view);
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -86,14 +121,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [users, setUsers] = useState<SystemUser[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // 初始化：尝试用已有 token 恢复登录状态
   useEffect(() => {
     const initAuth = async () => {
       const token = getToken();
       const cachedUser = loadAuthUser();
 
       if (token && cachedUser) {
-        // 有 token 且有缓存用户 → 先用缓存渲染，后台验证
         setUser(cachedUser);
         try {
           const me = await authApi.me();
@@ -101,13 +134,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(authUser);
           saveAuthUser(authUser);
         } catch {
-          // token 无效，清除
           removeToken();
           saveAuthUser(null);
           setUser(null);
         }
       } else if (token) {
-        // 有 token 但没有缓存用户 → 调接口获取
         try {
           const me = await authApi.me();
           const authUser = toAuthUser(me);
@@ -132,13 +163,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         username: u.username,
         name: u.name,
         role: u.role as UserRole,
-        managedUnitIds: u.managedUnitIds,
+        managedUnitIds: u.managedUnitIds || [],
+        permissions: normalizePermissions(u.permissions, u.role),
         createdAt: u.createdAt,
       })));
     } catch {
-      // 非超管或无权限时忽略
+      // 无权限时忽略
     }
   }, []);
+
+  useEffect(() => {
+    if (loading || !user) return;
+    if (canManageUsers(user)) {
+      void refreshUsers();
+    }
+  }, [loading, user, refreshUsers]);
 
   const login = useCallback(async (username: string, password: string): Promise<void> => {
     const res = await authApi.login(username, password);
@@ -155,7 +194,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addUser = useCallback(
-    async (u: { username: string; password: string; name: string; role: UserRole; managedUnitIds: string[] }) => {
+    async (u: {
+      username: string;
+      password: string;
+      name: string;
+      role: UserRole;
+      managedUnitIds: string[];
+      permissions: UserPermissions;
+    }) => {
       await usersApi.create(u);
       await refreshUsers();
     },
@@ -163,10 +209,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const updateUser = useCallback(
-    async (id: string, u: Partial<{ username: string; password: string; name: string; role: UserRole; managedUnitIds: string[] }>) => {
+    async (
+      id: string,
+      u: Partial<{
+        username: string;
+        password: string;
+        name: string;
+        role: UserRole;
+        managedUnitIds: string[];
+        permissions: UserPermissions;
+      }>
+    ) => {
       await usersApi.update(id, u);
       await refreshUsers();
-      // 如果更新的是当前登录用户，重新获取
       if (user?.id === id) {
         try {
           const me = await authApi.me();

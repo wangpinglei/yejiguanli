@@ -53,52 +53,107 @@ interface ImportRow {
   selected: boolean; // 是否勾选导入
 }
 
-// 表头别名映射（支持各种常见叫法）
-const HEADER_ALIASES: Record<string, string[]> = {
-  customerName: ["客户姓名", "客户名称", "客户", "customer", "customername"],
+// 表头别名：短词仅精确匹配，避免「客户」「类型」等误伤其他列
+const HEADER_EXACT_ALIASES: Record<string, string[]> = {
+  customerName: ["客户姓名", "客户名称", "客户名", "客户", "customer", "customername", "customer_name"],
   productCategory: ["产品类别", "产品分类", "类别", "category"],
-  productName: ["购买产品", "产品名称", "产品", "product", "productname"],
-  orderAmount: ["订单金额", "原价", "orderamount"],
-  totalAmount: ["实收金额", "实收", "金额", "总金额", "成交金额", "amount", "total"],
-  orderType: ["订单类型", "类型", "ordertype"],
-  salesUnitName: ["销售单位", "单位", "部门", "门店", "unit", "salesunit"],
-  salesPersonName: ["销售人员", "销售员", "负责人", "业务员", "salesperson", "salesman"],
-  saleDate: ["成交日期", "日期", "销售日期", "date", "saledate"],
+  productName: ["购买产品", "产品名称", "产品", "product", "productname", "product_name"],
+  orderAmount: ["订单金额", "原价", "orderamount", "order_amount"],
+  totalAmount: ["实收金额", "实收", "成交金额", "amount", "total", "totalamount"],
+  orderType: ["订单类型", "ordertype", "order_type"],
+  salesUnitName: ["销售单位", "单位名称", "门店", "salesunit", "sales_unit"],
+  salesPersonName: ["销售人员", "销售员", "业务员", "salesperson", "sales_person"],
+  saleDate: ["成交日期", "销售日期", "saledate", "sale_date"],
   activityName: ["参加活动", "活动名称", "活动", "activity", "activityname"],
 };
 
+// 模糊匹配只用较长关键词，避免短别名串列
+const HEADER_FUZZY_ALIASES: Record<string, string[]> = {
+  customerName: ["客户姓名", "客户名称", "客户名", "customername"],
+  productCategory: ["产品类别", "产品分类"],
+  productName: ["购买产品", "产品名称", "productname"],
+  orderAmount: ["订单金额", "orderamount"],
+  totalAmount: ["实收金额", "成交金额", "totalamount"],
+  orderType: ["订单类型", "ordertype"],
+  salesUnitName: ["销售单位", "salesunit"],
+  salesPersonName: ["销售人员", "销售员", "salesperson"],
+  saleDate: ["成交日期", "销售日期", "saledate"],
+  activityName: ["参加活动", "活动名称", "activityname"],
+};
+
+const FIXED_IMPORT_FIELDS = [
+  "customerName",
+  "productCategory",
+  "productName",
+  "orderAmount",
+  "totalAmount",
+  "orderType",
+  "salesUnitName",
+  "salesPersonName",
+  "saleDate",
+  "activityName",
+] as const;
+
 function normalizeHeader(h: string): string {
-  return h.trim().toLowerCase().replace(/\s+/g, "");
+  return String(h ?? "")
+    .replace(/^\ufeff/, "")
+    .replace(/[\u200b\u00a0]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[（(].*?[）)]/g, ""); // 去掉括号备注，如 客户姓名(必填)
 }
 
 function matchHeader(header: string): string | null {
   const norm = normalizeHeader(header);
-  for (const [field, aliases] of Object.entries(HEADER_ALIASES)) {
+  if (!norm) return null;
+
+  for (const [field, aliases] of Object.entries(HEADER_EXACT_ALIASES)) {
     if (aliases.some((a) => normalizeHeader(a) === norm)) return field;
   }
-  // 模糊匹配
-  for (const [field, aliases] of Object.entries(HEADER_ALIASES)) {
-    if (aliases.some((a) => norm.includes(normalizeHeader(a)) || normalizeHeader(a).includes(norm))) return field;
+
+  for (const [field, aliases] of Object.entries(HEADER_FUZZY_ALIASES)) {
+    if (aliases.some((a) => {
+      const alias = normalizeHeader(a);
+      return alias.length >= 3 && (norm.includes(alias) || alias.includes(norm));
+    })) {
+      return field;
+    }
+  }
+
+  // 兜底：含「客户」且含「名」→ 客户姓名
+  if (norm.includes("客户") && (norm.includes("名") || norm.includes("customer"))) {
+    return "customerName";
   }
   return null;
 }
 
+function cellToString(cell: unknown): string {
+  if (cell === null || cell === undefined) return "";
+  if (typeof cell === "number") {
+    // Excel 日期序列数留给 parseDate 处理；普通数字直接转字符串
+    return String(cell);
+  }
+  if (cell instanceof Date) {
+    return cell.toISOString().slice(0, 10);
+  }
+  return String(cell).replace(/^\ufeff/, "").trim();
+}
+
 function parseDate(dateStr: string): string {
   const s = dateStr.trim();
-  // 支持 YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD, YYYYMMDD, Excel日期数字
+  if (!s) return "";
   const ymdDash = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
   if (ymdDash) {
     const [, y, m, d] = ymdDash;
     return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
   }
-  // YYYYMMDD
-  const ymdCompact = s.match(/^(\d{4})(\d{2})(\d{2})/);
+  const ymdCompact = s.match(/^(\d{4})(\d{2})(\d{2})$/);
   if (ymdCompact) {
     const [, y, m, d] = ymdCompact;
     return `${y}-${m}-${d}`;
   }
-  // Excel序列号（从1900-01-01开始）
-  const excelNum = parseInt(s, 10);
+  const excelNum = parseFloat(s);
   if (!isNaN(excelNum) && excelNum > 30000 && excelNum < 80000) {
     const date = new Date(Date.UTC(1899, 11, 30) + excelNum * 86400000);
     return date.toISOString().slice(0, 10);
@@ -112,8 +167,131 @@ function parseAmount(s: string): number {
   return isNaN(n) ? 0 : n;
 }
 
+/** 将二维表（含表头）解析为导入行 */
+function parseImportMatrix(
+  matrix: string[][],
+  salesUnits: { id: string; name: string }[],
+  personnel: { id: string; name: string }[],
+  products: { id: string; name: string }[]
+): ImportRow[] {
+  const rows = matrix
+    .map((r) => r.map((c) => cellToString(c)))
+    .filter((r) => r.some((c) => c.trim()));
+  if (rows.length < 2) return [];
+
+  // 找表头行：优先包含「客户姓名/购买产品」的行
+  let headerIdx = 0;
+  for (let i = 0; i < Math.min(rows.length, 5); i++) {
+    const joined = rows[i].map(normalizeHeader).join("|");
+    if (
+      joined.includes("客户") ||
+      joined.includes("购买产品") ||
+      joined.includes("实收") ||
+      joined.includes("customer")
+    ) {
+      headerIdx = i;
+      break;
+    }
+  }
+
+  const headers = rows[headerIdx];
+  const columnMap: Record<number, string> = {};
+  headers.forEach((h, idx) => {
+    const field = matchHeader(h);
+    if (field) columnMap[idx] = field;
+  });
+
+  const mappedFields = new Set(Object.values(columnMap));
+  const useFixedOrder = !mappedFields.has("customerName") && !mappedFields.has("productName");
+
+  const result: ImportRow[] = [];
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const cells = rows[i];
+    // 跳过重复表头行
+    const firstCellNorm = normalizeHeader(cells[0] || "");
+    if (
+      firstCellNorm === "客户姓名" ||
+      firstCellNorm === "客户名称" ||
+      firstCellNorm === "customername"
+    ) {
+      continue;
+    }
+
+    const data: Record<string, string> = {};
+    if (useFixedOrder) {
+      FIXED_IMPORT_FIELDS.forEach((field, idx) => {
+        data[field] = cells[idx] || "";
+      });
+    } else {
+      Object.entries(columnMap).forEach(([idx, field]) => {
+        data[field] = cells[parseInt(idx, 10)] || "";
+      });
+      // 表头未识别到客户列时，尝试第 1 列兜底
+      if (!data.customerName) {
+        const first = cells[0] || "";
+        if (first && !matchHeader(first)) data.customerName = first;
+      }
+    }
+
+    const unitName = (data.salesUnitName || "").trim();
+    const personName = (data.salesPersonName || "").trim();
+    const productName = (data.productName || "").trim();
+    const customerName = (data.customerName || "").trim();
+
+    // 整行几乎为空则跳过
+    if (!customerName && !productName && !unitName && !personName) continue;
+
+    const matchedUnit = unitName
+      ? salesUnits.find((u) => u.name === unitName || u.name.includes(unitName) || unitName.includes(u.name))
+      : undefined;
+    const matchedPerson = personName
+      ? personnel.find((p) => p.name === personName || p.name.includes(personName) || personName.includes(p.name))
+      : undefined;
+    const matchedProduct = productName
+      ? products.find((p) => p.name === productName || p.name.includes(productName) || productName.includes(p.name))
+      : undefined;
+
+    result.push({
+      rowIndex: result.length + 1,
+      customerName,
+      productCategory: (data.productCategory || "").trim(),
+      productName,
+      orderAmount: parseAmount(data.orderAmount || "0"),
+      totalAmount: parseAmount(data.totalAmount || "0"),
+      orderType: (data.orderType || "").trim(),
+      salesUnitName: unitName,
+      salesPersonName: personName,
+      saleDate: parseDate(data.saleDate || ""),
+      activityName: (data.activityName || "").trim(),
+      matchedUnitId: matchedUnit?.id || "",
+      matchedPersonId: matchedPerson?.id || "",
+      matchedProductId: matchedProduct?.id || "",
+      unitMatched: !!matchedUnit,
+      personMatched: !!matchedPerson,
+      productMatched: !!matchedProduct,
+      selected: true,
+    });
+  }
+
+  return result;
+}
+
+function textToMatrix(text: string): string[][] {
+  const cleaned = text.replace(/^\ufeff/, "").trim();
+  if (!cleaned) return [];
+  const lines = cleaned.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length === 0) return [];
+
+  const sampleLine = lines[0];
+  const delimiter = sampleLine.includes("\t")
+    ? "\t"
+    : (sampleLine.split(",").length >= sampleLine.split("，").length ? "," : "，");
+
+  return lines.map((line) => line.split(delimiter).map((c) => c.trim()));
+}
+
 export default function SalesRecords() {
-  const { products, addSalesRecord, updateSalesRecord, deleteSalesRecord, refreshSyncedOrders, syncedLoading } = useData();
+  const { products, ensureProductByName, addSalesRecord, updateSalesRecord, deleteSalesRecord, refreshSyncedOrders, syncedLoading } = useData();
   const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleSalesRecords: salesRecords, canEditSales, isReadOnly } = usePermissions();
   const [search, setSearch] = useState("");
   const [filterUnit, setFilterUnit] = useState("all");
@@ -318,80 +496,8 @@ export default function SalesRecords() {
 
   // ===================== 批量导入逻辑 =====================
 
-  // 解析粘贴的文本或CSV
   const parseImportText = (text: string): ImportRow[] => {
-    const lines = text.trim().split(/\r?\n/).filter((l) => l.trim());
-    if (lines.length < 2) return []; // 至少需要表头+1行数据
-
-    // 检测分隔符（Tab 或逗号）
-    const sampleLine = lines[0];
-    const delimiter = sampleLine.includes("\t") ? "\t" : ",";
-
-    // 解析表头
-    const headers = lines[0].split(delimiter).map((h) => h.trim());
-    const columnMap: Record<number, string> = {}; // 列索引 -> 字段名
-    headers.forEach((h, idx) => {
-      const field = matchHeader(h);
-      if (field) columnMap[idx] = field;
-    });
-
-    // 如果没有匹配到表头，使用固定列顺序（用户指定的10列）
-    const useFixedOrder = Object.keys(columnMap).length === 0;
-    const fixedFields = ["customerName", "productCategory", "productName", "orderAmount", "totalAmount", "orderType", "salesUnitName", "salesPersonName", "saleDate", "activityName"];
-
-    const rows: ImportRow[] = [];
-    for (let i = 1; i < lines.length; i++) {
-      const cells = lines[i].split(delimiter).map((c) => c.trim());
-      const data: Record<string, string> = {};
-
-      if (useFixedOrder) {
-        fixedFields.forEach((field, idx) => {
-          data[field] = cells[idx] || "";
-        });
-      } else {
-        Object.entries(columnMap).forEach(([idx, field]) => {
-          data[field] = cells[parseInt(idx)] || "";
-        });
-      }
-
-      // 智能匹配
-      const unitName = data.salesUnitName || "";
-      const personName = data.salesPersonName || "";
-      const productName = data.productName || "";
-
-      const matchedUnit = unitName
-        ? salesUnits.find((u) => u.name === unitName || u.name.includes(unitName) || unitName.includes(u.name))
-        : undefined;
-      const matchedPerson = personName
-        ? personnel.find((p) => p.name === personName || p.name.includes(personName) || personName.includes(p.name))
-        : undefined;
-      const matchedProduct = productName
-        ? products.find((p) => p.name === productName || p.name.includes(productName) || productName.includes(p.name))
-        : undefined;
-
-      rows.push({
-        rowIndex: i,
-        customerName: data.customerName || "",
-        productCategory: data.productCategory || "",
-        productName,
-        orderAmount: parseAmount(data.orderAmount || "0"),
-        totalAmount: parseAmount(data.totalAmount || "0"),
-        orderType: data.orderType || "",
-        salesUnitName: unitName,
-        salesPersonName: personName,
-        saleDate: parseDate(data.saleDate || ""),
-        activityName: data.activityName || "",
-        matchedUnitId: matchedUnit?.id || "",
-        matchedPersonId: matchedPerson?.id || "",
-        matchedProductId: matchedProduct?.id || "",
-        unitMatched: !!matchedUnit,
-        personMatched: !!matchedPerson,
-        productMatched: !!matchedProduct,
-        selected: true, // 默认全选
-      });
-    }
-
-    return rows;
+    return parseImportMatrix(textToMatrix(text), salesUnits, personnel, products);
   };
 
   const handleParsePreview = () => {
@@ -399,6 +505,12 @@ export default function SalesRecords() {
     if (rows.length === 0) {
       alert("未能解析出有效数据行，请检查格式。\n确保第一行为表头，包含：客户姓名、产品类别、购买产品、订单金额、实收金额、订单类型、销售单位、销售人员、成交日期、参加活动");
       return;
+    }
+    const emptyCustomer = rows.filter((r) => !r.customerName).length;
+    if (emptyCustomer === rows.length) {
+      alert("已解析到数据，但「客户姓名」列全部为空。请确认表头第一列是「客户姓名」或「客户名称」。");
+    } else if (emptyCustomer > 0) {
+      console.warn(`导入预览：${emptyCustomer} 行客户姓名为空`);
     }
     setImportRows(rows);
     setImportStep("preview");
@@ -412,29 +524,34 @@ export default function SalesRecords() {
     const isCsv = fileName.endsWith(".csv");
 
     if (isExcel) {
-      // Excel 二进制文件用 xlsx 库解析
       const reader = new FileReader();
       reader.onload = (event) => {
         try {
           const data = new Uint8Array(event.target?.result as ArrayBuffer);
-          const workbook = XLSX.read(data, { type: "array" });
-          // 取第一个工作表
+          const workbook = XLSX.read(data, { type: "array", cellDates: true });
           const sheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[sheetName];
           if (!worksheet) {
             alert("未能读取到有效工作表，请检查文件内容");
             return;
           }
-          // 转为 Tab 分隔的文本（与粘贴格式统一，复用原有解析逻辑）
-          const csvText = XLSX.utils.sheet_to_txt(worksheet, { FS: "\t" });
-          setImportText(csvText);
+          // 用二维数组解析，避免 sheet_to_txt 丢列/错位导致客户姓名读不到
+          const matrix = XLSX.utils.sheet_to_json<(string | number | Date | null)[]>(worksheet, {
+            header: 1,
+            defval: "",
+            raw: false,
+          });
+          const textMatrix = matrix.map((row) =>
+            (row || []).map((cell) => cellToString(cell))
+          );
+          const tsv = textMatrix.map((r) => r.join("\t")).join("\n");
+          setImportText(tsv);
         } catch (err: any) {
           alert("Excel 文件解析失败: " + (err.message || "未知错误"));
         }
       };
       reader.readAsArrayBuffer(file);
     } else if (isCsv) {
-      // CSV 文件直接读取文本
       const reader = new FileReader();
       reader.onload = (event) => {
         const text = event.target?.result as string;
@@ -444,7 +561,6 @@ export default function SalesRecords() {
     } else {
       alert("不支持的文件格式，请上传 .xls、.xlsx 或 .csv 文件");
     }
-    // 重置 input 以便重复选择同一文件
     e.target.value = "";
   };
 
@@ -484,21 +600,51 @@ export default function SalesRecords() {
     setImporting(true);
     let successCount = 0;
     let failCount = 0;
+    let createdProductCount = 0;
+
+    // 导入过程中本地缓存：产品名 → id（含本次新建）
+    const nameToProductId = new Map<string, string>();
+    products.forEach((p) => {
+      const key = (p.name || "").trim().toLowerCase();
+      if (key) nameToProductId.set(key, p.id);
+    });
 
     for (const row of selectedRows) {
       try {
+        let productId = row.matchedProductId;
+        const productName = (row.productName || "").trim();
+        if (productName) {
+          const key = productName.toLowerCase();
+          if (productId && nameToProductId.has(key)) {
+            productId = nameToProductId.get(key)!;
+          } else if (nameToProductId.has(key)) {
+            productId = nameToProductId.get(key)!;
+          } else {
+            const created = await ensureProductByName(productName, {
+              category: row.productCategory || "",
+              unitPrice: row.totalAmount || row.orderAmount || 0,
+              description: "由销售订单自动录入",
+            });
+            if (created) {
+              productId = created.id;
+              nameToProductId.set(key, created.id);
+              createdProductCount++;
+            }
+          }
+        }
+
         await addSalesRecord({
           salesUnitId: row.matchedUnitId,
           personnelId: row.matchedPersonId,
-          productId: row.matchedProductId,
+          productId: productId || "",
           quantity: 1,
           unitPrice: row.totalAmount,
           saleDate: row.saleDate,
           remark: row.productCategory ? `产品类别: ${row.productCategory}` : "",
-          customerName: row.customerName,
+          customerName: (row.customerName || "").trim(),
           salesUnitName: row.salesUnitName,
           salesPersonName: row.salesPersonName,
-          productName: row.productName,
+          productName,
           orderAmount: row.orderAmount,
           orderType: row.orderType,
           activityName: row.activityName,
@@ -514,7 +660,10 @@ export default function SalesRecords() {
     setImportText("");
     setImportRows([]);
     setImportStep("input");
-    alert(`导入完成：成功 ${successCount} 条${failCount > 0 ? `，失败 ${failCount} 条` : ""}`);
+    const productTip = createdProductCount > 0
+      ? `\n已自动新建 ${createdProductCount} 个产品，请到「产品管理 / 产品结算」配置结算比例与销售提成。`
+      : "\n可在「产品结算」中配置各单位结算比例与人员提成。";
+    alert(`导入完成：成功 ${successCount} 条${failCount > 0 ? `，失败 ${failCount} 条` : ""}${productTip}`);
   };
 
   const openImportDialog = () => {
@@ -629,9 +778,7 @@ export default function SalesRecords() {
                       aria-label="全选"
                     />
                   </TableHead>
-                  <TableHead>来源</TableHead>
                   <TableHead>客户姓名</TableHead>
-                  <TableHead>产品类别</TableHead>
                   <TableHead>购买产品</TableHead>
                   <TableHead className="text-right">订单金额</TableHead>
                   <TableHead className="text-right">实收金额</TableHead>
@@ -641,6 +788,7 @@ export default function SalesRecords() {
                   <TableHead>成交日期</TableHead>
                   <TableHead>参加活动</TableHead>
                   <TableHead className="text-right">销售提成</TableHead>
+                  <TableHead>来源</TableHead>
                   <TableHead className="text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
@@ -660,20 +808,7 @@ export default function SalesRecords() {
                         />
                       )}
                     </TableCell>
-                    <TableCell>
-                      {record.synced ? (
-                        <Badge className="bg-blue-100 text-blue-700 text-xs">生态圈</Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-xs">手动</Badge>
-                      )}
-                    </TableCell>
                     <TableCell className="text-sm whitespace-nowrap">{record.customerName || "-"}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
-                      {(() => {
-                        const product = products.find((p) => p.id === record.productId);
-                        return product?.category || "-";
-                      })()}
-                    </TableCell>
                     <TableCell className="whitespace-nowrap">{getProductName(record)}</TableCell>
                     <TableCell className="text-right text-muted-foreground whitespace-nowrap">{record.orderAmount ? formatCurrency(record.orderAmount) : "-"}</TableCell>
                     <TableCell className="text-right font-bold text-blue-600 whitespace-nowrap">{formatCurrency(record.totalAmount)}</TableCell>
@@ -708,6 +843,13 @@ export default function SalesRecords() {
                         return commission > 0 ? formatCurrency(commission) : "-";
                       })()}
                     </TableCell>
+                    <TableCell>
+                      {record.synced ? (
+                        <Badge className="bg-blue-100 text-blue-700 text-xs">生态圈</Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-xs">手动</Badge>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right">
                       {record.synced ? (
                         <span className="text-xs text-muted-foreground">只读</span>
@@ -728,7 +870,7 @@ export default function SalesRecords() {
                 ))}
                 {filteredRecords.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={14} className="text-center py-12 text-muted-foreground">暂无数据</TableCell>
+                    <TableCell colSpan={13} className="text-center py-12 text-muted-foreground">暂无数据</TableCell>
                   </TableRow>
                 )}
               </TableBody>
@@ -869,7 +1011,7 @@ export default function SalesRecords() {
                 <p className="text-sm font-medium text-emerald-800">导入说明</p>
                 <ul className="text-xs text-emerald-700 space-y-1 list-disc list-inside">
                   <li>支持从 Excel 直接粘贴（复制单元格后粘贴到文本框），或上传 .xls / .xlsx / .csv 文件</li>
-                  <li>表头需包含以下10列（名称可略有差异，系统会自动识别）：</li>
+                  <li>表头需包含以下10列（与你的表格一致，系统会自动识别）：</li>
                 </ul>
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   {["客户姓名", "产品类别", "购买产品", "订单金额", "实收金额", "订单类型", "销售单位", "销售人员", "成交日期", "参加活动"].map((col) => (
@@ -877,7 +1019,10 @@ export default function SalesRecords() {
                   ))}
                 </div>
                 <p className="text-xs text-emerald-700 mt-2">
-                  系统会自动按名称匹配已有的销售单位、人员和产品。未匹配的记录仍可导入，但不会参与薪资计算。
+                  产品类别仅用于导入识别，列表中不展示。
+                  系统会自动按名称匹配已有的销售单位、人员和产品。
+                  <strong className="text-foreground">未匹配到的产品名将在导入时自动建档</strong>，
+                  随后可在「产品管理 / 产品结算」配置结算比例与销售提成。
                 </p>
                 <Button variant="link" size="sm" onClick={handleDownloadTemplate} className="p-0 h-auto text-emerald-700">
                   下载导入模板
@@ -954,7 +1099,6 @@ export default function SalesRecords() {
                       <TableHead className="w-10 text-center">选</TableHead>
                       <TableHead className="w-10 text-center">行</TableHead>
                       <TableHead>客户姓名</TableHead>
-                      <TableHead>产品类别</TableHead>
                       <TableHead>购买产品</TableHead>
                       <TableHead className="text-right">订单金额</TableHead>
                       <TableHead className="text-right">实收金额</TableHead>
@@ -985,11 +1129,12 @@ export default function SalesRecords() {
                           </TableCell>
                           <TableCell className="text-center text-xs text-muted-foreground">{row.rowIndex}</TableCell>
                           <TableCell className="text-sm">{row.customerName || "-"}</TableCell>
-                          <TableCell className="text-sm text-muted-foreground">{row.productCategory || "-"}</TableCell>
                           <TableCell className="text-sm">
                             {row.productName}
                             {row.productMatched ? (
                               <CheckCircle2 className="inline ml-1 h-3.5 w-3.5 text-green-500" />
+                            ) : row.productName ? (
+                              <Badge className="ml-1 bg-sky-100 text-sky-700 text-[10px]">将自动创建</Badge>
                             ) : (
                               <AlertCircle className="inline ml-1 h-3.5 w-3.5 text-red-400" />
                             )}
@@ -1034,11 +1179,11 @@ export default function SalesRecords() {
               {/* 提示 */}
               {(importStats.noMatch > 0 || importStats.partialMatched > 0) && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 text-xs text-amber-700">
-                  <p className="font-medium">部分数据未完全匹配，可能原因：</p>
+                  <p className="font-medium">部分数据未完全匹配，说明：</p>
                   <ul className="list-disc list-inside mt-1 space-y-0.5">
-                    <li>系统中尚未创建对应的销售单位/人员/产品</li>
-                    <li>名称不完全一致（建议先在对应管理页面创建）</li>
-                    <li>未匹配的记录仍可导入，但不会参与薪资提成计算</li>
+                    <li>带「将自动创建」的产品会在导入时自动进入产品管理</li>
+                    <li>销售单位/人员建议名称与系统一致，否则提成归属可能不完整</li>
+                    <li>导入后请到「产品结算」配置各单位结算比例与人员销售提成</li>
                   </ul>
                 </div>
               )}

@@ -29,15 +29,29 @@ router.post("/login", (req, res) => {
     name: user.name,
     role: user.role,
     managedUnitIds: user.managedUnitIds,
+    permissions: user.permissions,
   };
 
   const token = signToken(payload);
   res.json({ token, user: payload });
 });
 
-// GET /api/auth/me - 获取当前用户信息
+// GET /api/auth/me - 获取当前用户信息（从库刷新，保证权限最新）
 router.get("/me", authMiddleware, (req, res) => {
-  res.json(req.user);
+  const db = getDb();
+  const row = db.prepare("SELECT * FROM users WHERE id = ?").get(req.user!.id);
+  if (!row) {
+    return res.status(401).json({ error: "用户不存在" });
+  }
+  const user = rowToUser(row);
+  res.json({
+    id: user.id,
+    username: user.username,
+    name: user.name,
+    role: user.role,
+    managedUnitIds: user.managedUnitIds,
+    permissions: user.permissions,
+  });
 });
 
 // PUT /api/auth/password - 修改密码

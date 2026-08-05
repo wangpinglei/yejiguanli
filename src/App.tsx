@@ -16,10 +16,13 @@ import UserManagement from "@/pages/UserManagement";
 import ProductSettlement from "@/pages/ProductSettlement";
 import type { ReactNode } from "react";
 
-function SuperadminRoute({ children }: { children: ReactNode }) {
+function UsersManageRoute({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
-  if (user.role !== "superadmin") return <Navigate to="/" replace />;
+  const canManage =
+    user.role === "superadmin" ||
+    Boolean(user.permissions?.users?.edit || user.permissions?.users?.view);
+  if (!canManage) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
 
@@ -47,12 +50,12 @@ export default function App() {
               <Route path="profit-analysis" element={<ProfitAnalysis />} />
               <Route path="sales-battle-report" element={<SalesBattleReport />} />
               <Route path="product-settlement" element={<ProductSettlement />} />
-              <Route
+                  <Route
                 path="users"
                 element={
-                  <SuperadminRoute>
+                  <UsersManageRoute>
                     <UserManagement />
-                  </SuperadminRoute>
+                  </UsersManageRoute>
                 }
               />
             </Route>

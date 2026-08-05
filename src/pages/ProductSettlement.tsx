@@ -46,7 +46,7 @@ const EMPTY_PERSON_COMMISSION = {
 
 export default function ProductSettlement() {
   const {
-    products, salesRecords,
+    products, allSalesRecords: salesRecords,
     unitProductSettlements: upsList,
     productPersonCommissions: ppcList,
     personnel,
@@ -159,7 +159,8 @@ export default function ProductSettlement() {
     const ups = findUps(productId, unitId);
     setSettleForm({
       settlementType: ups?.settlementType || "percentage",
-      settlementRate: ups?.settlementRate || 0,
+      // 未配置时默认 100%，表示按实收全额结算
+      settlementRate: ups?.settlementRate ?? 100,
       settlementAmount: ups?.settlementAmount || 0,
       note: ups?.note || "",
     });
@@ -183,9 +184,11 @@ export default function ProductSettlement() {
     }
   };
 
-  const handleSettleClear = async () => {
-    if (!editKey) return;
-    const ups = findUps(editKey.productId, editKey.unitId);
+  const handleSettleClear = async (productId?: string, unitId?: string) => {
+    const pid = productId || editKey?.productId;
+    const uid = unitId || editKey?.unitId;
+    if (!pid || !uid) return;
+    const ups = findUps(pid, uid);
     if (ups?.id) {
       try { await deleteUnitProductSettlement(ups.id); }
       catch (error: any) { alert("清除失败: " + (error.message || "未知错误")); }
@@ -259,7 +262,7 @@ export default function ProductSettlement() {
     <div>
       <PageHeader
         title="产品结算比例（按销售单位）"
-        description="配置每个产品在各销售单位的结算方式/比例，以及各销售人员在不同产品上的管理提成和个人提成。"
+        description="先导入销售订单自动生成产品，再在此配置：① 各销售单位结算比例 ② 各销售人员管理/个人提成。"
         action={
           <Select value={selectedMonth} onValueChange={setSelectedMonth}>
             <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
@@ -270,6 +273,13 @@ export default function ProductSettlement() {
         }
       />
 
+      {products.length === 0 && (
+        <Card className="mb-6 border-dashed">
+          <CardContent className="p-6 text-sm text-muted-foreground">
+            暂无产品。请先到「销售记录」导入/同步销售订单，系统会按产品名称自动建档，再回到本页配置结算比例与销售提成。
+          </CardContent>
+        </Card>
+      )}
       {/* 汇总卡片 */}
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
@@ -396,7 +406,11 @@ export default function ProductSettlement() {
                                     <Pencil className="h-4 w-4" />
                                   </Button>
                                   {ups?.id && (
-                                    <Button variant="ghost" size="icon" onClick={() => { setEditKey({ productId: product.id, unitId: unit.id }); handleSettleClear(); }}>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => handleSettleClear(product.id, unit.id)}
+                                    >
                                       <Trash2 className="h-4 w-4 text-destructive" />
                                     </Button>
                                   )}
@@ -419,7 +433,11 @@ export default function ProductSettlement() {
           );
         })}
         {filteredProducts.length === 0 && (
-          <Card><CardContent className="py-12 text-center text-muted-foreground">暂无产品，请先在「产品管理」中新增。</CardContent></Card>
+          <Card>
+            <CardContent className="py-12 text-center text-muted-foreground text-sm">
+              暂无产品。请先到「销售记录」导入/同步销售订单，产品会按名称自动出现后再配置结算比例与提成。
+            </CardContent>
+          </Card>
         )}
       </div>
 
