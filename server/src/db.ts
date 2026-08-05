@@ -20,6 +20,24 @@ export function getDb(): any {
   return db;
 }
 
+/** node:sqlite 无 better-sqlite3 的 db.transaction，用 BEGIN/COMMIT 模拟 */
+export function runInTransaction<T>(fn: () => T): T {
+  const database = getDb();
+  database.exec("BEGIN");
+  try {
+    const result = fn();
+    database.exec("COMMIT");
+    return result;
+  } catch (err) {
+    try {
+      database.exec("ROLLBACK");
+    } catch {
+      // ignore rollback errors
+    }
+    throw err;
+  }
+}
+
 function ensureColumns(table: string, cols: Array<{ name: string; ddl: string }>) {
   const existing = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
   const names = new Set(existing.map((c) => c.name));

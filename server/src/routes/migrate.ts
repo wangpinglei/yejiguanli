@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getDb } from "../db";
+import { getDb, runInTransaction } from "../db";
 import { authMiddleware } from "../auth";
 import { requireRole } from "../middleware";
 
@@ -26,7 +26,8 @@ router.post("/", (req, res) => {
   const stats: Record<string, number> = {};
 
   const db = getDb();
-  const migrateAll = db.transaction(() => {
+  try {
+    runInTransaction(() => {
     const salesUnits = body.salesUnits || [];
     stats.salesUnits = 0;
     for (const unit of salesUnits) {
@@ -305,10 +306,8 @@ router.post("/", (req, res) => {
         args: [r.type || "cost_change", r.title || "", r.message || "", r.timestamp || new Date().toISOString(), r.read ? 1 : 0, r.id],
       })
     );
-  });
+    });
 
-  try {
-    migrateAll();
     res.json({ message: "数据迁移成功", stats });
   } catch (err: any) {
     res.status(500).json({ error: "迁移失败: " + err.message, stats });

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import {
-  getDb, generateId,
+  getDb, generateId, runInTransaction,
   rowToIncomeRecord, rowToRevenueSettlement, rowToUnitProductSettlement,
   rowToProductPersonCommission, rowToCostChangeLog, rowToNotification,
   rowToMonthlyAdjustment, rowToPerformanceTarget, rowToPositionGroupLabel,
@@ -168,7 +168,7 @@ router.post("/unit-product-settlements/batch", requireEditPermission, (req, res)
   const items = Array.isArray(req.body) ? req.body : (req.body.items || []);
   const db = getDb();
   const results: any[] = [];
-  const tx = db.transaction(() => {
+  runInTransaction(() => {
     for (const item of items) {
       const { salesUnitId, productId, settlementType, settlementRate, settlementAmount, note } = item;
       if (!salesUnitId || !productId) continue;
@@ -193,7 +193,6 @@ router.post("/unit-product-settlements/batch", requireEditPermission, (req, res)
       }
     }
   });
-  tx();
   res.json(results);
 });
 
@@ -386,7 +385,7 @@ router.post("/performance-targets/batch", requireEditPermission, (req, res) => {
   const items = Array.isArray(req.body) ? req.body : (req.body.items || []);
   const results: any[] = [];
   const db = getDb();
-  const tx = db.transaction(() => {
+  runInTransaction(() => {
     for (const b of items) {
       if (!b.salesUnitId || !b.yearMonth) continue;
       const personnelId = b.personnelId || null;
@@ -414,7 +413,6 @@ router.post("/performance-targets/batch", requireEditPermission, (req, res) => {
       }
     }
   });
-  tx();
   res.json(results);
 });
 
