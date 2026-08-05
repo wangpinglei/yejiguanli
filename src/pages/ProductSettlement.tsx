@@ -7,7 +7,7 @@ import { formatCurrency } from "@/lib/format";
 import { filterByMonth } from "@/lib/salary";
 import type { Product, SalesUnit, UnitProductSettlement, ProductPersonCommission, Personnel } from "@/types";
 import {
-  Building2, Package, Pencil, Trash2, Search, Calculator, Users, UserCog,
+  Building2, Package, Pencil, Trash2, Search, Calculator, Users, UserCog, Layers,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -52,6 +52,7 @@ export default function ProductSettlement() {
     personnel,
     upsertUnitProductSettlement, deleteUnitProductSettlement,
     upsertProductPersonCommission, deleteProductPersonCommission,
+    batchUpsertUnitProductSettlements,
   } = useData();
   const {
     visibleSalesUnits: units, visibleUnitProductSettlements: _upsVisible,
@@ -76,6 +77,10 @@ export default function ProductSettlement() {
     settlementAmount: 0,
     note: "",
   });
+
+  // ---- 批量结算：null=关闭；'all'=当前列表全部产品；string=单个产品 id ----
+  const [batchSettleTarget, setBatchSettleTarget] = useState<string | "all" | null>(null);
+  const [batchSaving, setBatchSaving] = useState(false);
 
   // ---- 人员提成编辑弹窗状态 ----
   const [ppcEditKey, setPpcEditKey] = useState<{ productId: string; unitId: string; personnelId: string } | null>(null);
@@ -210,6 +215,50 @@ export default function ProductSettlement() {
     setEditKey(null);
   };
 
+  const openBatchSettle = (target: string | "all") => {
+    setSettleForm({
+      settlementType: "percentage",
+      settlementRate: 100,
+      settlementAmount: 0,
+      note: "",
+    });
+    setBatchSettleTarget(target);
+  };
+
+  const handleBatchSettleSave = async () => {
+    if (!batchSettleTarget) return;
+    const productIds =
+      batchSettleTarget === "all"
+        ? filteredProducts.map((p) => p.id)
+        : [batchSettleTarget];
+    if (productIds.length === 0 || units.length === 0) {
+      alert("没有可配置的产品或销售单位");
+      return;
+    }
+    const items = productIds.flatMap((productId) =>
+      units.map((unit) => ({
+        salesUnitId: unit.id,
+        productId,
+        settlementType: settleForm.settlementType,
+        settlementRate: settleForm.settlementRate || 0,
+        settlementAmount: settleForm.settlementAmount || 0,
+        note: settleForm.note,
+      }))
+    );
+    if (!confirm(`将把相同结算规则应用到 ${productIds.length} 个产品 × ${units.length} 个单位（共 ${items.length} 条），是否继续？`)) {
+      return;
+    }
+    setBatchSaving(true);
+    try {
+      await batchUpsertUnitProductSettlements(items);
+      setBatchSettleTarget(null);
+    } catch (error: any) {
+      alert("批量保存失败: " + (error.message || "未知错误"));
+    } finally {
+      setBatchSaving(false);
+    }
+  };
+
   // ---- 人员提成编辑 ----
   const openPpcEdit = (productId: string, unitId: string, personnelId: string) => {
     const ppc = findPpc(productId, unitId, personnelId);
@@ -276,7 +325,7 @@ export default function ProductSettlement() {
     <div>
       <PageHeader
         title="结算与提成"
-        description="产品来自销售记录。在此配置：① 单位×产品结算比例 ② 人员管理/个人提成。本月金额仅作预览（自动部署验证）。"
+        description="产品来自销售记录。可按单位单独配置，或一键批量设置全部单位的结算比例；人员提成可提前按单位内在职人员配置。"
         action={
           <Select value={selectedMonth} onValueChange={setSelectedMonth}>
             <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
@@ -344,12 +393,18 @@ export default function ProductSettlement() {
       </div>
 
       {/* 搜索 */}
-      <div className="mb-4 flex items-center gap-3">
-        <div className="relative flex-1 max-w-sm">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 max-w-sm min-w-[200px]">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input placeholder="搜索产品名称或分类..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
         </div>
         <Badge variant="secondary">共 {filteredProducts.length} 个产品</Badge>
+        {canEdit && filteredProducts.length > 0 && units.length > 0 && (
+          <Button variant="outline" size="sm" onClick={() => openBatchSettle("all")}>
+            <Layers className="mr-2 h-4 w-4" />
+            批量设置全部产品×单位
+          </Button>
+        )}
       </div>
 
       {/* ==================== 第一部分：产品 × 单位 结算配置 ==================== */}
@@ -363,15 +418,26 @@ export default function ProductSettlement() {
                   <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
                     <Package className="h-4 w-4 text-primary" />
                   </div>
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <p className="font-medium">{product.name}</p>
                     <p className="text-xs text-muted-foreground">
                       {product.category || "未分类"}
                       <span className="ml-2 text-muted-foreground">
-                        · {productUnits.length} 个有销售的单位
+                        · {productUnits.length} 个销售单位
                       </span>
                     </p>
                   </div>
+                  {canEdit && productUnits.length > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0"
+                      onClick={() => openBatchSettle(product.id)}
+                    >
+                      <Layers className="mr-1.5 h-3.5 w-3.5" />
+                      批量设置全部单位
+                    </Button>
+                  )}
                 </div>
                 <div className="overflow-x-auto">
                   <Table>
@@ -625,6 +691,98 @@ export default function ProductSettlement() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditKey(null)}>取消</Button>
             <Button onClick={handleSettleSave}>保存</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ===== 批量结算弹窗 ===== */}
+      <Dialog open={!!batchSettleTarget} onOpenChange={(open) => !open && !batchSaving && setBatchSettleTarget(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>一键批量设置结算</DialogTitle>
+          </DialogHeader>
+          <div className="mb-2 rounded-lg bg-cyan-50 border border-cyan-200 px-3 py-2 text-sm space-y-1">
+            {batchSettleTarget === "all" ? (
+              <>
+                <p>将应用到当前列表 <strong>{filteredProducts.length}</strong> 个产品</p>
+                <p>× 全部 <strong>{units.length}</strong> 个销售单位</p>
+                <p className="text-xs text-muted-foreground">
+                  共 {filteredProducts.length * units.length} 条配置（覆盖已有规则）
+                </p>
+              </>
+            ) : (
+              <>
+                <p>
+                  产品：
+                  <strong>
+                    {products.find((p) => p.id === batchSettleTarget)?.name || "-"}
+                  </strong>
+                </p>
+                <p>× 全部 <strong>{units.length}</strong> 个销售单位（覆盖已有规则）</p>
+              </>
+            )}
+          </div>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>结算方式</Label>
+              <Select
+                value={settleForm.settlementType}
+                onValueChange={(v) => setSettleForm({
+                  ...settleForm,
+                  settlementType: v as "percentage" | "fixed",
+                })}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="percentage">按售价百分比</SelectItem>
+                  <SelectItem value="fixed">按件固定金额</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {settleForm.settlementType === "percentage" ? (
+              <div className="space-y-2">
+                <Label>结算比例 (%)</Label>
+                <Input
+                  type="number"
+                  step="0.1"
+                  value={settleForm.settlementRate}
+                  onChange={(e) => setSettleForm({
+                    ...settleForm,
+                    settlementRate: Number(e.target.value),
+                  })}
+                  placeholder="如：80"
+                />
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label>每件结算金额 (¥)</Label>
+                <Input
+                  type="number"
+                  value={settleForm.settlementAmount}
+                  onChange={(e) => setSettleForm({
+                    ...settleForm,
+                    settlementAmount: Number(e.target.value),
+                  })}
+                  placeholder="如：500"
+                />
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label>结算说明</Label>
+              <Input
+                value={settleForm.note}
+                onChange={(e) => setSettleForm({ ...settleForm, note: e.target.value })}
+                placeholder="可选"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" disabled={batchSaving} onClick={() => setBatchSettleTarget(null)}>
+              取消
+            </Button>
+            <Button disabled={batchSaving} onClick={handleBatchSettleSave}>
+              {batchSaving ? "保存中…" : "一键应用"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
