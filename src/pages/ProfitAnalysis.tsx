@@ -175,7 +175,7 @@ export default function ProfitAnalysis() {
   const costStructure = useMemo(() => {
     const catMap = new Map<string, number>();
     filteredCosts.forEach((c) => {
-      c.items.forEach((item) => {
+      (c.items || []).forEach((item) => {
         catMap.set(item.category, (catMap.get(item.category) || 0) + item.amount);
       });
     });

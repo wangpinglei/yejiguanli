@@ -16,6 +16,7 @@ import {
   Bell,
   CheckCheck,
   Swords,
+  Scale,
 } from "lucide-react";
 import { useAuth, ROLE_LABELS } from "@/context/AuthContext";
 import { useData } from "@/context/DataContext";
@@ -49,6 +50,7 @@ const navItems: NavItem[] = [
   { path: "/cost-management", label: "成本管理", icon: Wallet },
   { path: "/profit-analysis", label: "收支利润", icon: TrendingUp },
   { path: "/sales-battle-report", label: "单位战报", icon: Swords },
+  { path: "/product-settlement", label: "产品结算比例", icon: Scale },
   { path: "/users", label: "用户管理", icon: ShieldCheck, superadminOnly: true },
 ];
 

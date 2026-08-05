@@ -113,7 +113,7 @@ const RANGE_LABELS: Record<SalesRange, string> = {
 };
 
 export default function PersonnelPage() {
-  const { addPersonnel, updatePersonnel, deletePersonnel, products, monthlyAdjustments } = useData();
+  const { addPersonnel, updatePersonnel, deletePersonnel, products, monthlyAdjustments, productPersonCommissions } = useData();
   const { visiblePersonnel: personnel, visibleSalesUnits: salesUnits, visibleSalesRecords: salesRecords, canEditPersonnel, isReadOnly, role } = usePermissions();
   const [search, setSearch] = useState("");
   const [filterUnit, setFilterUnit] = useState("all");
@@ -236,8 +236,8 @@ export default function PersonnelPage() {
     const adj = monthlyAdjustments.find(
       (a) => a.personnelId === salaryDetailPerson.id && a.yearMonth === salaryDetailMonth
     );
-    return calculateMonthlySalary(salaryDetailPerson, salesRecords, products, salaryDetailMonth, adj);
-  }, [salaryDetailPerson, salaryDetailMonth, salesRecords, products, monthlyAdjustments]);
+    return calculateMonthlySalary(salaryDetailPerson, salesRecords, products, salaryDetailMonth, adj, productPersonCommissions);
+  }, [salaryDetailPerson, salaryDetailMonth, salesRecords, products, monthlyAdjustments, productPersonCommissions]);
 
   // 月度销售额
   const monthlyPersonnelSales = useMemo(() => {
@@ -562,57 +562,6 @@ export default function PersonnelPage() {
                     </div>
                   </div>
 
-                  {/* 管理提成 */}
-                  <div className="space-y-2 rounded-md bg-muted/30 p-3">
-                    <div className="flex items-center gap-2">
-                      <Badge className="bg-emerald-100 text-emerald-700">管理提成</Badge>
-                      <span className="text-xs text-muted-foreground">按团队销售额计算</span>
-                    </div>
-                    <div className="grid grid-cols-3 gap-3">
-                      <div className="space-y-1">
-                        <Label className="text-xs">提成比例 (%)</Label>
-                        <Input type="number" step="0.1" value={form.salary.managementCommissionRate} onChange={(e) => updateSalary("managementCommissionRate", Number(e.target.value))} placeholder="如：2" />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">起算门槛 (¥)</Label>
-                        <Input type="number" value={form.salary.managementCommissionThreshold} onChange={(e) => updateSalary("managementCommissionThreshold", Number(e.target.value))} placeholder="如：100000" />
-                        <p className="text-[10px] text-muted-foreground">团队销售额超过此值才开始计算</p>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">发放条件</Label>
-                        <Input value={form.salary.managementCommissionCondition} onChange={(e) => updateSalary("managementCommissionCondition", e.target.value)} placeholder="如：团队达标后发放" />
-                      </div>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      计算公式：(团队销售额 - 起算门槛) × 提成比例%
-                    </p>
-                  </div>
-
-                  {/* 个人提成 */}
-                  <div className="space-y-2 rounded-md bg-muted/30 p-3">
-                    <div className="flex items-center gap-2">
-                      <Badge className="bg-orange-100 text-orange-700">个人提成</Badge>
-                      <span className="text-xs text-muted-foreground">按个人销售额计算</span>
-                    </div>
-                    <div className="grid grid-cols-3 gap-3">
-                      <div className="space-y-1">
-                        <Label className="text-xs">提成比例 (%)</Label>
-                        <Input type="number" step="0.1" value={form.salary.personalCommissionRate} onChange={(e) => updateSalary("personalCommissionRate", Number(e.target.value))} placeholder="如：3" />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">起算门槛 (¥)</Label>
-                        <Input type="number" value={form.salary.personalCommissionThreshold} onChange={(e) => updateSalary("personalCommissionThreshold", Number(e.target.value))} placeholder="如：50000" />
-                        <p className="text-[10px] text-muted-foreground">个人销售额超过此值才开始计算</p>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">发放条件</Label>
-                        <Input value={form.salary.personalCommissionCondition} onChange={(e) => updateSalary("personalCommissionCondition", e.target.value)} placeholder="如：个人达标后发放" />
-                      </div>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      计算公式：(个人销售额 - 起算门槛) × 提成比例%
-                    </p>
-                  </div>
                 </div>
 
                 {/* 社保公积金 */}

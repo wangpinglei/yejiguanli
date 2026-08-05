@@ -13,6 +13,7 @@ import CostManagement from "@/pages/CostManagement";
 import ProfitAnalysis from "@/pages/ProfitAnalysis";
 import SalesBattleReport from "@/pages/SalesBattleReport";
 import UserManagement from "@/pages/UserManagement";
+import ProductSettlement from "@/pages/ProductSettlement";
 import type { ReactNode } from "react";
 
 function SuperadminRoute({ children }: { children: ReactNode }) {
@@ -45,6 +46,7 @@ export default function App() {
               <Route path="cost-management" element={<CostManagement />} />
               <Route path="profit-analysis" element={<ProfitAnalysis />} />
               <Route path="sales-battle-report" element={<SalesBattleReport />} />
+              <Route path="product-settlement" element={<ProductSettlement />} />
               <Route
                 path="users"
                 element={

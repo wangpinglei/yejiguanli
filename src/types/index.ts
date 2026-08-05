@@ -67,6 +67,7 @@ export interface Product {
   id: string;
   name: string;
   category: string;
+  salesUnitId?: string; // 默认归属销售单位（编辑产品时设定，用于结算分组与默认匹配）
   unitPrice: number;
   // 成本设置
   costType: "percentage" | "fixed"; // 成本方式：按售价百分比 / 固定金额
@@ -203,6 +204,24 @@ export interface UnitProductSettlement {
   settlementRate?: number; // 结算比例（%），当 settlementType 为 percentage 时生效
   settlementAmount?: number; // 每件结算金额（¥），当 settlementType 为 fixed 时生效
   note?: string; // 结算说明
+  createdAt: string;
+  updatedAt?: string;
+}
+
+// 单位×产品×人员提成设置（每个销售人员在不同产品上的管理/个人提成比例）
+export interface ProductPersonCommission {
+  id: string;
+  salesUnitId: string;
+  productId: string;
+  personnelId: string;
+  // 管理提成（按团队销售额计算）
+  managementCommissionRate: number; // %
+  managementCommissionThreshold: number; // 起算门槛 ¥
+  managementCommissionCondition: string; // 条件描述
+  // 个人提成（按个人销售额计算）
+  personalCommissionRate: number; // %
+  personalCommissionThreshold: number; // 起算门槛 ¥
+  personalCommissionCondition: string; // 条件描述
   createdAt: string;
   updatedAt?: string;
 }

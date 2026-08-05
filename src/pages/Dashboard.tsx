@@ -152,7 +152,7 @@ export default function Dashboard() {
   const costByCategory = useMemo(() => {
     const catMap = new Map<string, number>();
     monthlyCosts.forEach((c) => {
-      c.items.forEach((item) => {
+      (c.items || []).forEach((item) => {
         catMap.set(item.category, (catMap.get(item.category) || 0) + item.amount);
       });
     });
@@ -180,7 +180,7 @@ export default function Dashboard() {
   // 最近销售记录（按月度）
   const recentSales = useMemo(() => {
     return [...monthlySales]
-      .sort((a, b) => b.saleDate.localeCompare(a.saleDate))
+      .sort((a, b) => (b.saleDate || "").localeCompare(a.saleDate || ""))
       .slice(0, 6);
   }, [monthlySales]);
 

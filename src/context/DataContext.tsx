@@ -22,6 +22,7 @@ import type {
   IncomeRecord,
   RevenueSettlement,
   UnitProductSettlement,
+  ProductPersonCommission,
 } from "@/types";
 
 // ===================== Context 定义 =====================
@@ -37,6 +38,7 @@ interface DataContextType {
   incomeRecords: IncomeRecord[];
   revenueSettlements: RevenueSettlement[];
   unitProductSettlements: UnitProductSettlement[];
+  productPersonCommissions: ProductPersonCommission[];
   costChangeLogs: CostChangeLog[];
   notifications: AppNotification[];
   monthlyAdjustments: MonthlyAdjustment[];
@@ -81,6 +83,10 @@ interface DataContextType {
   batchUpsertUnitProductSettlements: (items: Omit<UnitProductSettlement, "id" | "createdAt">[]) => Promise<void>;
   deleteUnitProductSettlement: (id: string) => Promise<void>;
 
+  // ProductPersonCommission CRUD（按单位×产品×人员提成设置）
+  upsertProductPersonCommission: (c: Omit<ProductPersonCommission, "id" | "createdAt">) => Promise<void>;
+  deleteProductPersonCommission: (id: string) => Promise<void>;
+
   // MonthlyAdjustment CRUD
   upsertMonthlyAdjustment: (a: Omit<MonthlyAdjustment, "id" | "createdAt">) => Promise<void>;
   deleteMonthlyAdjustment: (id: string) => Promise<void>;
@@ -120,6 +126,7 @@ const KEYS = {
   incomeRecords: "pm5_incomeRecords",
   revenueSettlements: "pm5_revenueSettlements",
   unitProductSettlements: "pm5_unitProductSettlements",
+  productPersonCommissions: "pm5_productPersonCommissions",
   changeLogs: "pm5_costChangeLogs",
   notifications: "pm5_notifications",
   monthlyAdjustments: "pm5_monthlyAdjustments",
@@ -153,6 +160,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [incomeRecords, setIncomeRecords] = useState<IncomeRecord[]>([]);
   const [revenueSettlements, setRevenueSettlements] = useState<RevenueSettlement[]>([]);
   const [unitProductSettlements, setUnitProductSettlements] = useState<UnitProductSettlement[]>([]);
+  const [productPersonCommissions, setProductPersonCommissions] = useState<ProductPersonCommission[]>([]);
   const [costChangeLogs, setCostChangeLogs] = useState<CostChangeLog[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [monthlyAdjustments, setMonthlyAdjustments] = useState<MonthlyAdjustment[]>([]);
@@ -171,6 +179,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setIncomeRecords(load(KEYS.incomeRecords, []));
     setRevenueSettlements(load(KEYS.revenueSettlements, []));
     setUnitProductSettlements(load(KEYS.unitProductSettlements, []));
+    setProductPersonCommissions(load(KEYS.productPersonCommissions, []));
     setCostChangeLogs(load(KEYS.changeLogs, []));
     setNotifications(load(KEYS.notifications, []));
     setMonthlyAdjustments(load(KEYS.monthlyAdjustments, []));
@@ -701,6 +710,39 @@ export function DataProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // ===================== ProductPersonCommission CRUD =====================
+  const upsertProductPersonCommission = useCallback(async (c: Omit<ProductPersonCommission, "id" | "createdAt">) => {
+    setProductPersonCommissions((prev) => {
+      const existingIdx = prev.findIndex(
+        (x) => x.salesUnitId === c.salesUnitId && x.productId === c.productId && x.personnelId === c.personnelId
+      );
+      let updated: ProductPersonCommission[];
+      const now = new Date().toISOString();
+      if (existingIdx >= 0) {
+        updated = prev.map((x) =>
+          x.id === prev[existingIdx].id ? { ...x, ...c, updatedAt: now } : x
+        );
+      } else {
+        const newRecord: ProductPersonCommission = {
+          ...c,
+          id: genId("ppc"),
+          createdAt: now,
+        };
+        updated = [...prev, newRecord];
+      }
+      save(KEYS.productPersonCommissions, updated);
+      return updated;
+    });
+  }, []);
+
+  const deleteProductPersonCommission = useCallback(async (id: string) => {
+    setProductPersonCommissions((prev) => {
+      const updated = prev.filter((x) => x.id !== id);
+      save(KEYS.productPersonCommissions, updated);
+      return updated;
+    });
+  }, []);
+
   // ===================== MonthlyAdjustment CRUD =====================
   const upsertMonthlyAdjustment = useCallback(async (a: Omit<MonthlyAdjustment, "id" | "createdAt">) => {
     setMonthlyAdjustments((prev) => {
@@ -877,6 +919,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setIncomeRecords(load(KEYS.incomeRecords, []));
     setRevenueSettlements(load(KEYS.revenueSettlements, []));
     setUnitProductSettlements(load(KEYS.unitProductSettlements, []));
+    setProductPersonCommissions(load(KEYS.productPersonCommissions, []));
     setCostChangeLogs(load(KEYS.changeLogs, []));
     setNotifications(load(KEYS.notifications, []));
     setMonthlyAdjustments(load(KEYS.monthlyAdjustments, []));
@@ -927,6 +970,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
         upsertUnitProductSettlement,
         batchUpsertUnitProductSettlements,
         deleteUnitProductSettlement,
+        productPersonCommissions,
+        upsertProductPersonCommission,
+        deleteProductPersonCommission,
         upsertMonthlyAdjustment,
         deleteMonthlyAdjustment,
         upsertPerformanceTarget,

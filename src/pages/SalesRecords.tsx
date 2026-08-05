@@ -122,6 +122,9 @@ export default function SalesRecords() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<SalesRecord | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  // 批量删除
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
 
   // 批量导入状态
   const [importOpen, setImportOpen] = useState(false);
@@ -162,12 +165,17 @@ export default function SalesRecords() {
         const matchSync = filterSync === "all" || (filterSync === "synced" ? s.synced : !s.synced);
         return matchSearch && matchUnit && matchPerson && matchSync;
       })
-      .sort((a, b) => b.saleDate.localeCompare(a.saleDate));
+      .sort((a, b) => (b.saleDate || "").localeCompare(a.saleDate || ""));
   }, [salesRecords, personnel, products, search, filterUnit, filterPerson, filterSync]);
 
   // 统计
   const syncedCount = useMemo(() => salesRecords.filter((s) => s.synced).length, [salesRecords]);
   const manualCount = useMemo(() => salesRecords.filter((s) => !s.synced).length, [salesRecords]);
+
+  // 可批量删除的记录（同步记录只读，不可删）
+  const selectableRecords = useMemo(() => filteredRecords.filter((s) => !s.synced), [filteredRecords]);
+  const allSelected = selectableRecords.length > 0 && selectableRecords.every((s) => selectedIds.has(s.id));
+  const someSelected = selectableRecords.some((s) => selectedIds.has(s.id));
 
   // 根据筛选单位过滤人员
   const availablePersonnel = useMemo(() => {
@@ -264,6 +272,37 @@ export default function SalesRecords() {
       } catch (error: any) {
         alert("删除失败: " + (error.message || "未知错误"));
       }
+    }
+  };
+
+  // 批量选择
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const toggleSelectAll = (select: boolean) => {
+    setSelectedIds(select ? new Set(selectableRecords.map((s) => s.id)) : new Set());
+  };
+  const clearSelection = () => setSelectedIds(new Set());
+
+  // 批量删除（同步记录跳过）
+  const handleBatchDelete = async () => {
+    try {
+      const ids = Array.from(selectedIds).filter((id) => {
+        const r = salesRecords.find((s) => s.id === id);
+        return r && !r.synced;
+      });
+      for (const id of ids) {
+        await deleteSalesRecord(id);
+      }
+      clearSelection();
+      setBatchDeleteOpen(false);
+    } catch (error: any) {
+      alert("批量删除失败: " + (error.message || "未知错误"));
     }
   };
 
@@ -505,6 +544,11 @@ export default function SalesRecords() {
         description="记录每笔销售：销售人员、销售产品、销售时间与金额（支持生态圈订单同步）"
         action={
           <div className="flex gap-2">
+            {canEditSales && !isReadOnly && selectedIds.size > 0 && (
+              <Button variant="destructive" onClick={() => setBatchDeleteOpen(true)}>
+                <Trash2 className="mr-2 h-4 w-4" />批量删除 ({selectedIds.size})
+              </Button>
+            )}
             <Button variant="outline" onClick={handleSyncRefresh} disabled={syncedLoading}>
               <RefreshCw className={`mr-2 h-4 w-4 ${syncedLoading ? "animate-spin" : ""}`} />
               {syncedLoading ? "同步中..." : "刷新同步"}
@@ -575,6 +619,16 @@ export default function SalesRecords() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10 text-center">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      ref={(el) => { if (el) el.indeterminate = someSelected && !allSelected; }}
+                      onChange={(e) => toggleSelectAll(e.target.checked)}
+                      className="h-4 w-4 cursor-pointer"
+                      aria-label="全选"
+                    />
+                  </TableHead>
                   <TableHead>来源</TableHead>
                   <TableHead>客户姓名</TableHead>
                   <TableHead>产品类别</TableHead>
@@ -593,6 +647,19 @@ export default function SalesRecords() {
               <TableBody>
                 {filteredRecords.map((record) => (
                   <TableRow key={record.id} className={record.synced ? "bg-blue-50/30" : ""}>
+                    <TableCell className="text-center">
+                      {record.synced ? (
+                        <span className="text-xs text-muted-foreground">只读</span>
+                      ) : (
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(record.id)}
+                          onChange={() => toggleSelect(record.id)}
+                          className="h-4 w-4 cursor-pointer"
+                          aria-label="选择该行"
+                        />
+                      )}
+                    </TableCell>
                     <TableCell>
                       {record.synced ? (
                         <Badge className="bg-blue-100 text-blue-700 text-xs">生态圈</Badge>
@@ -661,7 +728,7 @@ export default function SalesRecords() {
                 ))}
                 {filteredRecords.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={13} className="text-center py-12 text-muted-foreground">暂无数据</TableCell>
+                    <TableCell colSpan={14} className="text-center py-12 text-muted-foreground">暂无数据</TableCell>
                   </TableRow>
                 )}
               </TableBody>
@@ -1011,6 +1078,22 @@ export default function SalesRecords() {
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">确认删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 批量删除确认 */}
+      <AlertDialog open={batchDeleteOpen} onOpenChange={(open) => !open && setBatchDeleteOpen(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认批量删除</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定要删除选中的 {selectedIds.size} 条销售记录吗？此操作不可撤销。（生态圈同步记录不可删除）
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={handleBatchDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">确认删除</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

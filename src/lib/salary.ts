@@ -1,4 +1,4 @@
-import type { SalaryStructure, SalesRecord, Personnel, Product, MonthlyAdjustment } from "@/types";
+import type { SalaryStructure, SalesRecord, Personnel, Product, MonthlyAdjustment, ProductPersonCommission } from "@/types";
 
 // 每月法定计薪天数（中国劳动法标准）
 export const MONTHLY_WORK_DAYS = 21.75;
@@ -24,7 +24,7 @@ export const EMPTY_SALARY: SalaryStructure = {
  */
 export function filterByMonth(records: SalesRecord[], yearMonth?: string): SalesRecord[] {
   if (!yearMonth) return records;
-  return records.filter((s) => s.saleDate.startsWith(yearMonth));
+  return records.filter((s) => (s.saleDate || "").startsWith(yearMonth));
 }
 
 /**
@@ -52,7 +52,7 @@ export function getTeamSales(
 }
 
 /**
- * 计算管理提成金额
+ * 计算管理提成金额（原始，基于人员默认薪资结构）
  * = max(0, 团队销售额 - 起算门槛) x 管理提成比例 / 100
  */
 export function calcManagementCommission(
@@ -67,7 +67,7 @@ export function calcManagementCommission(
 }
 
 /**
- * 计算个人提成金额
+ * 计算个人提成金额（原始，基于人员默认薪资结构）
  * = max(0, 个人销售额 - 起算门槛) x 个人提成比例 / 100
  */
 export function calcPersonalCommission(
@@ -79,6 +79,97 @@ export function calcPersonalCommission(
     (personalSales - salary.personalCommissionThreshold) *
     (salary.personalCommissionRate / 100)
   );
+}
+
+/**
+ * 按产品逐个计算管理提成（优先使用产品级配置，fallback 到默认薪资）
+ * 遍历该人员本月有销售记录的每个产品：
+ *   - 若存在 ProductPersonConfig（单位×产品×人员），用该产品的专属比例/门槛
+ *   - 否则 fallback 到人员默认 SalaryStructure 的统一设置
+ */
+export function calcManagementCommissionByProduct(
+  person: Personnel,
+  monthlyRecords: SalesRecord[],
+  _products: Product[],
+  ppcList: ProductPersonCommission[]
+): number {
+  const s = person.salary || EMPTY_SALARY;
+  // 找出该人员本月涉及的所有产品 ID
+  const productIds = new Set(monthlyRecords.filter((r) => r.personnelId === person.id).map((r) => r.productId));
+  // 也加上所有产品（用于计算团队销售额中各产品的占比）
+  // const allProductIds = new Set(monthlyRecords.map((r) => r.productId));
+
+  let totalMgmt = 0;
+
+  // 对每个有专属配置的产品，用产品级参数计算
+  const configuredProducts = new Set<string>();
+  ppcList
+    .filter((ppc) => ppc.personnelId === person.id && ppc.salesUnitId === person.salesUnitId)
+    .forEach((ppc) => {
+      if (!productIds.has(ppc.productId)) return; // 该人本月没卖这个产品
+      configuredProducts.add(ppc.productId);
+      // 管理提成：基于该产品在团队中的销售额
+      const productTeamSales = monthlyRecords
+        .filter((r) => r.productId === ppc.productId && r.salesUnitId === person.salesUnitId)
+        .reduce((sum, r) => sum + r.totalAmount, 0);
+      if (productTeamSales > (ppc.managementCommissionThreshold || 0)) {
+        totalMgmt += (productTeamSales - ppc.managementCommissionThreshold) * (ppc.managementCommissionRate / 100);
+      }
+    });
+
+  // 对于没有专属配置的产品，用默认薪资结构的统一参数（按剩余团队销售额计算）
+  const unconfiguredTeamSales = monthlyRecords
+    .filter((r) => !configuredProducts.has(r.productId) && r.salesUnitId === person.salesUnitId)
+    .reduce((sum, r) => sum + r.totalAmount, 0);
+  if (unconfiguredTeamSales > (s.managementCommissionThreshold || 0) && (s.managementCommissionRate || 0) > 0) {
+    totalMgmt += (unconfiguredTeamSales - s.managementCommissionThreshold) * (s.managementCommissionRate / 100);
+  }
+
+  return totalMgmt;
+}
+
+/**
+ * 按产品逐个计算个人提成（优先使用产品级配置，fallback 到默认薪资）
+ */
+export function calcPersonalCommissionByProduct(
+  person: Personnel,
+  monthlyRecords: SalesRecord[],
+  _products: Product[],
+  ppcList: ProductPersonCommission[]
+): number {
+  const s = person.salary || EMPTY_SALARY;
+  let totalPersonal = 0;
+
+  // 找出该人员本月销售的各产品
+  const productSalesMap = new Map<string, number>();
+  monthlyRecords
+    .filter((r) => r.personnelId === person.id)
+    .forEach((r) => {
+      productSalesMap.set(r.productId, (productSalesMap.get(r.productId) || 0) + r.totalAmount);
+    });
+
+  const configuredProducts = new Set<string>();
+  ppcList
+    .filter((ppc) => ppc.personnelId === person.id && ppc.salesUnitId === person.salesUnitId)
+    .forEach((ppc) => {
+      const sales = productSalesMap.get(ppc.productId) || 0;
+      if (sales <= 0) return;
+      configuredProducts.add(ppc.productId);
+      if (sales > (ppc.personalCommissionThreshold || 0)) {
+        totalPersonal += (sales - ppc.personalCommissionThreshold) * (ppc.personalCommissionRate / 100);
+      }
+    });
+
+  // 未配置的产品用默认值
+  let unconfiguredSales = 0;
+  productSalesMap.forEach((sales, pid) => {
+    if (!configuredProducts.has(pid)) unconfiguredSales += sales;
+  });
+  if (unconfiguredSales > (s.personalCommissionThreshold || 0) && (s.personalCommissionRate || 0) > 0) {
+    totalPersonal += (unconfiguredSales - s.personalCommissionThreshold) * (s.personalCommissionRate / 100);
+  }
+
+  return totalPersonal;
 }
 
 /**
@@ -103,7 +194,8 @@ export function calculateMonthlySalary(
   salesRecords: SalesRecord[],
   products: Product[] = [],
   yearMonth?: string,
-  adjustment?: MonthlyAdjustment
+  adjustment?: MonthlyAdjustment,
+  productPersonCommissions?: ProductPersonCommission[]  // 新增：产品级提成配置
 ): {
   baseSalary: number;
   performance: number;
@@ -119,12 +211,18 @@ export function calculateMonthlySalary(
   // 按月过滤销售记录
   const monthlyRecords = filterByMonth(salesRecords, yearMonth);
 
-  const s = person.salary;
+  const s = person.salary || EMPTY_SALARY;
   const personalSales = getPersonalSales(person.id, monthlyRecords);
   const teamSales = getTeamSales(person.salesUnitId, monthlyRecords);
 
-  const managementCommission = calcManagementCommission(s, teamSales);
-  const personalCommission = calcPersonalCommission(s, personalSales);
+  // 优先使用产品级提成配置（按产品逐个计算），无配置则 fallback 到默认薪资结构
+  const hasPpc = productPersonCommissions && productPersonCommissions.length > 0;
+  const managementCommission = hasPpc
+    ? calcManagementCommissionByProduct(person, monthlyRecords, products, productPersonCommissions)
+    : calcManagementCommission(s, teamSales);
+  const personalCommission = hasPpc
+    ? calcPersonalCommissionByProduct(person, monthlyRecords, products, productPersonCommissions)
+    : calcPersonalCommission(s, personalSales);
   const productCommission = getPersonProductCommission(person.id, monthlyRecords, products);
 
   const leaveDeduction = adjustment

@@ -70,6 +70,7 @@ export default function SalesBattleReport() {
     updatePositionGroupLabel,
     deletePositionGroupLabel,
     matchPositionLabel,
+    productPersonCommissions,
   } = useData();
   const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleSalesRecords: salesRecords } = usePermissions();
 
@@ -139,7 +140,7 @@ export default function SalesBattleReport() {
       const adj = monthlyAdjustments.find(
         (a) => a.personnelId === p.id && a.yearMonth === yearMonth
       );
-      const salary = calculateMonthlySalary(p, salesRecords, products, yearMonth, adj);
+      const salary = calculateMonthlySalary(p, salesRecords, products, yearMonth, adj, productPersonCommissions);
       const totalCost =
         salary.total + (p.socialInsurance || 0) + (p.housingFund || 0);
 
@@ -245,6 +246,33 @@ export default function SalesBattleReport() {
     setEditingUnitTarget(false);
   };
 
+  // 人员目标行内编辑
+  const [editingPersonId, setEditingPersonId] = useState<string | null>(null);
+  const [personTargetDraft, setPersonTargetDraft] = useState(0);
+
+  const startEditPersonTarget = (personId: string, current: number | undefined) => {
+    setEditingPersonId(personId);
+    setPersonTargetDraft(current || 0);
+  };
+
+  const savePersonTarget = async () => {
+    if (!editingPersonId || !unitId) return;
+    await upsertPerformanceTarget({
+      salesUnitId: unitId,
+      yearMonth,
+      personnelId: editingPersonId,
+      targetAmount: personTargetDraft,
+      note: "",
+      createdBy: user?.name,
+    });
+    setEditingPersonId(null);
+  };
+
+  const cancelPersonTarget = () => {
+    setEditingPersonId(null);
+    setPersonTargetDraft(0);
+  };
+
   // 人员目标批量编辑
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchDraft, setBatchDraft] = useState<Record<string, number>>({});
@@ -340,6 +368,12 @@ export default function SalesBattleReport() {
 
   // 团队目标（人员目标合计 + 单位整体目标）取最大
   const effectiveTeamTarget = totalTarget > 0 ? totalTarget : (unitTarget?.targetAmount || 0);
+
+  // 单位目标与人员目标合计的差额（正=单位目标>人员合计，负=人员合计>单位目标）
+  const targetGap = useMemo(() => {
+    const ut = unitTarget?.targetAmount || 0;
+    return ut - totalTarget;
+  }, [unitTarget, totalTarget]);
 
   // 团队完成率（取有效目标）
   const effectiveTeamCompletionRate = useMemo(() => {
@@ -540,22 +574,67 @@ export default function SalesBattleReport() {
               </Button>
             </div>
           ) : unitTarget ? (
-            <div className="flex items-center justify-between">
-              <div className="flex items-baseline gap-4">
-                <div>
-                  <p className="text-xs text-muted-foreground">目标金额</p>
-                  <p className="text-2xl font-bold text-violet-700">{formatCurrency(unitTarget.targetAmount)}</p>
-                </div>
-                {unitTarget.note && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-baseline gap-4">
                   <div>
-                    <p className="text-xs text-muted-foreground">备注</p>
-                    <p className="text-sm">{unitTarget.note}</p>
+                    <p className="text-xs text-muted-foreground">目标金额</p>
+                    <p className="text-2xl font-bold text-violet-700">{formatCurrency(unitTarget.targetAmount)}</p>
                   </div>
-                )}
+                  {unitTarget.note && (
+                    <div>
+                      <p className="text-xs text-muted-foreground">备注</p>
+                      <p className="text-sm">{unitTarget.note}</p>
+                    </div>
+                  )}
+                </div>
+                <Button variant="outline" size="sm" onClick={startEditUnitTarget}>
+                  <Edit3 className="mr-2 h-4 w-4" />编辑
+                </Button>
               </div>
-              <Button variant="outline" size="sm" onClick={startEditUnitTarget}>
-                <Edit3 className="mr-2 h-4 w-4" />编辑
-              </Button>
+              {/* 人员目标汇总对比 */}
+              {totalTarget > 0 || unitTarget.targetAmount > 0 ? (
+                <div className={`rounded-lg border p-3 ${Math.abs(targetGap) > 0 ? "border-amber-300 bg-amber-50/50" : "border-emerald-200 bg-emerald-50/30"}`}>
+                  <div className="flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-6">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-muted-foreground">单位目标</span>
+                        <span className="font-semibold text-violet-700">{formatCurrency(unitTarget.targetAmount)}</span>
+                      </div>
+                      <span className="text-muted-foreground">vs</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-muted-foreground">人员目标合计</span>
+                        <span className="font-semibold text-blue-700">{formatCurrency(totalTarget)}</span>
+                      </div>
+                    </div>
+                    <div className={`flex items-center gap-1 font-bold ${targetGap > 0 ? "text-amber-600" : targetGap < 0 ? "text-red-600" : "text-emerald-600"}`}>
+                      {targetGap > 0 ? (
+                        <>
+                          <span>未分配</span>
+                          <span>+{formatCurrency(targetGap)}</span>
+                        </>
+                      ) : targetGap < 0 ? (
+                        <>
+                          <span>超额分配</span>
+                          <span>{formatCurrency(targetGap)}</span>
+                        </>
+                      ) : (
+                        <span>完全匹配</span>
+                      )}
+                    </div>
+                  </div>
+                  {Math.abs(targetGap) > 0 && targetGap > 0 && (
+                    <p className="mt-1.5 text-xs text-amber-600/70">
+                      提示：单位目标比人员目标总和多 {formatCurrency(targetGap)}，可继续为其他人员设定个人目标或调整单位目标
+                    </p>
+                  )}
+                  {targetGap < 0 && (
+                    <p className="mt-1.5 text-xs text-red-500/70">
+                      提示：人员目标合计超出单位目标 {formatCurrency(Math.abs(targetGap))}，请确认是否需要调高单位目标或降低部分人员目标
+                    </p>
+                  )}
+                </div>
+              ) : null}
             </div>
           ) : (
             <div className="flex items-center justify-between">
@@ -618,12 +697,40 @@ export default function SalesBattleReport() {
                       )}
                     </TableCell>
                     <TableCell className="text-center border-r">
-                      {targetAmount !== null ? (
-                        <span className={targetAmount > 0 ? "font-medium" : "text-muted-foreground"}>
+                      {editingPersonId === person.id ? (
+                        <div className="flex items-center justify-center gap-1">
+                          <Input
+                            type="number"
+                            value={personTargetDraft}
+                            onChange={(e) => setPersonTargetDraft(Number(e.target.value))}
+                            className="w-28 h-7 text-sm text-center"
+                            autoFocus
+                          />
+                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={savePersonTarget}>
+                            <Save className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={cancelPersonTarget}>
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      ) : targetAmount !== null ? (
+                        <button
+                          type="button"
+                          onClick={() => startEditPersonTarget(person.id, targetAmount)}
+                          className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm hover:bg-muted transition-colors ${targetAmount > 0 ? "font-medium" : "text-muted-foreground"}`}
+                        >
                           {targetAmount > 0 ? formatCurrency(targetAmount) : "—"}
-                        </span>
+                          <Edit3 className="h-3 w-3 opacity-40 hover:opacity-100" />
+                        </button>
                       ) : (
-                        <span className="text-muted-foreground">—</span>
+                        <button
+                          type="button"
+                          onClick={() => startEditPersonTarget(person.id, undefined)}
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                        >
+                          —
+                          <Edit3 className="h-3 w-3 opacity-40 hover:opacity-100" />
+                        </button>
                       )}
                     </TableCell>
                     <TableCell className="text-center border-r font-medium">
@@ -689,30 +796,43 @@ export default function SalesBattleReport() {
               {/* 团队汇总行 */}
               <TableRow className="bg-yellow-50 border-t border-yellow-200">
                 <TableCell colSpan={6} className="py-3">
-                  <div className="flex items-center justify-center gap-8">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-muted-foreground">团队总业绩</span>
-                      <span className="text-lg font-bold text-blue-700">{formatCurrency(teamTotal)}</span>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-center gap-8 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-muted-foreground">团队总业绩</span>
+                        <span className="text-lg font-bold text-blue-700">{formatCurrency(teamTotal)}</span>
+                      </div>
+                      <div className="h-6 w-px bg-yellow-300" />
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-muted-foreground">团队目标</span>
+                        <span className="text-lg font-bold text-emerald-700">{formatCurrency(effectiveTeamTarget)}</span>
+                      </div>
+                      <div className="h-6 w-px bg-yellow-300" />
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-muted-foreground">团队差额</span>
+                        <span className={`text-lg font-bold ${teamDiff < 0 ? "text-red-600" : "text-violet-700"}`}>
+                          {teamDiff < 0 ? "-" : "+"}{formatCurrency(Math.abs(teamDiff))}
+                        </span>
+                      </div>
+                      <div className="h-6 w-px bg-yellow-300" />
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-muted-foreground">团队总完成率</span>
+                        <span className={`text-lg font-bold ${effectiveTeamCompletionRate >= 100 ? "text-emerald-600" : "text-red-600"}`}>
+                          {effectiveTeamTarget > 0 ? formatPercent(effectiveTeamCompletionRate) : "—"}
+                        </span>
+                      </div>
                     </div>
-                    <div className="h-6 w-px bg-yellow-300" />
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-muted-foreground">团队目标</span>
-                      <span className="text-lg font-bold text-emerald-700">{formatCurrency(effectiveTeamTarget)}</span>
-                    </div>
-                    <div className="h-6 w-px bg-yellow-300" />
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-muted-foreground">团队差额</span>
-                      <span className={`text-lg font-bold ${teamDiff < 0 ? "text-red-600" : "text-violet-700"}`}>
-                        {teamDiff < 0 ? "-" : "+"}{formatCurrency(Math.abs(teamDiff))}
-                      </span>
-                    </div>
-                    <div className="h-6 w-px bg-yellow-300" />
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-muted-foreground">团队总完成率</span>
-                      <span className={`text-lg font-bold ${effectiveTeamCompletionRate >= 100 ? "text-emerald-600" : "text-red-600"}`}>
-                        {effectiveTeamTarget > 0 ? formatPercent(effectiveTeamCompletionRate) : "—"}
-                      </span>
-                    </div>
+                    {/* 目标分配差额提示 */}
+                    {unitTarget && Math.abs(targetGap) > 0 && (
+                      <div className={`flex items-center justify-center gap-3 rounded-md border px-3 py-1.5 text-xs ${targetGap > 0 ? "border-amber-200 bg-amber-50/60 text-amber-700" : "border-red-200 bg-red-50/60 text-red-700"}`}>
+                        <span>单位目标 {formatCurrency(unitTarget.targetAmount)}</span>
+                        <span>vs</span>
+                        <span>人员目标合计 {formatCurrency(totalTarget)}</span>
+                        <span className="font-bold">
+                          {targetGap > 0 ? `差额 +${formatCurrency(targetGap)}（未分配到个人）` : `差额 ${formatCurrency(targetGap)}（超出单位目标）`}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </TableCell>
               </TableRow>
