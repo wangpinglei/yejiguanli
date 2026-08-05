@@ -297,6 +297,8 @@ export default function SalesRecords() {
   const [filterUnit, setFilterUnit] = useState("all");
   const [filterPerson, setFilterPerson] = useState("all");
   const [filterSync, setFilterSync] = useState("all"); // all | manual | synced
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<SalesRecord | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -341,10 +343,13 @@ export default function SalesRecords() {
         const matchUnit = filterUnit === "all" || s.salesUnitId === filterUnit;
         const matchPerson = filterPerson === "all" || s.personnelId === filterPerson;
         const matchSync = filterSync === "all" || (filterSync === "synced" ? s.synced : !s.synced);
-        return matchSearch && matchUnit && matchPerson && matchSync;
+        const saleDate = (s.saleDate || "").slice(0, 10);
+        const matchFrom = !dateFrom || saleDate >= dateFrom;
+        const matchTo = !dateTo || saleDate <= dateTo;
+        return matchSearch && matchUnit && matchPerson && matchSync && matchFrom && matchTo;
       })
       .sort((a, b) => (b.saleDate || "").localeCompare(a.saleDate || ""));
-  }, [salesRecords, personnel, products, search, filterUnit, filterPerson, filterSync]);
+  }, [salesRecords, personnel, products, search, filterUnit, filterPerson, filterSync, dateFrom, dateTo]);
 
   // 统计
   const syncedCount = useMemo(() => salesRecords.filter((s) => s.synced).length, [salesRecords]);
@@ -757,6 +762,35 @@ export default function SalesRecords() {
             <SelectItem value="manual">仅手动</SelectItem>
           </SelectContent>
         </Select>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-muted-foreground whitespace-nowrap">成交日期</span>
+          <Input
+            type="date"
+            value={dateFrom}
+            max={dateTo || undefined}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="w-[140px]"
+          />
+          <span className="text-xs text-muted-foreground">至</span>
+          <Input
+            type="date"
+            value={dateTo}
+            min={dateFrom || undefined}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="w-[140px]"
+          />
+          {(dateFrom || dateTo) && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-9 px-2 text-xs"
+              onClick={() => { setDateFrom(""); setDateTo(""); }}
+            >
+              清除
+            </Button>
+          )}
+        </div>
         <Badge variant="secondary">{filteredRecords.length} 笔</Badge>
         <Badge className="bg-blue-50 text-blue-700">合计 {formatCurrency(totalRevenue)}</Badge>
         <Badge className="bg-violet-50 text-violet-700">提成合计 {formatCurrency(totalCommission)}</Badge>
