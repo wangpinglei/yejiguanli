@@ -54,12 +54,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-const unitTypeMap = {
-  company: { label: "公司", color: "bg-blue-100 text-blue-700" },
-  department: { label: "部门", color: "bg-violet-100 text-violet-700" },
-  team: { label: "团队", color: "bg-emerald-100 text-emerald-700" },
-};
-
 export default function SalesUnits() {
   const navigate = useNavigate();
   const { addSalesUnit, updateSalesUnit, deleteSalesUnit } = useData();
@@ -72,10 +66,6 @@ export default function SalesUnits() {
 
   const [form, setForm] = useState({
     name: "",
-    type: "company" as SalesUnit["type"],
-    address: "",
-    contact: "",
-    contactPhone: "",
     description: "",
     groupAdminId: "",
     militaryCadreId: "",
@@ -88,10 +78,8 @@ export default function SalesUnits() {
   const getUserName = (id?: string) => (id ? users.find((u) => u.id === id)?.name || "-" : "-");
 
   const filteredUnits = useMemo(() => {
-    return salesUnits.filter(
-      (u) =>
-        u.name.toLowerCase().includes(search.toLowerCase()) ||
-        u.contact.toLowerCase().includes(search.toLowerCase())
+    return salesUnits.filter((u) =>
+      u.name.toLowerCase().includes(search.toLowerCase())
     );
   }, [salesUnits, search]);
 
@@ -104,7 +92,14 @@ export default function SalesUnits() {
 
   const openAdd = () => {
     setEditingUnit(null);
-    setForm({ name: "", type: "company", address: "", contact: "", contactPhone: "", description: "", groupAdminId: "", militaryCadreId: "", orgDeptId: "", unitLeaderId: "" });
+    setForm({
+      name: "",
+      description: "",
+      groupAdminId: "",
+      militaryCadreId: "",
+      orgDeptId: "",
+      unitLeaderId: "",
+    });
     setDialogOpen(true);
   };
 
@@ -112,10 +107,6 @@ export default function SalesUnits() {
     setEditingUnit(unit);
     setForm({
       name: unit.name,
-      type: unit.type,
-      address: unit.address,
-      contact: unit.contact,
-      contactPhone: unit.contactPhone,
       description: unit.description,
       groupAdminId: unit.groupAdminId || "",
       militaryCadreId: unit.militaryCadreId || "",
@@ -127,12 +118,13 @@ export default function SalesUnits() {
 
   const handleSubmit = async () => {
     if (!form.name.trim()) return;
+    // 类型/联系人/电话/地址已从界面移除，提交时保留兼容后端的默认值
     const data = {
       name: form.name,
-      type: form.type,
-      address: form.address,
-      contact: form.contact,
-      contactPhone: form.contactPhone,
+      type: (editingUnit?.type || "company") as SalesUnit["type"],
+      address: editingUnit?.address || "",
+      contact: editingUnit?.contact || "",
+      contactPhone: editingUnit?.contactPhone || "",
       description: form.description,
       groupAdminId: form.groupAdminId || undefined,
       militaryCadreId: form.militaryCadreId || undefined,
@@ -188,7 +180,7 @@ export default function SalesUnits() {
     <div>
       <PageHeader
         title="销售单位管理"
-        description="管理各销售单位（公司/部门/团队），分配管理人员，查看业绩与成本"
+        description="管理各销售单位，分配管理人员，查看业绩与成本"
         action={
           canEditUnit && (
             <Button onClick={openAdd}>
@@ -204,7 +196,7 @@ export default function SalesUnits() {
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="搜索单位名称或联系人..."
+            placeholder="搜索单位名称..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-10"
@@ -221,7 +213,6 @@ export default function SalesUnits() {
               <TableHeader>
                 <TableRow>
                   <TableHead>单位名称</TableHead>
-                  <TableHead>类型</TableHead>
                   <TableHead>集团管理</TableHead>
                   <TableHead>军工干部</TableHead>
                   <TableHead>组织部</TableHead>
@@ -246,11 +237,6 @@ export default function SalesUnits() {
                             <p className="text-xs text-muted-foreground">{unit.description}</p>
                           </div>
                         </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge className={unitTypeMap[unit.type].color} variant="secondary">
-                          {unitTypeMap[unit.type].label}
-                        </Badge>
                       </TableCell>
                       <TableCell className="text-sm">{getUserName(unit.groupAdminId)}</TableCell>
                       <TableCell className="text-sm">{getUserName(unit.militaryCadreId)}</TableCell>
@@ -299,7 +285,7 @@ export default function SalesUnits() {
                 })}
                 {filteredUnits.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center py-12 text-muted-foreground">
+                    <TableCell colSpan={8} className="text-center py-12 text-muted-foreground">
                       暂无数据
                     </TableCell>
                   </TableRow>
@@ -324,47 +310,6 @@ export default function SalesUnits() {
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 placeholder="请输入单位名称"
               />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>单位类型</Label>
-                <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v as SalesUnit["type"] })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="company">公司</SelectItem>
-                    <SelectItem value="department">部门</SelectItem>
-                    <SelectItem value="team">团队</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>联系人</Label>
-                <Input
-                  value={form.contact}
-                  onChange={(e) => setForm({ ...form, contact: e.target.value })}
-                  placeholder="联系人姓名"
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>联系电话</Label>
-                <Input
-                  value={form.contactPhone}
-                  onChange={(e) => setForm({ ...form, contactPhone: e.target.value })}
-                  placeholder="联系电话"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>地址</Label>
-                <Input
-                  value={form.address}
-                  onChange={(e) => setForm({ ...form, address: e.target.value })}
-                  placeholder="单位地址"
-                />
-              </div>
             </div>
 
             {/* 角色分配 */}
