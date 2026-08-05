@@ -292,7 +292,7 @@ export default function ProductSettlement() {
     <div>
       <PageHeader
         title="结算与提成"
-        description="产品来自销售记录。在此配置：① 单位×产品结算比例 ② 人员管理/个人提成。本月金额仅作预览。"
+        description="产品来自销售记录。在此配置：① 单位×产品结算比例 ② 人员管理/个人提成。本月金额仅作预览（自动部署验证）。"
         action={
           <Select value={selectedMonth} onValueChange={setSelectedMonth}>
             <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
