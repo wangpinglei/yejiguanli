@@ -14,7 +14,8 @@ server/data/
 npm-debug.log*
 server/logs/
 
-# Env
+# Env（.env 含本地配置，勿提交；.env.production 保留供生产构建）
+.env
 .env.local
 .env.*.local
 

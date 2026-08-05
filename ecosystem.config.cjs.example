@@ -1,0 +1,26 @@
+// 业绩管理系统 - 应用进程 pm2 配置示例
+// 用法（服务器上，首次）：
+//   1. cp ecosystem.config.cjs.example ecosystem.config.cjs
+//   2. 按需改 PORT / JWT_SECRET
+//   3. pm2 start ecosystem.config.cjs && pm2 save
+// 之后部署由 deploy.sh 执行：pm2 restart yejiguanli
+//
+// 注意：ecosystem.config.cjs 可留在服务器本地（含密钥时勿提交）
+module.exports = {
+  apps: [
+    {
+      name: 'yejiguanli',
+      script: 'server/dist/index.js',
+      cwd: '/root/yejiguanli',
+      interpreter: 'node',
+      interpreter_args: '--experimental-sqlite',
+      autorestart: true,
+      watch: false,
+      env: {
+        NODE_ENV: 'production',
+        PORT: 8100,
+        // JWT_SECRET: '请换成强随机字符串',
+      },
+    },
+  ],
+};
