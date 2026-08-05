@@ -10,6 +10,7 @@ import productRoutes from "./routes/products";
 import salesRecordRoutes from "./routes/salesRecords";
 import costRecordRoutes from "./routes/costRecords";
 import migrateRoutes from "./routes/migrate";
+import extraRoutes from "./routes/extra";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -36,6 +37,7 @@ app.use("/api/products", productRoutes);
 app.use("/api/sales-records", salesRecordRoutes);
 app.use("/api/cost-records", costRecordRoutes);
 app.use("/api/migrate", migrateRoutes);
+app.use("/api", extraRoutes);
 
 // 生态圈同步订单（占位：当前返回空列表，真实同步逻辑可在后续接入）
 app.get("/api/synced-orders", (_req, res) => {

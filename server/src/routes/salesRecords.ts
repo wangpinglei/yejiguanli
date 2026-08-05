@@ -4,97 +4,99 @@ import { authMiddleware } from "../auth";
 import { getVisibleUnitIds, requireEditPermission } from "../middleware";
 
 const router = Router();
-
 router.use(authMiddleware);
 
-// GET /api/sales-records - 获取销售记录（按权限过滤）
+const INSERT_SQL = `
+  INSERT INTO sales_records (
+    id, sales_unit_id, personnel_id, product_id, quantity, unit_price, total_amount, sale_date, remark,
+    synced, external_order_id, customer_name, sales_unit_name, sales_person_name, product_name, synced_at,
+    order_number, product_module, order_amount, order_type, activity_name
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`;
+
+const UPDATE_SQL = `
+  UPDATE sales_records SET
+    sales_unit_id=?, personnel_id=?, product_id=?, quantity=?, unit_price=?, total_amount=?, sale_date=?, remark=?,
+    synced=?, external_order_id=?, customer_name=?, sales_unit_name=?, sales_person_name=?, product_name=?, synced_at=?,
+    order_number=?, product_module=?, order_amount=?, order_type=?, activity_name=?
+  WHERE id=?
+`;
+
+function pick(body: any, existing?: any) {
+  const qty = body.quantity ?? existing?.quantity ?? 1;
+  const price = body.unitPrice ?? existing?.unit_price ?? 0;
+  const totalAmount = body.totalAmount != null
+    ? body.totalAmount
+    : (existing ? existing.total_amount : qty * price);
+  return {
+    salesUnitId: body.salesUnitId ?? existing?.sales_unit_id ?? "",
+    personnelId: body.personnelId ?? existing?.personnel_id ?? "",
+    productId: body.productId ?? existing?.product_id ?? "",
+    quantity: qty,
+    unitPrice: price,
+    totalAmount,
+    saleDate: body.saleDate ?? existing?.sale_date,
+    remark: body.remark ?? existing?.remark ?? "",
+    synced: body.synced != null ? (body.synced ? 1 : 0) : (existing?.synced || 0),
+    externalOrderId: body.externalOrderId ?? existing?.external_order_id ?? "",
+    customerName: body.customerName ?? existing?.customer_name ?? "",
+    salesUnitName: body.salesUnitName ?? existing?.sales_unit_name ?? "",
+    salesPersonName: body.salesPersonName ?? existing?.sales_person_name ?? "",
+    productName: body.productName ?? existing?.product_name ?? "",
+    syncedAt: body.syncedAt ?? existing?.synced_at ?? null,
+    orderNumber: body.orderNumber ?? existing?.order_number ?? "",
+    productModule: body.productModule ?? existing?.product_module ?? "",
+    orderAmount: body.orderAmount ?? existing?.order_amount ?? 0,
+    orderType: body.orderType ?? existing?.order_type ?? "",
+    activityName: body.activityName ?? existing?.activity_name ?? "",
+  };
+}
+
+function bind(f: ReturnType<typeof pick>) {
+  return [
+    f.salesUnitId, f.personnelId, f.productId, f.quantity, f.unitPrice, f.totalAmount, f.saleDate, f.remark,
+    f.synced, f.externalOrderId, f.customerName, f.salesUnitName, f.salesPersonName, f.productName, f.syncedAt,
+    f.orderNumber, f.productModule, f.orderAmount, f.orderType, f.activityName,
+  ];
+}
+
 router.get("/", (req, res) => {
   const db = getDb();
   let rows = db.prepare("SELECT * FROM sales_records ORDER BY sale_date DESC").all();
-
   const visibleIds = getVisibleUnitIds(req.user!);
   if (visibleIds !== null) {
     const idSet = new Set(visibleIds);
-    rows = rows.filter((r: any) => idSet.has(r.sales_unit_id));
+    rows = rows.filter((r: any) => !r.sales_unit_id || idSet.has(r.sales_unit_id));
   }
-
-  // 支持按单位/人员筛选
   const { salesUnitId, personnelId } = req.query;
-  if (salesUnitId) {
-    rows = rows.filter((r: any) => r.sales_unit_id === salesUnitId);
-  }
-  if (personnelId) {
-    rows = rows.filter((r: any) => r.personnel_id === personnelId);
-  }
-
+  if (salesUnitId) rows = rows.filter((r: any) => r.sales_unit_id === salesUnitId);
+  if (personnelId) rows = rows.filter((r: any) => r.personnel_id === personnelId);
   res.json(rows.map(rowToSalesRecord));
 });
 
-// POST /api/sales-records - 创建销售记录
 router.post("/", requireEditPermission, (req, res) => {
-  const { salesUnitId, personnelId, productId, quantity, unitPrice, saleDate, remark } = req.body;
-  if (!salesUnitId || !personnelId || !productId || !saleDate) {
-    return res.status(400).json({ error: "销售单位、人员、产品和销售日期不能为空" });
-  }
-
-  const qty = quantity || 1;
-  const price = unitPrice || 0;
-  const totalAmount = qty * price;
-
+  const f = pick(req.body);
+  if (!f.saleDate) return res.status(400).json({ error: "销售日期不能为空" });
   const id = generateId("sr");
   const db = getDb();
-  db.prepare(`
-    INSERT INTO sales_records (id, sales_unit_id, personnel_id, product_id, quantity, unit_price, total_amount, sale_date, remark)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, salesUnitId, personnelId, productId, qty, price, totalAmount, saleDate, remark || "");
-
-  const row = db.prepare("SELECT * FROM sales_records WHERE id = ?").get(id);
-  res.json(rowToSalesRecord(row));
+  db.prepare(INSERT_SQL).run(id, ...bind(f));
+  res.json(rowToSalesRecord(db.prepare("SELECT * FROM sales_records WHERE id = ?").get(id)));
 });
 
-// PUT /api/sales-records/:id - 更新销售记录
 router.put("/:id", requireEditPermission, (req, res) => {
   const { id } = req.params;
   const db = getDb();
   const existing = db.prepare("SELECT * FROM sales_records WHERE id = ?").get(id);
-  if (!existing) {
-    return res.status(404).json({ error: "销售记录不存在" });
-  }
-
-  const { salesUnitId, personnelId, productId, quantity, unitPrice, saleDate, remark } = req.body;
-  const qty = quantity ?? existing.quantity;
-  const price = unitPrice ?? existing.unit_price;
-  const totalAmount = qty * price;
-
-  db.prepare(`
-    UPDATE sales_records SET
-      sales_unit_id = ?, personnel_id = ?, product_id = ?, quantity = ?,
-      unit_price = ?, total_amount = ?, sale_date = ?, remark = ?
-    WHERE id = ?
-  `).run(
-    salesUnitId ?? existing.sales_unit_id,
-    personnelId ?? existing.personnel_id,
-    productId ?? existing.product_id,
-    qty,
-    price,
-    totalAmount,
-    saleDate ?? existing.sale_date,
-    remark ?? existing.remark,
-    id
-  );
-
-  const row = db.prepare("SELECT * FROM sales_records WHERE id = ?").get(id);
-  res.json(rowToSalesRecord(row));
+  if (!existing) return res.status(404).json({ error: "销售记录不存在" });
+  const f = pick(req.body, existing);
+  db.prepare(UPDATE_SQL).run(...bind(f), id);
+  res.json(rowToSalesRecord(db.prepare("SELECT * FROM sales_records WHERE id = ?").get(id)));
 });
 
-// DELETE /api/sales-records/:id - 删除销售记录
 router.delete("/:id", requireEditPermission, (req, res) => {
-  const { id } = req.params;
   const db = getDb();
-  const result = db.prepare("DELETE FROM sales_records WHERE id = ?").run(id);
-  if (result.changes === 0) {
-    return res.status(404).json({ error: "销售记录不存在" });
-  }
+  const result = db.prepare("DELETE FROM sales_records WHERE id = ?").run(req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: "销售记录不存在" });
   res.json({ message: "删除成功" });
 });
 

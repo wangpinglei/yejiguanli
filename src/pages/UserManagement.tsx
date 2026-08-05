@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useAuth, type SystemUser } from "@/context/AuthContext";
+import { loadLegacyLocalStoragePayload, useData } from "@/context/DataContext";
+import { migrateApi } from "@/lib/api";
 import { PageHeader } from "@/components/PageHeader";
 import type { UserRole } from "@/types";
 import {
@@ -10,7 +12,7 @@ import {
   type ModuleKey,
   type UserPermissions,
 } from "@/config/modules";
-import { Plus, Pencil, Trash2, Lock, Eye, EyeOff, Shield } from "lucide-react";
+import { Plus, Pencil, Trash2, Lock, Eye, EyeOff, Shield, Database } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -39,10 +41,29 @@ function summarizePermissions(perms: UserPermissions, role: string): string {
 
 export default function UserManagement() {
   const { users, addUser, updateUser, deleteUser, user: currentUser } = useAuth();
+  const { refreshAll } = useData();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<SystemUser | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [migrating, setMigrating] = useState(false);
+
+  async function handleImportLegacy() {
+    if (!confirm("将把本浏览器中的旧 localStorage 业务数据导入服务器（按 id 覆盖/合并）。确认继续？")) {
+      return;
+    }
+    setMigrating(true);
+    try {
+      const payload = loadLegacyLocalStoragePayload();
+      const res = await migrateApi.migrate(payload);
+      await refreshAll();
+      alert(`导入成功：${JSON.stringify(res.stats)}`);
+    } catch (e: any) {
+      alert("导入失败：" + (e.message || "未知错误"));
+    } finally {
+      setMigrating(false);
+    }
+  }
 
   const [form, setForm] = useState({
     username: "",
@@ -424,6 +445,27 @@ export default function UserManagement() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {currentUser?.role === "superadmin" && (
+        <Card className="mt-6 border-dashed">
+          <CardContent className="flex flex-wrap items-center justify-between gap-4 p-5">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 shrink-0">
+                <Database className="h-5 w-5 text-amber-700" />
+              </div>
+              <div>
+                <p className="font-medium">导入本机旧数据到服务器</p>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  业务数据已改为存服务器。若本浏览器还有以前的 localStorage 数据，可一键导入（仅超管）。
+                </p>
+              </div>
+            </div>
+            <Button variant="outline" size="sm" disabled={migrating} onClick={handleImportLegacy}>
+              {migrating ? "导入中…" : "从本机导入"}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

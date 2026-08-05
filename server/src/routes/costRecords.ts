@@ -29,21 +29,19 @@ router.get("/", (req, res) => {
 
 // POST /api/cost-records - 创建成本记录
 router.post("/", requireEditPermission, (req, res) => {
-  const { salesUnitId, date, items, remark } = req.body;
+  const { salesUnitId, date, items, remark, changeReason } = req.body;
   if (!salesUnitId || !date) {
     return res.status(400).json({ error: "销售单位和日期不能为空" });
   }
-
   const costItems = items || [];
   const totalCost = costItems.reduce((sum: number, item: any) => sum + (item.amount || 0), 0);
   const id = generateId("cr");
   const db = getDb();
 
-  // 自动记录录入人和录入时间
   db.prepare(`
-    INSERT INTO cost_records (id, sales_unit_id, date, items, total_cost, remark, created_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(id, salesUnitId, date, JSON.stringify(costItems), totalCost, remark || "", req.user!.name);
+    INSERT INTO cost_records (id, sales_unit_id, date, items, total_cost, remark, created_by, change_reason)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, salesUnitId, date, JSON.stringify(costItems), totalCost, remark || "", req.user!.name, changeReason || "");
 
   const row = db.prepare("SELECT * FROM cost_records WHERE id = ?").get(id);
   res.json(rowToCostRecord(row));
@@ -58,13 +56,13 @@ router.put("/:id", requireEditPermission, (req, res) => {
     return res.status(404).json({ error: "成本记录不存在" });
   }
 
-  const { salesUnitId, date, items, remark } = req.body;
+  const { salesUnitId, date, items, remark, changeReason } = req.body;
   const costItems = items !== undefined ? items : JSON.parse(existing.items);
   const totalCost = costItems.reduce((sum: number, item: any) => sum + (item.amount || 0), 0);
 
   db.prepare(`
     UPDATE cost_records SET
-      sales_unit_id = ?, date = ?, items = ?, total_cost = ?, remark = ?
+      sales_unit_id = ?, date = ?, items = ?, total_cost = ?, remark = ?, change_reason = ?
     WHERE id = ?
   `).run(
     salesUnitId ?? existing.sales_unit_id,
@@ -72,6 +70,7 @@ router.put("/:id", requireEditPermission, (req, res) => {
     JSON.stringify(costItems),
     totalCost,
     remark ?? existing.remark,
+    changeReason ?? existing.change_reason,
     id
   );
 

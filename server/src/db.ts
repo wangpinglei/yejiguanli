@@ -20,6 +20,16 @@ export function getDb(): any {
   return db;
 }
 
+function ensureColumns(table: string, cols: Array<{ name: string; ddl: string }>) {
+  const existing = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  const names = new Set(existing.map((c) => c.name));
+  for (const col of cols) {
+    if (!names.has(col.name)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${col.ddl}`);
+    }
+  }
+}
+
 function initSchema() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
@@ -72,24 +82,44 @@ function initSchema() {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       category TEXT DEFAULT '',
+      sales_unit_id TEXT,
       unit_price REAL DEFAULT 0,
+      cost_type TEXT DEFAULT 'fixed',
       unit_cost REAL DEFAULT 0,
-      description TEXT DEFAULT ''
+      cost_rate REAL DEFAULT 0,
+      description TEXT DEFAULT '',
+      commission_type TEXT DEFAULT 'percentage',
+      commission_rate REAL DEFAULT 0,
+      commission_amount REAL DEFAULT 0,
+      commission_note TEXT DEFAULT '',
+      settlement_type TEXT DEFAULT 'percentage',
+      settlement_rate REAL DEFAULT 100,
+      settlement_amount REAL DEFAULT 0,
+      settlement_note TEXT DEFAULT ''
     );
 
     CREATE TABLE IF NOT EXISTS sales_records (
       id TEXT PRIMARY KEY,
-      sales_unit_id TEXT NOT NULL,
-      personnel_id TEXT NOT NULL,
-      product_id TEXT NOT NULL,
+      sales_unit_id TEXT NOT NULL DEFAULT '',
+      personnel_id TEXT NOT NULL DEFAULT '',
+      product_id TEXT NOT NULL DEFAULT '',
       quantity INTEGER DEFAULT 1,
       unit_price REAL DEFAULT 0,
       total_amount REAL DEFAULT 0,
       sale_date TEXT NOT NULL,
       remark TEXT DEFAULT '',
-      FOREIGN KEY (sales_unit_id) REFERENCES sales_units(id) ON DELETE CASCADE,
-      FOREIGN KEY (personnel_id) REFERENCES personnel(id) ON DELETE CASCADE,
-      FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+      synced INTEGER DEFAULT 0,
+      external_order_id TEXT DEFAULT '',
+      customer_name TEXT DEFAULT '',
+      sales_unit_name TEXT DEFAULT '',
+      sales_person_name TEXT DEFAULT '',
+      product_name TEXT DEFAULT '',
+      synced_at TEXT,
+      order_number TEXT DEFAULT '',
+      product_module TEXT DEFAULT '',
+      order_amount REAL DEFAULT 0,
+      order_type TEXT DEFAULT '',
+      activity_name TEXT DEFAULT ''
     );
 
     CREATE TABLE IF NOT EXISTS cost_records (
@@ -101,36 +131,173 @@ function initSchema() {
       remark TEXT DEFAULT '',
       created_at TEXT DEFAULT (datetime('now')),
       created_by TEXT,
-      FOREIGN KEY (sales_unit_id) REFERENCES sales_units(id) ON DELETE CASCADE
+      change_reason TEXT DEFAULT ''
+    );
+
+    CREATE TABLE IF NOT EXISTS income_records (
+      id TEXT PRIMARY KEY,
+      sales_unit_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      items TEXT DEFAULT '[]',
+      total_amount REAL DEFAULT 0,
+      remark TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now')),
+      created_by TEXT,
+      change_reason TEXT DEFAULT '',
+      is_recurring INTEGER DEFAULT 0,
+      recurring_months TEXT DEFAULT '[1,2,3,4,5,6,7,8,9,10,11,12]',
+      recurring_start_date TEXT DEFAULT '',
+      recurring_end_date TEXT DEFAULT ''
+    );
+
+    CREATE TABLE IF NOT EXISTS revenue_settlements (
+      id TEXT PRIMARY KEY,
+      sales_unit_id TEXT NOT NULL,
+      year_month TEXT NOT NULL,
+      estimated_amount REAL DEFAULT 0,
+      actual_amount REAL,
+      is_adjusted INTEGER DEFAULT 0,
+      remark TEXT DEFAULT '',
+      adjusted_by TEXT,
+      adjusted_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(sales_unit_id, year_month)
+    );
+
+    CREATE TABLE IF NOT EXISTS unit_product_settlements (
+      id TEXT PRIMARY KEY,
+      sales_unit_id TEXT NOT NULL,
+      product_id TEXT NOT NULL,
+      settlement_type TEXT DEFAULT 'percentage',
+      settlement_rate REAL DEFAULT 100,
+      settlement_amount REAL DEFAULT 0,
+      note TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT,
+      UNIQUE(sales_unit_id, product_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS product_person_commissions (
+      id TEXT PRIMARY KEY,
+      sales_unit_id TEXT NOT NULL,
+      product_id TEXT NOT NULL,
+      personnel_id TEXT NOT NULL,
+      management_commission_rate REAL DEFAULT 0,
+      management_commission_threshold REAL DEFAULT 0,
+      management_commission_condition TEXT DEFAULT '',
+      personal_commission_rate REAL DEFAULT 0,
+      personal_commission_threshold REAL DEFAULT 0,
+      personal_commission_condition TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT,
+      UNIQUE(sales_unit_id, product_id, personnel_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS cost_change_logs (
+      id TEXT PRIMARY KEY,
+      cost_record_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      reason TEXT DEFAULT '',
+      operator TEXT DEFAULT '',
+      operator_id TEXT DEFAULT '',
+      timestamp TEXT DEFAULT (datetime('now')),
+      summary TEXT DEFAULT '',
+      cost_record_remark TEXT DEFAULT ''
+    );
+
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      type TEXT DEFAULT 'cost_change',
+      title TEXT DEFAULT '',
+      message TEXT DEFAULT '',
+      timestamp TEXT DEFAULT (datetime('now')),
+      read INTEGER DEFAULT 0,
+      user_id TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS monthly_adjustments (
+      id TEXT PRIMARY KEY,
+      personnel_id TEXT NOT NULL,
+      year_month TEXT NOT NULL,
+      leave_days REAL DEFAULT 0,
+      other_bonus REAL DEFAULT 0,
+      other_deduction REAL DEFAULT 0,
+      note TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now')),
+      created_by TEXT,
+      UNIQUE(personnel_id, year_month)
+    );
+
+    CREATE TABLE IF NOT EXISTS performance_targets (
+      id TEXT PRIMARY KEY,
+      sales_unit_id TEXT NOT NULL,
+      year_month TEXT NOT NULL,
+      personnel_id TEXT,
+      target_amount REAL DEFAULT 0,
+      note TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now')),
+      created_by TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS position_group_labels (
+      id TEXT PRIMARY KEY,
+      keyword TEXT NOT NULL,
+      label TEXT NOT NULL,
+      color TEXT DEFAULT 'gray',
+      description TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now'))
     );
 
     CREATE INDEX IF NOT EXISTS idx_personnel_unit ON personnel(sales_unit_id);
     CREATE INDEX IF NOT EXISTS idx_sales_unit ON sales_records(sales_unit_id);
     CREATE INDEX IF NOT EXISTS idx_sales_personnel ON sales_records(personnel_id);
     CREATE INDEX IF NOT EXISTS idx_cost_unit ON cost_records(sales_unit_id);
+    CREATE INDEX IF NOT EXISTS idx_income_unit ON income_records(sales_unit_id);
   `);
 
-  // 兼容旧库：销售单位管理人员人名列
-  const unitCols = db.prepare("PRAGMA table_info(sales_units)").all() as Array<{ name: string }>;
-  const unitColNames = new Set(unitCols.map((c) => c.name));
-  const nameCols = [
-    "group_admin_name",
-    "military_cadre_name",
-    "org_dept_name",
-    "unit_leader_name",
-  ];
-  for (const col of nameCols) {
-    if (!unitColNames.has(col)) {
-      db.exec(`ALTER TABLE sales_units ADD COLUMN ${col} TEXT DEFAULT ''`);
-    }
-  }
+  ensureColumns("sales_units", [
+    { name: "group_admin_name", ddl: "group_admin_name TEXT DEFAULT ''" },
+    { name: "military_cadre_name", ddl: "military_cadre_name TEXT DEFAULT ''" },
+    { name: "org_dept_name", ddl: "org_dept_name TEXT DEFAULT ''" },
+    { name: "unit_leader_name", ddl: "unit_leader_name TEXT DEFAULT ''" },
+  ]);
 
-  // 兼容旧库：用户模块权限列
-  const userCols = db.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>;
-  const userColNames = new Set(userCols.map((c) => c.name));
-  if (!userColNames.has("permissions")) {
-    db.exec(`ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT '{}'`);
-  }
+  ensureColumns("users", [
+    { name: "permissions", ddl: "permissions TEXT DEFAULT '{}'" },
+  ]);
+
+  ensureColumns("products", [
+    { name: "sales_unit_id", ddl: "sales_unit_id TEXT" },
+    { name: "cost_type", ddl: "cost_type TEXT DEFAULT 'fixed'" },
+    { name: "cost_rate", ddl: "cost_rate REAL DEFAULT 0" },
+    { name: "commission_type", ddl: "commission_type TEXT DEFAULT 'percentage'" },
+    { name: "commission_rate", ddl: "commission_rate REAL DEFAULT 0" },
+    { name: "commission_amount", ddl: "commission_amount REAL DEFAULT 0" },
+    { name: "commission_note", ddl: "commission_note TEXT DEFAULT ''" },
+    { name: "settlement_type", ddl: "settlement_type TEXT DEFAULT 'percentage'" },
+    { name: "settlement_rate", ddl: "settlement_rate REAL DEFAULT 100" },
+    { name: "settlement_amount", ddl: "settlement_amount REAL DEFAULT 0" },
+    { name: "settlement_note", ddl: "settlement_note TEXT DEFAULT ''" },
+  ]);
+
+  ensureColumns("sales_records", [
+    { name: "synced", ddl: "synced INTEGER DEFAULT 0" },
+    { name: "external_order_id", ddl: "external_order_id TEXT DEFAULT ''" },
+    { name: "customer_name", ddl: "customer_name TEXT DEFAULT ''" },
+    { name: "sales_unit_name", ddl: "sales_unit_name TEXT DEFAULT ''" },
+    { name: "sales_person_name", ddl: "sales_person_name TEXT DEFAULT ''" },
+    { name: "product_name", ddl: "product_name TEXT DEFAULT ''" },
+    { name: "synced_at", ddl: "synced_at TEXT" },
+    { name: "order_number", ddl: "order_number TEXT DEFAULT ''" },
+    { name: "product_module", ddl: "product_module TEXT DEFAULT ''" },
+    { name: "order_amount", ddl: "order_amount REAL DEFAULT 0" },
+    { name: "order_type", ddl: "order_type TEXT DEFAULT ''" },
+    { name: "activity_name", ddl: "activity_name TEXT DEFAULT ''" },
+  ]);
+
+  ensureColumns("cost_records", [
+    { name: "change_reason", ddl: "change_reason TEXT DEFAULT ''" },
+  ]);
 }
 
 function seedDefaultAdmin() {
@@ -145,8 +312,6 @@ function seedDefaultAdmin() {
     console.log("[DB] 默认管理员账号已创建: 18115335268 / 0720");
   }
 }
-
-// ===================== 辅助函数：行 → 对象 =====================
 
 export function rowToUser(row: any): SystemUser {
   let rawPerms: any = {};
@@ -210,23 +375,46 @@ export function rowToProduct(row: any) {
     id: row.id,
     name: row.name,
     category: row.category || "",
+    salesUnitId: row.sales_unit_id || undefined,
     unitPrice: row.unit_price || 0,
+    costType: (row.cost_type || "fixed") as "percentage" | "fixed",
     unitCost: row.unit_cost || 0,
+    costRate: row.cost_rate || 0,
     description: row.description || "",
+    commissionType: (row.commission_type || "percentage") as "percentage" | "fixed",
+    commissionRate: row.commission_rate || 0,
+    commissionAmount: row.commission_amount || 0,
+    commissionNote: row.commission_note || "",
+    settlementType: (row.settlement_type || "percentage") as "percentage" | "fixed",
+    settlementRate: row.settlement_rate ?? 100,
+    settlementAmount: row.settlement_amount || 0,
+    settlementNote: row.settlement_note || "",
   };
 }
 
 export function rowToSalesRecord(row: any) {
   return {
     id: row.id,
-    salesUnitId: row.sales_unit_id,
-    personnelId: row.personnel_id,
-    productId: row.product_id,
+    salesUnitId: row.sales_unit_id || "",
+    personnelId: row.personnel_id || "",
+    productId: row.product_id || "",
     quantity: row.quantity || 1,
     unitPrice: row.unit_price || 0,
     totalAmount: row.total_amount || 0,
     saleDate: row.sale_date,
     remark: row.remark || "",
+    synced: Boolean(row.synced),
+    externalOrderId: row.external_order_id || undefined,
+    customerName: row.customer_name || undefined,
+    salesUnitName: row.sales_unit_name || undefined,
+    salesPersonName: row.sales_person_name || undefined,
+    productName: row.product_name || undefined,
+    syncedAt: row.synced_at || undefined,
+    orderNumber: row.order_number || undefined,
+    productModule: row.product_module || undefined,
+    orderAmount: row.order_amount || undefined,
+    orderType: row.order_type || undefined,
+    activityName: row.activity_name || undefined,
   };
 }
 
@@ -240,9 +428,147 @@ export function rowToCostRecord(row: any) {
     remark: row.remark || "",
     createdAt: row.created_at,
     createdBy: row.created_by || undefined,
+    changeReason: row.change_reason || undefined,
+  };
+}
+
+export function rowToIncomeRecord(row: any) {
+  return {
+    id: row.id,
+    salesUnitId: row.sales_unit_id,
+    date: row.date,
+    items: JSON.parse(row.items || "[]"),
+    totalAmount: row.total_amount || 0,
+    remark: row.remark || "",
+    createdAt: row.created_at,
+    createdBy: row.created_by || undefined,
+    changeReason: row.change_reason || undefined,
+    isRecurring: Boolean(row.is_recurring),
+    recurringMonths: JSON.parse(row.recurring_months || "[1,2,3,4,5,6,7,8,9,10,11,12]"),
+    recurringStartDate: row.recurring_start_date || undefined,
+    recurringEndDate: row.recurring_end_date || undefined,
+  };
+}
+
+export function rowToRevenueSettlement(row: any) {
+  return {
+    id: row.id,
+    salesUnitId: row.sales_unit_id,
+    yearMonth: row.year_month,
+    estimatedAmount: row.estimated_amount || 0,
+    actualAmount: row.actual_amount ?? undefined,
+    isAdjusted: Boolean(row.is_adjusted),
+    remark: row.remark || undefined,
+    adjustedBy: row.adjusted_by || undefined,
+    adjustedAt: row.adjusted_at || undefined,
+    createdAt: row.created_at,
+  };
+}
+
+export function rowToUnitProductSettlement(row: any) {
+  return {
+    id: row.id,
+    salesUnitId: row.sales_unit_id,
+    productId: row.product_id,
+    settlementType: (row.settlement_type || "percentage") as "percentage" | "fixed",
+    settlementRate: row.settlement_rate ?? 100,
+    settlementAmount: row.settlement_amount || 0,
+    note: row.note || undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at || undefined,
+  };
+}
+
+export function rowToProductPersonCommission(row: any) {
+  return {
+    id: row.id,
+    salesUnitId: row.sales_unit_id,
+    productId: row.product_id,
+    personnelId: row.personnel_id,
+    managementCommissionRate: row.management_commission_rate || 0,
+    managementCommissionThreshold: row.management_commission_threshold || 0,
+    managementCommissionCondition: row.management_commission_condition || "",
+    personalCommissionRate: row.personal_commission_rate || 0,
+    personalCommissionThreshold: row.personal_commission_threshold || 0,
+    personalCommissionCondition: row.personal_commission_condition || "",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at || undefined,
+  };
+}
+
+export function rowToCostChangeLog(row: any) {
+  return {
+    id: row.id,
+    costRecordId: row.cost_record_id,
+    action: row.action,
+    reason: row.reason || "",
+    operator: row.operator || "",
+    operatorId: row.operator_id || "",
+    timestamp: row.timestamp,
+    summary: row.summary || "",
+    costRecordRemark: row.cost_record_remark || undefined,
+  };
+}
+
+export function rowToNotification(row: any) {
+  return {
+    id: row.id,
+    type: row.type || "cost_change",
+    title: row.title || "",
+    message: row.message || "",
+    timestamp: row.timestamp,
+    read: Boolean(row.read),
+  };
+}
+
+export function rowToMonthlyAdjustment(row: any) {
+  return {
+    id: row.id,
+    personnelId: row.personnel_id,
+    yearMonth: row.year_month,
+    leaveDays: row.leave_days || 0,
+    otherBonus: row.other_bonus || 0,
+    otherDeduction: row.other_deduction || 0,
+    note: row.note || "",
+    createdAt: row.created_at,
+    createdBy: row.created_by || undefined,
+  };
+}
+
+export function rowToPerformanceTarget(row: any) {
+  return {
+    id: row.id,
+    salesUnitId: row.sales_unit_id,
+    yearMonth: row.year_month,
+    personnelId: row.personnel_id || undefined,
+    targetAmount: row.target_amount || 0,
+    note: row.note || "",
+    createdAt: row.created_at,
+    createdBy: row.created_by || undefined,
+  };
+}
+
+export function rowToPositionGroupLabel(row: any) {
+  return {
+    id: row.id,
+    keyword: row.keyword,
+    label: row.label,
+    color: row.color || "gray",
+    description: row.description || undefined,
+    createdAt: row.created_at,
   };
 }
 
 export function generateId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+}
+
+export function parseJsonField(value: any, fallback: any) {
+  if (value == null || value === "") return fallback;
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
 }

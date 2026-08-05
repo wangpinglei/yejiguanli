@@ -1,10 +1,4 @@
-// ===================== API 客户端 =====================
-// 封装所有后端 API 调用，管理 JWT token
-
-// 优先级：.env.production 的 VITE_API_BASE（/yeji/api）> 自动按 Vite base 拼接（/yeji/api）> 兜底 /api
 export const API_BASE = import.meta.env.VITE_API_BASE || (import.meta.env.BASE_URL + "api");
-
-// ===================== Token 管理 =====================
 
 const TOKEN_KEY = "pm_token";
 
@@ -20,28 +14,17 @@ export function removeToken(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
 
-// ===================== 请求封装 =====================
-
-async function apiRequest<T>(
-  method: string,
-  path: string,
-  body?: unknown
-): Promise<T> {
+async function apiRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
   const token = getToken();
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const res = await fetch(`${API_BASE}${path}`, {
     method,
     headers,
-    body: body ? JSON.stringify(body) : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
   });
 
-  // 401 → 清除 token，跳转登录（基于 Vite base，兼容 /yeji/ 子路径）
   if (res.status === 401) {
     removeToken();
     const loginPath = import.meta.env.BASE_URL + "login";
@@ -52,10 +35,7 @@ async function apiRequest<T>(
   }
 
   const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || `请求失败 (${res.status})`);
-  }
-
+  if (!res.ok) throw new Error(data.error || `请求失败 (${res.status})`);
   return data as T;
 }
 
@@ -65,8 +45,6 @@ export const api = {
   put: <T>(path: string, body?: unknown) => apiRequest<T>("PUT", path, body),
   delete: <T>(path: string) => apiRequest<T>("DELETE", path),
 };
-
-// ===================== API 类型 =====================
 
 export interface AuthUser {
   id: string;
@@ -82,8 +60,6 @@ export interface LoginResponse {
   user: AuthUser;
 }
 
-// ===================== Auth API =====================
-
 export const authApi = {
   login: (username: string, password: string) =>
     api.post<LoginResponse>("/auth/login", { username, password }),
@@ -91,8 +67,6 @@ export const authApi = {
   changePassword: (oldPassword: string, newPassword: string) =>
     api.put("/auth/password", { oldPassword, newPassword }),
 };
-
-// ===================== Users API =====================
 
 export interface UserItem {
   id: string;
@@ -128,16 +102,12 @@ export const usersApi = {
   delete: (id: string) => api.delete(`/users/${id}`),
 };
 
-// ===================== Sales Units API =====================
-
 export const salesUnitsApi = {
   list: () => api.get<any[]>("/sales-units"),
   create: (data: any) => api.post<any>("/sales-units", data),
   update: (id: string, data: any) => api.put<any>(`/sales-units/${id}`, data),
   delete: (id: string) => api.delete(`/sales-units/${id}`),
 };
-
-// ===================== Personnel API =====================
 
 export const personnelApi = {
   list: () => api.get<any[]>("/personnel"),
@@ -146,16 +116,13 @@ export const personnelApi = {
   delete: (id: string) => api.delete(`/personnel/${id}`),
 };
 
-// ===================== Products API =====================
-
 export const productsApi = {
   list: () => api.get<any[]>("/products"),
   create: (data: any) => api.post<any>("/products", data),
+  ensure: (data: any) => api.post<any>("/products/ensure", data),
   update: (id: string, data: any) => api.put<any>(`/products/${id}`, data),
   delete: (id: string) => api.delete(`/products/${id}`),
 };
-
-// ===================== Sales Records API =====================
 
 export const salesRecordsApi = {
   list: (params?: { salesUnitId?: string; personnelId?: string }) => {
@@ -170,8 +137,6 @@ export const salesRecordsApi = {
   delete: (id: string) => api.delete(`/sales-records/${id}`),
 };
 
-// ===================== Cost Records API =====================
-
 export const costRecordsApi = {
   list: (params?: { salesUnitId?: string }) => {
     const query = new URLSearchParams();
@@ -184,9 +149,65 @@ export const costRecordsApi = {
   delete: (id: string) => api.delete(`/cost-records/${id}`),
 };
 
-// ===================== Migrate API =====================
+export const incomeRecordsApi = {
+  list: () => api.get<any[]>("/income-records"),
+  create: (data: any) => api.post<any>("/income-records", data),
+  update: (id: string, data: any) => api.put<any>(`/income-records/${id}`, data),
+  delete: (id: string) => api.delete(`/income-records/${id}`),
+};
+
+export const revenueSettlementsApi = {
+  list: () => api.get<any[]>("/revenue-settlements"),
+  upsert: (data: any) => api.post<any>("/revenue-settlements/upsert", data),
+  delete: (id: string) => api.delete(`/revenue-settlements/${id}`),
+};
+
+export const unitProductSettlementsApi = {
+  list: () => api.get<any[]>("/unit-product-settlements"),
+  upsert: (data: any) => api.post<any>("/unit-product-settlements/upsert", data),
+  batch: (items: any[]) => api.post<any[]>("/unit-product-settlements/batch", items),
+  delete: (id: string) => api.delete(`/unit-product-settlements/${id}`),
+};
+
+export const productPersonCommissionsApi = {
+  list: () => api.get<any[]>("/product-person-commissions"),
+  upsert: (data: any) => api.post<any>("/product-person-commissions/upsert", data),
+  delete: (id: string) => api.delete(`/product-person-commissions/${id}`),
+};
+
+export const costChangeLogsApi = {
+  list: () => api.get<any[]>("/cost-change-logs"),
+  create: (data: any) => api.post<any>("/cost-change-logs", data),
+};
+
+export const notificationsApi = {
+  list: () => api.get<any[]>("/notifications"),
+  create: (data: any) => api.post<any>("/notifications", data),
+  markRead: (id: string) => api.put<any>(`/notifications/${id}/read`),
+  markAllRead: () => api.put<any>("/notifications/read-all"),
+};
+
+export const monthlyAdjustmentsApi = {
+  list: () => api.get<any[]>("/monthly-adjustments"),
+  upsert: (data: any) => api.post<any>("/monthly-adjustments/upsert", data),
+  delete: (id: string) => api.delete(`/monthly-adjustments/${id}`),
+};
+
+export const performanceTargetsApi = {
+  list: () => api.get<any[]>("/performance-targets"),
+  upsert: (data: any) => api.post<any>("/performance-targets/upsert", data),
+  batch: (items: any[]) => api.post<any[]>("/performance-targets/batch", items),
+  delete: (id: string) => api.delete(`/performance-targets/${id}`),
+};
+
+export const positionGroupLabelsApi = {
+  list: () => api.get<any[]>("/position-group-labels"),
+  create: (data: any) => api.post<any>("/position-group-labels", data),
+  update: (id: string, data: any) => api.put<any>(`/position-group-labels/${id}`, data),
+  delete: (id: string) => api.delete(`/position-group-labels/${id}`),
+};
 
 export const migrateApi = {
-  migrate: (data: { salesUnits: any[]; personnel: any[]; products: any[]; salesRecords: any[]; costRecords: any[] }) =>
+  migrate: (data: Record<string, any>) =>
     api.post<{ message: string; stats: any }>("/migrate", data),
 };

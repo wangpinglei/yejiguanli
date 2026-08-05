@@ -64,7 +64,7 @@ router.put("/:id", requireEditPermission, (req, res) => {
   }
 
   // 军工干部只读（已被 requireEditPermission 拦截，这里做双重保险）
-  if (isReadOnly(role)) {
+  if (isReadOnly(req.user!)) {
     return res.status(403).json({ error: "只读角色无编辑权限" });
   }
 
