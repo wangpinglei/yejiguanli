@@ -8,6 +8,7 @@ import {
   calculateMonthlySalary,
   filterByMonth,
   getPersonalSales,
+  isSalesBattlePosition,
   EMPTY_SALARY,
 } from "@/lib/salary";
 import type { Personnel } from "@/types";
@@ -89,12 +90,17 @@ export default function SalesBattleReport() {
     return personnel.filter((p) => p.salesUnitId === unitId && p.status === "active");
   }, [personnel, unitId]);
 
+  // 战报仅展示销售相关岗位（排除组织部、售后等非销售岗）
+  const battlePersonnel = useMemo(() => {
+    return unitPersonnel.filter((p) => isSalesBattlePosition(p.position));
+  }, [unitPersonnel]);
+
   // 当月销售记录
   const monthlyRecords = useMemo(() => {
     return filterByMonth(salesRecords, yearMonth);
   }, [salesRecords, yearMonth]);
 
-  // 当月单位的所有销售记录
+  // 当月单位的所有销售记录（按销售单位汇总，个人业绩再按任命人员归集）
   const unitMonthlyRecords = useMemo(() => {
     return monthlyRecords.filter((r) => r.salesUnitId === unitId);
   }, [monthlyRecords, unitId]);
@@ -126,9 +132,9 @@ export default function SalesBattleReport() {
 
   // 计算每个人员的战报行
   const battleRows = useMemo(() => {
-    // 1. 系统内在职人员
-    const rows = unitPersonnel.map((p) => {
-      const personalSales = getPersonalSales(p.id, unitMonthlyRecords);
+    // 1. 系统内在职销售岗位；个人业绩 = 本单位当月销售记录按任命人员汇总
+    const rows = battlePersonnel.map((p) => {
+      const personalSales = getPersonalSales(p.id, unitMonthlyRecords, p.name);
       const targetAmount = personnelTargets.get(p.id);
       const hasTarget = targetAmount !== undefined;
       const diff = hasTarget ? personalSales - targetAmount : 0;
@@ -168,10 +174,12 @@ export default function SalesBattleReport() {
     const externalMap = new Map<string, number>();
     externalRecords.forEach((r) => {
       const name = r.salesPersonName!.trim();
+      // 已能按姓名归到战报人员的，不重复算外部行
+      if (battlePersonnel.some((p) => p.name === name)) return;
       externalMap.set(name, (externalMap.get(name) || 0) + r.totalAmount);
     });
 
-    // 确保不与系统人员重名（重名的外部人员业绩已通过 personnelId 匹配到系统人员）
+    // 确保不与系统人员重名（重名的外部人员业绩已通过 personnelId / 姓名匹配到系统人员）
     const existingNames = new Set(unitPersonnel.map((p) => p.name));
     externalMap.forEach((sales, name) => {
       if (existingNames.has(name)) return; // 重名跳过
@@ -215,12 +223,20 @@ export default function SalesBattleReport() {
     });
 
     return rows;
-  }, [unitPersonnel, unitMonthlyRecords, personnelTargets, monthlyAdjustments, yearMonth, salesRecords, products, matchPositionLabel, unitId]);
+  }, [
+    battlePersonnel, unitPersonnel, unitMonthlyRecords, personnelTargets,
+    monthlyAdjustments, yearMonth, salesRecords, products, matchPositionLabel,
+    unitId, productPersonCommissions,
+  ]);
 
-  // 团队合计
+  // 团队合计（仅战报表内人员目标）
   const totalTarget = useMemo(() => {
-    return Array.from(personnelTargets.values()).reduce((sum, v) => sum + v, 0);
-  }, [personnelTargets]);
+    return battleRows.reduce((sum, row) => sum + (row.targetAmount || 0), 0);
+  }, [battleRows]);
+
+  const battlePersonalSalesTotal = useMemo(() => {
+    return battleRows.reduce((sum, row) => sum + row.personalSales, 0);
+  }, [battleRows]);
 
   // 状态编辑相关
   const [editingUnitTarget, setEditingUnitTarget] = useState(false);
@@ -279,7 +295,7 @@ export default function SalesBattleReport() {
 
   const openBatchEdit = () => {
     const draft: Record<string, number> = {};
-    unitPersonnel.forEach((p) => {
+    battlePersonnel.forEach((p) => {
       draft[p.id] = personnelTargets.get(p.id) || 0;
     });
     setBatchDraft(draft);
@@ -288,7 +304,7 @@ export default function SalesBattleReport() {
 
   const saveBatchTargets = async () => {
     if (!unitId) return;
-    const targets = unitPersonnel.map((p) => ({
+    const targets = battlePersonnel.map((p) => ({
       salesUnitId: unitId,
       yearMonth,
       personnelId: p.id,
@@ -651,6 +667,10 @@ export default function SalesBattleReport() {
 
       {/* 战报表格 */}
       <Card className="overflow-hidden">
+        <div className="border-b bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
+          仅展示销售相关岗位（岗位名含「销售 / 顾问 / 客户经理 / 外援」等）；
+          组织部、售后等非销售岗不显示。个人业绩按本单位销售记录归集。
+        </div>
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
@@ -776,7 +796,7 @@ export default function SalesBattleReport() {
                   {formatCurrency(totalTarget)}
                 </TableCell>
                 <TableCell className="text-center text-pink-900">
-                  {formatCurrency(teamTotal)}
+                  {formatCurrency(battlePersonalSalesTotal)}
                 </TableCell>
                 <TableCell className={`text-center ${teamDiff < 0 ? "text-red-600" : "text-pink-900"}`}>
                   {effectiveTeamTarget > 0 ? (
@@ -880,11 +900,12 @@ export default function SalesBattleReport() {
               人员目标批量录入
             </DialogTitle>
             <DialogDescription>
-              为 {currentUnit?.name} 在 {yearMonth.split("-")[0]}年{yearMonth.split("-")[1]}月 录入每位在职人员的业绩目标。留空表示无个人目标（岗位命中特殊分组如「外援团」的人员可不填）。
+              为 {currentUnit?.name} 在 {yearMonth.split("-")[0]}年{yearMonth.split("-")[1]}月
+              录入销售岗位人员的业绩目标（非销售岗不在战报中显示，也不在此录入）。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">
-            {unitPersonnel.map((p) => (
+            {battlePersonnel.map((p) => (
               <div key={p.id} className="grid grid-cols-[1fr_180px] items-center gap-3 rounded-lg border p-3">
                 <div>
                   <p className="font-medium">{p.name}</p>
@@ -898,13 +919,13 @@ export default function SalesBattleReport() {
                 />
               </div>
             ))}
-            {unitPersonnel.length === 0 && (
-              <p className="py-8 text-center text-sm text-muted-foreground">该单位暂无在职人员</p>
+            {battlePersonnel.length === 0 && (
+              <p className="py-8 text-center text-sm text-muted-foreground">该单位暂无销售岗位在职人员</p>
             )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setBatchOpen(false)}>取消</Button>
-            <Button onClick={saveBatchTargets} disabled={unitPersonnel.length === 0}>
+            <Button onClick={saveBatchTargets} disabled={battlePersonnel.length === 0}>
               <Save className="mr-2 h-4 w-4" />
               批量保存
             </Button>

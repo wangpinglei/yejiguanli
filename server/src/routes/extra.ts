@@ -249,6 +249,58 @@ router.post("/product-person-commissions/upsert", requireEditPermission, (req, r
   res.json(rowToProductPersonCommission(db.prepare("SELECT * FROM product_person_commissions WHERE id=?").get(id)));
 });
 
+router.post("/product-person-commissions/batch", requireEditPermission, (req, res) => {
+  const items = Array.isArray(req.body) ? req.body : (req.body.items || []);
+  const db = getDb();
+  const results: any[] = [];
+  runInTransaction(() => {
+    for (const item of items) {
+      const {
+        salesUnitId, productId, personnelId,
+        managementCommissionRate, managementCommissionThreshold, managementCommissionCondition,
+        personalCommissionRate, personalCommissionThreshold, personalCommissionCondition,
+      } = item;
+      if (!salesUnitId || !productId || !personnelId) continue;
+      const existing = db.prepare(
+        "SELECT * FROM product_person_commissions WHERE sales_unit_id=? AND product_id=? AND personnel_id=?"
+      ).get(salesUnitId, productId, personnelId);
+      const now = new Date().toISOString();
+      if (existing) {
+        db.prepare(`
+          UPDATE product_person_commissions SET
+            management_commission_rate=?, management_commission_threshold=?, management_commission_condition=?,
+            personal_commission_rate=?, personal_commission_threshold=?, personal_commission_condition=?, updated_at=?
+          WHERE id=?
+        `).run(
+          managementCommissionRate ?? 0, managementCommissionThreshold ?? 0, managementCommissionCondition || "",
+          personalCommissionRate ?? 0, personalCommissionThreshold ?? 0, personalCommissionCondition || "",
+          now, existing.id
+        );
+        results.push(rowToProductPersonCommission(
+          db.prepare("SELECT * FROM product_person_commissions WHERE id=?").get(existing.id)
+        ));
+      } else {
+        const id = generateId("ppc");
+        db.prepare(`
+          INSERT INTO product_person_commissions (
+            id, sales_unit_id, product_id, personnel_id,
+            management_commission_rate, management_commission_threshold, management_commission_condition,
+            personal_commission_rate, personal_commission_threshold, personal_commission_condition, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          id, salesUnitId, productId, personnelId,
+          managementCommissionRate ?? 0, managementCommissionThreshold ?? 0, managementCommissionCondition || "",
+          personalCommissionRate ?? 0, personalCommissionThreshold ?? 0, personalCommissionCondition || "", now
+        );
+        results.push(rowToProductPersonCommission(
+          db.prepare("SELECT * FROM product_person_commissions WHERE id=?").get(id)
+        ));
+      }
+    }
+  });
+  res.json(results);
+});
+
 router.delete("/product-person-commissions/:id", requireEditPermission, (req, res) => {
   const db = getDb();
   const result = db.prepare("DELETE FROM product_person_commissions WHERE id=?").run(req.params.id);

@@ -172,6 +172,7 @@ export const unitProductSettlementsApi = {
 export const productPersonCommissionsApi = {
   list: () => api.get<any[]>("/product-person-commissions"),
   upsert: (data: any) => api.post<any>("/product-person-commissions/upsert", data),
+  batch: (items: any[]) => api.post<any[]>("/product-person-commissions/batch", items),
   delete: (id: string) => api.delete(`/product-person-commissions/${id}`),
 };
 

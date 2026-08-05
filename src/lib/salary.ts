@@ -29,14 +29,67 @@ export function filterByMonth(records: SalesRecord[], yearMonth?: string): Sales
 
 /**
  * 计算个人销售额（给定销售记录）
+ * 优先按 personnelId；无 id 时按销售人员姓名匹配（导入/同步未挂人员时）
  */
 export function getPersonalSales(
   personId: string,
-  salesRecords: SalesRecord[]
+  salesRecords: SalesRecord[],
+  personName?: string
 ): number {
+  const name = (personName || "").trim();
   return salesRecords
-    .filter((s) => s.personnelId === personId)
+    .filter((s) => {
+      if (s.personnelId === personId) return true;
+      if (!s.personnelId && name && (s.salesPersonName || "").trim() === name) {
+        return true;
+      }
+      return false;
+    })
     .reduce((sum, s) => sum + s.totalAmount, 0);
+}
+
+/** 非销售岗位关键词（命中则战报一定不展示；「销售」开头的岗位优先放行） */
+const NON_SALES_POSITION_KEYWORDS = [
+  "组织部",
+  "组织",
+  "售后",
+  "人事",
+  "财务",
+  "行政",
+  "后勤",
+  "客服",
+  "技术支持",
+  "研发",
+  "运维",
+  "产品运营",
+  "设计师",
+  "法务",
+  "军工",
+] as const;
+
+/** 销售相关岗位关键词（白名单：必须命中才展示） */
+const SALES_POSITION_KEYWORDS = [
+  "销售",
+  "顾问",
+  "业务员",
+  "业务经理",
+  "客户经理",
+  "外援",
+] as const;
+
+/**
+ * 是否应出现在单位战报中
+ * 规则：含「销售」→ 展示；命中非销售词 → 隐藏；否则必须命中销售相关词
+ */
+export function isSalesBattlePosition(position?: string): boolean {
+  const pos = (position || "").trim().toLowerCase().replace(/\s+/g, "");
+  if (!pos) return false;
+  // 含「销售」优先视为销售岗
+  if (pos.includes("销售")) return true;
+  if (NON_SALES_POSITION_KEYWORDS.some((k) => pos.includes(k.toLowerCase()))) {
+    return false;
+  }
+  return SALES_POSITION_KEYWORDS.some((k) => pos.includes(k.toLowerCase()));
 }
 
 /**
@@ -212,7 +265,7 @@ export function calculateMonthlySalary(
   const monthlyRecords = filterByMonth(salesRecords, yearMonth);
 
   const s = person.salary || EMPTY_SALARY;
-  const personalSales = getPersonalSales(person.id, monthlyRecords);
+  const personalSales = getPersonalSales(person.id, monthlyRecords, person.name);
   const teamSales = getTeamSales(person.salesUnitId, monthlyRecords);
 
   // 优先使用产品级提成配置（按产品逐个计算），无配置则 fallback 到默认薪资结构

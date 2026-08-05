@@ -29,6 +29,51 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Popover, PopoverContent, PopoverTrigger,
+} from "@/components/ui/popover";
+
+/** 长文本截断，点击展开查看全文 */
+function ExpandableCellText({
+  text,
+  emptyText = "-",
+  label = "完整内容",
+  maxLen = 10,
+  className = "max-w-[9rem]",
+}: {
+  text?: string;
+  emptyText?: string;
+  label?: string;
+  maxLen?: number;
+  className?: string;
+}) {
+  const value = (text || "").trim();
+  if (!value) {
+    return <span className="text-sm text-muted-foreground">{emptyText}</span>;
+  }
+  if (value.length <= maxLen) {
+    return <span className="text-sm">{value}</span>;
+  }
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={
+            `block w-full truncate text-left text-sm text-primary hover:underline cursor-pointer ${className}`
+          }
+          title="点击查看完整内容"
+        >
+          {value}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80 max-w-[min(20rem,90vw)] p-3">
+        <p className="mb-1 text-xs text-muted-foreground">{label}</p>
+        <p className="text-sm break-all whitespace-pre-wrap">{value}</p>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 // ===================== 批量导入类型 =====================
 interface ImportRow {
@@ -51,6 +96,97 @@ interface ImportRow {
   personMatched: boolean;
   productMatched: boolean;
   selected: boolean; // 是否勾选导入
+  isDuplicate?: boolean; // 与已有记录或表内其他行完全相同
+  duplicateReason?: string;
+  duplicateExistingId?: string; // 可覆盖的已有记录 id
+}
+
+/** 用于判断「全部一模一样」的指纹 */
+function buildSalesImportFingerprint(r: {
+  customerName?: string;
+  productName?: string;
+  productId?: string;
+  orderAmount?: number;
+  totalAmount?: number;
+  orderType?: string;
+  salesUnitId?: string;
+  salesUnitName?: string;
+  personnelId?: string;
+  salesPersonName?: string;
+  saleDate?: string;
+  activityName?: string;
+}): string {
+  return [
+    (r.customerName || "").trim().toLowerCase(),
+    (r.productName || "").trim().toLowerCase() || (r.productId || ""),
+    Number(r.orderAmount || 0).toFixed(2),
+    Number(r.totalAmount || 0).toFixed(2),
+    (r.orderType || "").trim().toLowerCase(),
+    (r.salesUnitId || "").trim() || (r.salesUnitName || "").trim().toLowerCase(),
+    (r.personnelId || "").trim() || (r.salesPersonName || "").trim().toLowerCase(),
+    (r.saleDate || "").slice(0, 10),
+    (r.activityName || "").trim().toLowerCase(),
+  ].join("|");
+}
+
+function markDuplicateImportRows(
+  rows: ImportRow[],
+  existing: SalesRecord[],
+  productList: { id: string; name: string }[]
+): ImportRow[] {
+  const idToProductName = new Map(productList.map((p) => [p.id, p.name || ""]));
+  const existingByKey = new Map<string, string>();
+  for (const s of existing) {
+    const key = buildSalesImportFingerprint({
+      customerName: s.customerName,
+      productName: s.productName || idToProductName.get(s.productId || "") || "",
+      productId: s.productId,
+      orderAmount: s.orderAmount,
+      totalAmount: s.totalAmount,
+      orderType: s.orderType,
+      salesUnitId: s.salesUnitId,
+      salesUnitName: s.salesUnitName,
+      personnelId: s.personnelId,
+      salesPersonName: s.salesPersonName,
+      saleDate: s.saleDate,
+      activityName: s.activityName,
+    });
+    if (!existingByKey.has(key)) existingByKey.set(key, s.id);
+  }
+
+  const seenInFile = new Set<string>();
+  return rows.map((row) => {
+    const key = buildSalesImportFingerprint({
+      customerName: row.customerName,
+      productName: row.productName,
+      productId: row.matchedProductId,
+      orderAmount: row.orderAmount,
+      totalAmount: row.totalAmount,
+      orderType: row.orderType,
+      salesUnitId: row.matchedUnitId,
+      salesUnitName: row.salesUnitName,
+      personnelId: row.matchedPersonId,
+      salesPersonName: row.salesPersonName,
+      saleDate: row.saleDate,
+      activityName: row.activityName,
+    });
+    const existingId = existingByKey.get(key);
+    const inFileDup = seenInFile.has(key);
+    seenInFile.add(key);
+    const isDuplicate = Boolean(existingId) || inFileDup;
+    return {
+      ...row,
+      isDuplicate,
+      duplicateReason: existingId
+        ? "与系统中已有记录完全相同"
+        : inFileDup
+          ? "导入表内重复行"
+          : "",
+      duplicateExistingId: existingId,
+      // 默认屏蔽重复行，避免误导入
+      selected: row.selected && !isDuplicate,
+    };
+  });
 }
 
 // 表头别名：短词仅精确匹配，避免「客户」「类型」等误伤其他列
@@ -517,8 +653,13 @@ export default function SalesRecords() {
     } else if (emptyCustomer > 0) {
       console.warn(`导入预览：${emptyCustomer} 行客户姓名为空`);
     }
-    setImportRows(rows);
+    const marked = markDuplicateImportRows(rows, salesRecords, products);
+    const dupCount = marked.filter((r) => r.isDuplicate).length;
+    setImportRows(marked);
     setImportStep("preview");
+    if (dupCount > 0) {
+      alert(`检测到 ${dupCount} 条与系统已有记录或表内完全相同的数据，已默认取消勾选（屏蔽）。如需覆盖或仍要导入，可在预览中重新勾选后确认。`);
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -597,25 +738,74 @@ export default function SalesRecords() {
   };
 
   const handleConfirmImport = async () => {
-    const selectedRows = importRows.filter((r) => r.selected);
+    let selectedRows = importRows.filter((r) => r.selected);
     if (selectedRows.length === 0) {
       alert("请至少选择一行数据导入");
       return;
     }
+
+    const selectedDups = selectedRows.filter((r) => r.isDuplicate);
+    let overwriteDuplicates = false;
+    if (selectedDups.length > 0) {
+      const skipOrCancel = confirm(
+        `选中行中有 ${selectedDups.length} 条与系统已有记录或表内完全相同。\n\n` +
+        `确定 = 跳过这些重复行，只导入其余新数据\n` +
+        `取消 = 再选处理方式（覆盖 / 返回）`
+      );
+      if (skipOrCancel) {
+        selectedRows = selectedRows.filter((r) => !r.isDuplicate);
+        if (selectedRows.length === 0) {
+          alert("跳过重复后没有可导入的新数据");
+          return;
+        }
+      } else {
+        const doOverwrite = confirm(
+          `是否用导入数据覆盖已有的完全相同记录？\n\n` +
+          `确定 = 覆盖已有记录（表内重复仍只保留一条）\n` +
+          `取消 = 返回预览，不执行导入`
+        );
+        if (!doOverwrite) return;
+        overwriteDuplicates = true;
+      }
+    }
+
     setImporting(true);
     let successCount = 0;
     let failCount = 0;
     let createdProductCount = 0;
+    let overwriteCount = 0;
+    let skippedInFileDup = 0;
 
-    // 导入过程中本地缓存：产品名 → id（含本次新建）
     const nameToProductId = new Map<string, string>();
     products.forEach((p) => {
       const key = (p.name || "").trim().toLowerCase();
       if (key) nameToProductId.set(key, p.id);
     });
 
+    const importedKeys = new Set<string>();
+
     for (const row of selectedRows) {
       try {
+        const rowKey = buildSalesImportFingerprint({
+          customerName: row.customerName,
+          productName: row.productName,
+          productId: row.matchedProductId,
+          orderAmount: row.orderAmount,
+          totalAmount: row.totalAmount,
+          orderType: row.orderType,
+          salesUnitId: row.matchedUnitId,
+          salesUnitName: row.salesUnitName,
+          personnelId: row.matchedPersonId,
+          salesPersonName: row.salesPersonName,
+          saleDate: row.saleDate,
+          activityName: row.activityName,
+        });
+        if (importedKeys.has(rowKey)) {
+          skippedInFileDup++;
+          continue;
+        }
+        importedKeys.add(rowKey);
+
         let productId = row.matchedProductId;
         const productName = (row.productName || "").trim();
         if (productName) {
@@ -638,7 +828,7 @@ export default function SalesRecords() {
           }
         }
 
-        await addSalesRecord({
+        const payload = {
           salesUnitId: row.matchedUnitId,
           personnelId: row.matchedPersonId,
           productId: productId || "",
@@ -653,7 +843,16 @@ export default function SalesRecords() {
           orderAmount: row.orderAmount,
           orderType: row.orderType,
           activityName: row.activityName,
-        });
+        };
+
+        if (overwriteDuplicates && row.duplicateExistingId) {
+          await updateSalesRecord(row.duplicateExistingId, payload);
+          overwriteCount++;
+        } else if (row.isDuplicate && row.duplicateExistingId && !overwriteDuplicates) {
+          continue;
+        } else {
+          await addSalesRecord(payload);
+        }
         successCount++;
       } catch (err) {
         failCount++;
@@ -668,7 +867,16 @@ export default function SalesRecords() {
     const productTip = createdProductCount > 0
       ? `\n已自动新建 ${createdProductCount} 个产品，请到「结算与提成」配置结算比例与销售提成。`
       : "\n可在「结算与提成」中配置各单位结算比例与人员提成。";
-    alert(`导入完成：成功 ${successCount} 条${failCount > 0 ? `，失败 ${failCount} 条` : ""}${productTip}`);
+    const extraTips = [
+      overwriteCount > 0 ? `覆盖 ${overwriteCount} 条` : "",
+      skippedInFileDup > 0 ? `表内重复跳过 ${skippedInFileDup} 条` : "",
+    ].filter(Boolean).join("，");
+    alert(
+      `导入完成：成功 ${successCount} 条` +
+      `${failCount > 0 ? `，失败 ${failCount} 条` : ""}` +
+      `${extraTips ? `（${extraTips}）` : ""}` +
+      productTip
+    );
   };
 
   const openImportDialog = () => {
@@ -681,9 +889,11 @@ export default function SalesRecords() {
   // 导入预览统计
   const importStats = useMemo(() => {
     const selected = importRows.filter((r) => r.selected);
+    const duplicates = importRows.filter((r) => r.isDuplicate);
     return {
       total: importRows.length,
       selected: selected.length,
+      duplicates: duplicates.length,
       allMatched: selected.filter((r) => r.unitMatched && r.personMatched && r.productMatched).length,
       partialMatched: selected.filter((r) => !(r.unitMatched && r.personMatched && r.productMatched) && (r.unitMatched || r.personMatched || r.productMatched)).length,
       noMatch: selected.filter((r) => !r.unitMatched && !r.personMatched && !r.productMatched).length,
@@ -812,7 +1022,7 @@ export default function SalesRecords() {
                       aria-label="全选"
                     />
                   </TableHead>
-                  <TableHead>客户姓名</TableHead>
+                  <TableHead className="w-[9.5rem]">客户姓名</TableHead>
                   <TableHead>购买产品</TableHead>
                   <TableHead className="text-right">订单金额</TableHead>
                   <TableHead className="text-right">实收金额</TableHead>
@@ -842,7 +1052,12 @@ export default function SalesRecords() {
                         />
                       )}
                     </TableCell>
-                    <TableCell className="text-sm whitespace-nowrap">{record.customerName || "-"}</TableCell>
+                    <TableCell className="max-w-[9.5rem]">
+                      <ExpandableCellText
+                        text={record.customerName}
+                        label="客户姓名"
+                      />
+                    </TableCell>
                     <TableCell className="whitespace-nowrap">{getProductName(record)}</TableCell>
                     <TableCell className="text-right text-muted-foreground whitespace-nowrap">{record.orderAmount ? formatCurrency(record.orderAmount) : "-"}</TableCell>
                     <TableCell className="text-right font-bold text-blue-600 whitespace-nowrap">{formatCurrency(record.totalAmount)}</TableCell>
@@ -1111,6 +1326,11 @@ export default function SalesRecords() {
               <div className="flex items-center gap-3 flex-wrap">
                 <Badge variant="secondary">共 {importStats.total} 行</Badge>
                 <Badge className="bg-emerald-100 text-emerald-700">已选 {importStats.selected} 行</Badge>
+                {importStats.duplicates > 0 && (
+                  <Badge className="bg-orange-100 text-orange-700">
+                    完全相同 {importStats.duplicates}（已默认屏蔽）
+                  </Badge>
+                )}
                 <Badge className="bg-green-100 text-green-700">全部匹配 {importStats.allMatched}</Badge>
                 {importStats.partialMatched > 0 && (
                   <Badge className="bg-amber-100 text-amber-700">部分匹配 {importStats.partialMatched}</Badge>
@@ -1151,7 +1371,13 @@ export default function SalesRecords() {
                       return (
                         <TableRow
                           key={row.rowIndex}
-                          className={row.selected ? "" : "opacity-40"}
+                          className={
+                            row.isDuplicate
+                              ? "bg-orange-50/60 opacity-70"
+                              : row.selected
+                                ? ""
+                                : "opacity-40"
+                          }
                         >
                           <TableCell className="text-center">
                             <input
@@ -1162,7 +1388,12 @@ export default function SalesRecords() {
                             />
                           </TableCell>
                           <TableCell className="text-center text-xs text-muted-foreground">{row.rowIndex}</TableCell>
-                          <TableCell className="text-sm">{row.customerName || "-"}</TableCell>
+                          <TableCell className="max-w-[9.5rem]">
+                            <ExpandableCellText
+                              text={row.customerName}
+                              label="客户姓名"
+                            />
+                          </TableCell>
                           <TableCell className="text-sm">
                             {row.productName}
                             {row.productMatched ? (
@@ -1195,13 +1426,20 @@ export default function SalesRecords() {
                           <TableCell className="text-sm">{row.saleDate}</TableCell>
                           <TableCell className="text-sm text-muted-foreground">{row.activityName || "-"}</TableCell>
                           <TableCell>
-                            {allMatched ? (
-                              <Badge className="bg-green-100 text-green-700 text-xs">全部匹配</Badge>
-                            ) : anyMatched ? (
-                              <Badge className="bg-amber-100 text-amber-700 text-xs">部分匹配</Badge>
-                            ) : (
-                              <Badge className="bg-red-100 text-red-700 text-xs">未匹配</Badge>
-                            )}
+                            <div className="flex flex-col gap-1">
+                              {row.isDuplicate && (
+                                <Badge className="bg-orange-100 text-orange-700 text-xs w-fit">
+                                  {row.duplicateReason || "完全相同"}
+                                </Badge>
+                              )}
+                              {allMatched ? (
+                                <Badge className="bg-green-100 text-green-700 text-xs w-fit">全部匹配</Badge>
+                              ) : anyMatched ? (
+                                <Badge className="bg-amber-100 text-amber-700 text-xs w-fit">部分匹配</Badge>
+                              ) : (
+                                <Badge className="bg-red-100 text-red-700 text-xs w-fit">未匹配</Badge>
+                              )}
+                            </div>
                           </TableCell>
                         </TableRow>
                       );
@@ -1211,6 +1449,16 @@ export default function SalesRecords() {
               </div>
 
               {/* 提示 */}
+              {importStats.duplicates > 0 && (
+                <div className="rounded-lg border border-orange-200 bg-orange-50/50 p-3 text-xs text-orange-800">
+                  <p className="font-medium">检测到与系统或表内完全相同的数据：</p>
+                  <ul className="list-disc list-inside mt-1 space-y-0.5">
+                    <li>重复行已默认取消勾选（屏蔽），避免误导入</li>
+                    <li>若仍勾选重复行再点确认，可选择「跳过」或「覆盖已有记录」</li>
+                    <li>比对字段：客户、产品、订单/实收金额、订单类型、单位、人员、成交日期、活动</li>
+                  </ul>
+                </div>
+              )}
               {(importStats.noMatch > 0 || importStats.partialMatched > 0) && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 text-xs text-amber-700">
                   <p className="font-medium">部分数据未完全匹配，说明：</p>

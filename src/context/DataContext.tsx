@@ -141,6 +141,9 @@ interface DataContextType {
   deleteUnitProductSettlement: (id: string) => Promise<void>;
 
   upsertProductPersonCommission: (c: Omit<ProductPersonCommission, "id" | "createdAt">) => Promise<void>;
+  batchUpsertProductPersonCommissions: (
+    items: Omit<ProductPersonCommission, "id" | "createdAt">[],
+  ) => Promise<void>;
   deleteProductPersonCommission: (id: string) => Promise<void>;
 
   upsertMonthlyAdjustment: (a: Omit<MonthlyAdjustment, "id" | "createdAt">) => Promise<void>;
@@ -517,6 +520,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
       return [...prev, saved];
     });
   }, []);
+  const batchUpsertProductPersonCommissions = useCallback(async (
+    items: Omit<ProductPersonCommission, "id" | "createdAt">[],
+  ) => {
+    await productPersonCommissionsApi.batch(items);
+    setProductPersonCommissions(await productPersonCommissionsApi.list());
+  }, []);
   const deleteProductPersonCommission = useCallback(async (id: string) => {
     await productPersonCommissionsApi.delete(id);
     setProductPersonCommissions((prev) => prev.filter((x) => x.id !== id));
@@ -609,7 +618,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     addIncomeRecord, updateIncomeRecord, deleteIncomeRecord,
     upsertRevenueSettlement, deleteRevenueSettlement,
     upsertUnitProductSettlement, batchUpsertUnitProductSettlements, deleteUnitProductSettlement,
-    upsertProductPersonCommission, deleteProductPersonCommission,
+    upsertProductPersonCommission, batchUpsertProductPersonCommissions, deleteProductPersonCommission,
     upsertMonthlyAdjustment, deleteMonthlyAdjustment,
     performanceTargets, upsertPerformanceTarget, deletePerformanceTarget, batchUpsertPerformanceTargets,
     positionGroupLabels, addPositionGroupLabel, updatePositionGroupLabel, deletePositionGroupLabel, matchPositionLabel,
