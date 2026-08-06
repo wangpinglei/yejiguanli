@@ -183,8 +183,8 @@ function markDuplicateImportRows(
           ? "导入表内重复行"
           : "",
       duplicateExistingId: existingId,
-      // 默认屏蔽重复行，避免误导入
-      selected: row.selected && !isDuplicate,
+      // 重复行仍默认勾选，允许正常导入；列表/预览可用筛选查看
+      selected: row.selected,
     };
   });
 }
@@ -456,6 +456,8 @@ export default function SalesRecords() {
   const [filterUnit, setFilterUnit] = useState("all");
   const [filterPerson, setFilterPerson] = useState("all");
   const [filterSync, setFilterSync] = useState("all"); // all | manual | synced
+  const [filterDuplicate, setFilterDuplicate] = useState<"all" | "duplicate" | "unique">("all");
+  const [importDupFilter, setImportDupFilter] = useState<"all" | "duplicate" | "unique">("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
@@ -489,6 +491,36 @@ export default function SalesRecords() {
     activityName: "",
   });
 
+  /** 系统中「内容完全相同」的销售记录 id（出现次数 > 1） */
+  const duplicateRecordIdSet = useMemo(() => {
+    const idToProductName = new Map(products.map((p) => [p.id, p.name || ""]));
+    const keyCounts = new Map<string, number>();
+    const idToKey = new Map<string, string>();
+    for (const s of salesRecords) {
+      const key = buildSalesImportFingerprint({
+        customerName: s.customerName,
+        productName: s.productName || idToProductName.get(s.productId || "") || "",
+        productId: s.productId,
+        orderAmount: s.orderAmount,
+        totalAmount: s.totalAmount,
+        orderType: s.orderType,
+        salesUnitId: s.salesUnitId,
+        salesUnitName: s.salesUnitName,
+        personnelId: s.personnelId,
+        salesPersonName: s.salesPersonName,
+        saleDate: s.saleDate,
+        activityName: s.activityName,
+      });
+      idToKey.set(s.id, key);
+      keyCounts.set(key, (keyCounts.get(key) || 0) + 1);
+    }
+    const set = new Set<string>();
+    idToKey.forEach((key, id) => {
+      if ((keyCounts.get(key) || 0) > 1) set.add(id);
+    });
+    return set;
+  }, [salesRecords, products]);
+
   const filteredRecords = useMemo(() => {
     return salesRecords
       .filter((s) => {
@@ -504,18 +536,23 @@ export default function SalesRecords() {
         const matchUnit = filterUnit === "all" || s.salesUnitId === filterUnit;
         const matchPerson = filterPerson === "all" || s.personnelId === filterPerson;
         const matchSync = filterSync === "all" || (filterSync === "synced" ? s.synced : !s.synced);
+        const isDup = duplicateRecordIdSet.has(s.id);
+        const matchDuplicate =
+          filterDuplicate === "all"
+          || (filterDuplicate === "duplicate" && isDup)
+          || (filterDuplicate === "unique" && !isDup);
         const saleDate = (s.saleDate || "").slice(0, 10);
         const matchFrom = !dateFrom || saleDate >= dateFrom;
         const matchTo = !dateTo || saleDate <= dateTo;
-        return matchSearch && matchUnit && matchPerson && matchSync && matchFrom && matchTo;
+        return matchSearch && matchUnit && matchPerson && matchSync && matchDuplicate && matchFrom && matchTo;
       })
       .sort((a, b) => (b.saleDate || "").localeCompare(a.saleDate || ""));
-  }, [salesRecords, personnel, products, search, filterUnit, filterPerson, filterSync, dateFrom, dateTo]);
+  }, [salesRecords, personnel, products, search, filterUnit, filterPerson, filterSync, filterDuplicate, duplicateRecordIdSet, dateFrom, dateTo]);
 
   // 筛选条件变化时回到第 1 页
   useEffect(() => {
     setPage(1);
-  }, [search, filterUnit, filterPerson, filterSync, dateFrom, dateTo, pageSize]);
+  }, [search, filterUnit, filterPerson, filterSync, filterDuplicate, dateFrom, dateTo, pageSize]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRecords.length / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -696,9 +733,10 @@ export default function SalesRecords() {
     const marked = markDuplicateImportRows(rows, salesRecords, products);
     const dupCount = marked.filter((r) => r.isDuplicate).length;
     setImportRows(marked);
+    setImportDupFilter("all");
     setImportStep("preview");
     if (dupCount > 0) {
-      alert(`检测到 ${dupCount} 条与系统已有记录或表内完全相同的数据，已默认取消勾选（屏蔽）。如需覆盖或仍要导入，可在预览中重新勾选后确认。`);
+      alert(`检测到 ${dupCount} 条与系统已有记录或表内完全相同的数据，仍会默认勾选并可正常导入。可用上方「重复信息」筛选查看。`);
     }
   };
 
@@ -778,35 +816,10 @@ export default function SalesRecords() {
   };
 
   const handleConfirmImport = async () => {
-    let selectedRows = importRows.filter((r) => r.selected);
+    const selectedRows = importRows.filter((r) => r.selected);
     if (selectedRows.length === 0) {
       alert("请至少选择一行数据导入");
       return;
-    }
-
-    const selectedDups = selectedRows.filter((r) => r.isDuplicate);
-    let overwriteDuplicates = false;
-    if (selectedDups.length > 0) {
-      const skipOrCancel = confirm(
-        `选中行中有 ${selectedDups.length} 条与系统已有记录或表内完全相同。\n\n` +
-        `确定 = 跳过这些重复行，只导入其余新数据\n` +
-        `取消 = 再选处理方式（覆盖 / 返回）`
-      );
-      if (skipOrCancel) {
-        selectedRows = selectedRows.filter((r) => !r.isDuplicate);
-        if (selectedRows.length === 0) {
-          alert("跳过重复后没有可导入的新数据");
-          return;
-        }
-      } else {
-        const doOverwrite = confirm(
-          `是否用导入数据覆盖已有的完全相同记录？\n\n` +
-          `确定 = 覆盖已有记录（表内重复仍只保留一条）\n` +
-          `取消 = 返回预览，不执行导入`
-        );
-        if (!doOverwrite) return;
-        overwriteDuplicates = true;
-      }
     }
 
     setImporting(true);
@@ -814,8 +827,7 @@ export default function SalesRecords() {
     let failCount = 0;
     let createdProductCount = 0;
     let createdPersonCount = 0;
-    let overwriteCount = 0;
-    let skippedInFileDup = 0;
+    let duplicateImportCount = 0;
 
     const nameToProductId = new Map<string, string>();
     products.forEach((p) => {
@@ -830,29 +842,9 @@ export default function SalesRecords() {
       unitPersonKeyToId.set(`${p.salesUnitId}::${n}`, p.id);
     });
 
-    const importedKeys = new Set<string>();
-
     for (const row of selectedRows) {
       try {
-        const rowKey = buildSalesImportFingerprint({
-          customerName: row.customerName,
-          productName: row.productName,
-          productId: row.matchedProductId,
-          orderAmount: row.orderAmount,
-          totalAmount: row.totalAmount,
-          orderType: row.orderType,
-          salesUnitId: row.matchedUnitId,
-          salesUnitName: row.salesUnitName,
-          personnelId: row.matchedPersonId,
-          salesPersonName: row.salesPersonName,
-          saleDate: row.saleDate,
-          activityName: row.activityName,
-        });
-        if (importedKeys.has(rowKey)) {
-          skippedInFileDup++;
-          continue;
-        }
-        importedKeys.add(rowKey);
+        if (row.isDuplicate) duplicateImportCount++;
 
         let productId = row.matchedProductId;
         const productName = (row.productName || "").trim();
@@ -921,14 +913,7 @@ export default function SalesRecords() {
           activityName: row.activityName,
         };
 
-        if (overwriteDuplicates && row.duplicateExistingId) {
-          await updateSalesRecord(row.duplicateExistingId, payload);
-          overwriteCount++;
-        } else if (row.isDuplicate && row.duplicateExistingId && !overwriteDuplicates) {
-          continue;
-        } else {
-          await addSalesRecord(payload);
-        }
+        await addSalesRecord(payload);
         successCount++;
       } catch (err) {
         failCount++;
@@ -951,8 +936,7 @@ export default function SalesRecords() {
       ? `\n已${autoTips.join("，")}。请到「人员管理」完善岗位/薪资，到「产品结算设置」配置结算，到「成本管理」配置销售提成。`
       : "\n可在「产品结算设置」配置单位结算规则，在「成本管理」配置人员销售提成。";
     const extraTips = [
-      overwriteCount > 0 ? `覆盖 ${overwriteCount} 条` : "",
-      skippedInFileDup > 0 ? `表内重复跳过 ${skippedInFileDup} 条` : "",
+      duplicateImportCount > 0 ? `其中重复 ${duplicateImportCount} 条（已正常导入）` : "",
     ].filter(Boolean).join("，");
     alert(
       `导入完成：成功 ${successCount} 条` +
@@ -966,6 +950,7 @@ export default function SalesRecords() {
     setImportText("");
     setImportRows([]);
     setImportStep("input");
+    setImportDupFilter("all");
     setImportOpen(true);
   };
 
@@ -983,6 +968,12 @@ export default function SalesRecords() {
       totalAmount: selected.reduce((sum, r) => sum + r.totalAmount, 0),
     };
   }, [importRows]);
+
+  const previewImportRows = useMemo(() => {
+    if (importDupFilter === "duplicate") return importRows.filter((r) => r.isDuplicate);
+    if (importDupFilter === "unique") return importRows.filter((r) => !r.isDuplicate);
+    return importRows;
+  }, [importRows, importDupFilter]);
 
   return (
     <div>
@@ -1055,6 +1046,14 @@ export default function SalesRecords() {
             <SelectItem value="manual">仅手动</SelectItem>
           </SelectContent>
         </Select>
+        <Select value={filterDuplicate} onValueChange={(v) => setFilterDuplicate(v as "all" | "duplicate" | "unique")}>
+          <SelectTrigger className="w-36"><SelectValue placeholder="重复信息" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部记录</SelectItem>
+            <SelectItem value="duplicate">仅重复</SelectItem>
+            <SelectItem value="unique">仅非重复</SelectItem>
+          </SelectContent>
+        </Select>
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-muted-foreground whitespace-nowrap">成交日期</span>
           <Input
@@ -1085,6 +1084,11 @@ export default function SalesRecords() {
           )}
         </div>
         <Badge variant="secondary">{filteredRecords.length} 笔</Badge>
+        {duplicateRecordIdSet.size > 0 && (
+          <Badge className="bg-orange-100 text-orange-700">
+            重复 {duplicateRecordIdSet.size} 笔
+          </Badge>
+        )}
         <Badge className="bg-blue-50 text-blue-700">合计 {formatCurrency(totalRevenue)}</Badge>
         <Badge className="bg-violet-50 text-violet-700" title="按成本管理「单位×人员」个人提成+特殊奖励预估（比例不含月门槛）">
           提成预估 {formatCurrency(totalCommission)}
@@ -1123,7 +1127,16 @@ export default function SalesRecords() {
               </TableHeader>
               <TableBody>
                 {pagedRecords.map((record) => (
-                  <TableRow key={record.id} className={record.synced ? "bg-blue-50/30" : ""}>
+                  <TableRow
+                    key={record.id}
+                    className={
+                      duplicateRecordIdSet.has(record.id)
+                        ? "bg-orange-50/40"
+                        : record.synced
+                          ? "bg-blue-50/30"
+                          : ""
+                    }
+                  >
                     <TableCell className="text-center">
                       {record.synced ? (
                         <span className="text-xs text-muted-foreground">只读</span>
@@ -1177,11 +1190,16 @@ export default function SalesRecords() {
                       })()}
                     </TableCell>
                     <TableCell>
-                      {record.synced ? (
-                        <Badge className="bg-blue-100 text-blue-700 text-xs">生态圈</Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-xs">手动</Badge>
-                      )}
+                      <div className="flex flex-col gap-1 items-start">
+                        {record.synced ? (
+                          <Badge className="bg-blue-100 text-blue-700 text-xs">生态圈</Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-xs">手动</Badge>
+                        )}
+                        {duplicateRecordIdSet.has(record.id) && (
+                          <Badge className="bg-orange-100 text-orange-700 text-xs">重复</Badge>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className="text-right">
                       {record.synced ? (
@@ -1467,9 +1485,20 @@ export default function SalesRecords() {
                 <Badge className="bg-emerald-100 text-emerald-700">已选 {importStats.selected} 行</Badge>
                 {importStats.duplicates > 0 && (
                   <Badge className="bg-orange-100 text-orange-700">
-                    完全相同 {importStats.duplicates}（已默认屏蔽）
+                    重复 {importStats.duplicates}（可正常导入）
                   </Badge>
                 )}
+                <Select
+                  value={importDupFilter}
+                  onValueChange={(v) => setImportDupFilter(v as "all" | "duplicate" | "unique")}
+                >
+                  <SelectTrigger className="w-36 h-8"><SelectValue placeholder="重复筛选" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">全部预览</SelectItem>
+                    <SelectItem value="duplicate">仅重复</SelectItem>
+                    <SelectItem value="unique">仅非重复</SelectItem>
+                  </SelectContent>
+                </Select>
                 <Badge className="bg-green-100 text-green-700">全部匹配 {importStats.allMatched}</Badge>
                 {importStats.partialMatched > 0 && (
                   <Badge className="bg-amber-100 text-amber-700">部分匹配 {importStats.partialMatched}</Badge>
@@ -1504,7 +1533,7 @@ export default function SalesRecords() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {importRows.map((row) => {
+                    {previewImportRows.map((row) => {
                       const allMatched = row.unitMatched && row.personMatched && row.productMatched;
                       const anyMatched = row.unitMatched || row.personMatched || row.productMatched;
                       return (
@@ -1512,7 +1541,7 @@ export default function SalesRecords() {
                           key={row.rowIndex}
                           className={
                             row.isDuplicate
-                              ? "bg-orange-50/60 opacity-70"
+                              ? "bg-orange-50/60"
                               : row.selected
                                 ? ""
                                 : "opacity-40"
@@ -1604,8 +1633,8 @@ export default function SalesRecords() {
                 <div className="rounded-lg border border-orange-200 bg-orange-50/50 p-3 text-xs text-orange-800">
                   <p className="font-medium">检测到与系统或表内完全相同的数据：</p>
                   <ul className="list-disc list-inside mt-1 space-y-0.5">
-                    <li>重复行已默认取消勾选（屏蔽），避免误导入</li>
-                    <li>若仍勾选重复行再点确认，可选择「跳过」或「覆盖已有记录」</li>
+                    <li>重复行默认仍勾选，确认后会作为新记录正常导入</li>
+                    <li>可用上方「重复筛选」只看重复 / 非重复行</li>
                     <li>比对字段：客户、产品、订单/实收金额、订单类型、单位、人员、成交日期、活动</li>
                   </ul>
                 </div>
