@@ -386,22 +386,32 @@ export default function Dashboard() {
             </Button>
           </PopoverTrigger>
           <PopoverContent align="start" className="w-72 p-0">
-            <div className="flex items-center justify-between border-b px-3 py-2">
-              <span className="text-xs text-muted-foreground">可多选，默认全部</span>
-              <div className="flex gap-1">
+            <div className="border-b px-3 py-2 space-y-2">
+              <p className="text-xs text-muted-foreground">可多选，默认全部</p>
+              <div className="flex gap-2">
                 <Button
-                  variant="ghost"
+                  type="button"
+                  variant="outline"
                   size="sm"
-                  className="h-7 px-2 text-xs"
-                  onClick={handleSelectAllUnits}
+                  className="h-7 flex-1 text-xs"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleSelectAllUnits();
+                  }}
                 >
                   全选
                 </Button>
                 <Button
-                  variant="ghost"
+                  type="button"
+                  variant="outline"
                   size="sm"
-                  className="h-7 px-2 text-xs"
-                  onClick={handleDeselectAllUnits}
+                  className="h-7 flex-1 text-xs"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleDeselectAllUnits();
+                  }}
                 >
                   全不选
                 </Button>
