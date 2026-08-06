@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -45,6 +46,7 @@ const EMPTY_SETTLE_FORM = {
   rewardAmount: 0,
   rewardFrom: "",
   rewardTo: "",
+  excludeFromTeamMgmt: false,
   note: "",
 };
 
@@ -54,9 +56,16 @@ export default function ProductSettlement() {
     unitProductSettlements: upsList,
     productPersonCommissions: ppcList,
     personnel,
+    teamMgmtCommissionRules,
+    performanceTargets,
     upsertUnitProductSettlement, deleteUnitProductSettlement,
     batchUpsertUnitProductSettlements,
   } = useData();
+  const teamMgmtContext = useMemo(() => ({
+    rules: teamMgmtCommissionRules,
+    targets: performanceTargets,
+    upsList,
+  }), [teamMgmtCommissionRules, performanceTargets, upsList]);
   const {
     visibleSalesUnits: units, visibleUnitProductSettlements: _upsVisible,
     canEditProduct, isReadOnly,
@@ -133,9 +142,10 @@ export default function ProductSettlement() {
       products,
       selectedMonth,
       [],
-      ppcList
+      ppcList,
+      teamMgmtContext,
     ).grandSalesCommission;
-  }, [units, personnel, salesRecords, products, selectedMonth, ppcList]);
+  }, [units, personnel, salesRecords, products, selectedMonth, ppcList, teamMgmtContext]);
 
 
   // ---- 结算编辑 ----
@@ -150,6 +160,7 @@ export default function ProductSettlement() {
       rewardAmount: ups?.rewardAmount || 0,
       rewardFrom: ups?.rewardFrom || "",
       rewardTo: ups?.rewardTo || "",
+      excludeFromTeamMgmt: !!ups?.excludeFromTeamMgmt,
       note: ups?.note || "",
     });
     setEditKey({ productId, unitId });
@@ -169,6 +180,7 @@ export default function ProductSettlement() {
         rewardAmount: settleForm.rewardAmount || 0,
         rewardFrom: settleForm.rewardFrom || "",
         rewardTo: settleForm.rewardTo || "",
+        excludeFromTeamMgmt: !!settleForm.excludeFromTeamMgmt,
         note: settleForm.note,
       });
       setEditKey(null);
@@ -216,6 +228,7 @@ export default function ProductSettlement() {
         rewardAmount: settleForm.rewardAmount || 0,
         rewardFrom: settleForm.rewardFrom || "",
         rewardTo: settleForm.rewardTo || "",
+        excludeFromTeamMgmt: !!settleForm.excludeFromTeamMgmt,
         note: settleForm.note,
       }))
     );
@@ -251,7 +264,7 @@ export default function ProductSettlement() {
     <div>
       <PageHeader
         title="产品结算设置"
-        description="配置单位×产品结算比例、生效时间及特殊时段结算奖励。销售提成（按单位×人员）请到「成本管理」配置。"
+        description="配置单位×产品结算比例、生效时间、特殊奖励，以及是否计入团队管理提成基数。销售个人提成请到「成本管理」配置。"
         action={
           <Select value={selectedMonth} onValueChange={setSelectedMonth}>
             <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
@@ -341,10 +354,10 @@ export default function ProductSettlement() {
         <div>
           <h3 className="text-base font-semibold">产品结算配置</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            可设置结算比例/金额、生效时间，以及特殊时段按件结算奖励
+            可设置结算比例/金额、生效时间、特殊时段按件结算奖励，以及是否不参与团队管理提成基数
           </p>
           <p className="text-xs text-muted-foreground mt-1">
-            产品来自销售记录自动同步。此处只配置各单位结算比例；销售提成请到「成本管理」配置。
+            产品来自销售记录自动同步。销售个人提成与团队管理提成请到「成本管理」配置。
           </p>
         </div>
         {filteredProducts.map((product: Product) => {
@@ -400,6 +413,7 @@ export default function ProductSettlement() {
                           <TableHead className="text-right">结算比例 / 金额</TableHead>
                           <TableHead>生效时间</TableHead>
                           <TableHead className="text-right">结算奖励</TableHead>
+                          <TableHead>管理提成基数</TableHead>
                           <TableHead className="text-right">{selectedMonth} 结算收入</TableHead>
                           <TableHead className="text-right">操作</TableHead>
                         </TableRow>
@@ -441,6 +455,13 @@ export default function ProductSettlement() {
                                   <span className="text-muted-foreground">-</span>
                                 )}
                               </TableCell>
+                              <TableCell>
+                                {ups?.excludeFromTeamMgmt ? (
+                                  <Badge className="bg-slate-100 text-slate-700">不参与</Badge>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">参与</span>
+                                )}
+                              </TableCell>
                               <TableCell className="text-right text-sm font-medium text-cyan-600">
                                 {income > 0 ? formatCurrency(income) : "-"}
                               </TableCell>
@@ -472,7 +493,7 @@ export default function ProductSettlement() {
                         })}
                         {productUnits.length === 0 && (
                           <TableRow>
-                            <TableCell colSpan={7} className="text-center py-6 text-muted-foreground">
+                            <TableCell colSpan={8} className="text-center py-6 text-muted-foreground">
                               暂无销售单位，请先在「销售单位」中录入
                             </TableCell>
                           </TableRow>
@@ -564,6 +585,21 @@ export default function ProductSettlement() {
               </div>
               <p className="text-xs text-muted-foreground">奖励区间留空时，与上方结算生效时间相同</p>
             </div>
+            <label className="flex items-start gap-2 rounded-lg border px-3 py-2 cursor-pointer">
+              <Checkbox
+                checked={settleForm.excludeFromTeamMgmt}
+                onCheckedChange={(v) =>
+                  setSettleForm({ ...settleForm, excludeFromTeamMgmt: v === true })
+                }
+                className="mt-0.5"
+              />
+              <span className="text-sm leading-snug">
+                不参与团队管理提成基数
+                <span className="block text-xs text-muted-foreground mt-0.5">
+                  勾选后，该单位此产品的实收不计入团队管理提成池
+                </span>
+              </span>
+            </label>
             <div className="space-y-2">
               <Label>结算说明</Label>
               <Input value={settleForm.note} onChange={(e) => setSettleForm({ ...settleForm, note: e.target.value })} placeholder="如：该单位特殊结算政策" />
@@ -680,6 +716,21 @@ export default function ProductSettlement() {
                 </div>
               </div>
             </div>
+            <label className="flex items-start gap-2 rounded-lg border px-3 py-2 cursor-pointer">
+              <Checkbox
+                checked={settleForm.excludeFromTeamMgmt}
+                onCheckedChange={(v) =>
+                  setSettleForm({ ...settleForm, excludeFromTeamMgmt: v === true })
+                }
+                className="mt-0.5"
+              />
+              <span className="text-sm leading-snug">
+                不参与团队管理提成基数
+                <span className="block text-xs text-muted-foreground mt-0.5">
+                  批量应用到所选产品×单位
+                </span>
+              </span>
+            </label>
             <div className="space-y-2">
               <Label>结算说明</Label>
               <Input

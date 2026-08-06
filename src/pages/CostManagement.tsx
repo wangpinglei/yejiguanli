@@ -32,12 +32,13 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import MSalesCommissionPanel from "./CostManagement/components/m-sales-commission-panel";
+import MTeamMgmtCommissionPanel from "./CostManagement/components/m-team-mgmt-commission-panel";
 
 const costCategories = ["人力成本", "办公租金", "营销推广", "差旅交通", "运营杂费", "设备采购", "其他"];
 const incomeCategories = ["服务费收入", "咨询费收入", "技术支持费", "培训费收入", "退款收入", "其他收入"];
 
 export default function CostManagement() {
-  const { addCostRecord, updateCostRecord, deleteCostRecord, costChangeLogs, products, monthlyAdjustments, upsertMonthlyAdjustment, addIncomeRecord, updateIncomeRecord, deleteIncomeRecord, productPersonCommissions } = useData();
+  const { addCostRecord, updateCostRecord, deleteCostRecord, costChangeLogs, products, monthlyAdjustments, upsertMonthlyAdjustment, addIncomeRecord, updateIncomeRecord, deleteIncomeRecord, productPersonCommissions, teamMgmtCommissionRules, performanceTargets, unitProductSettlements } = useData();
   const { user } = useAuth();
   const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleCostRecords: costRecords, visibleIncomeRecords: incomeRecords, visibleSalesRecords: salesRecords, canEditCost, isReadOnly, role } = usePermissions();
   const [search, setSearch] = useState("");
@@ -86,6 +87,12 @@ export default function CostManagement() {
 
   const isSuperadmin = role === "superadmin";
 
+  const teamMgmtContext = useMemo(() => ({
+    rules: teamMgmtCommissionRules,
+    targets: performanceTargets,
+    upsList: unitProductSettlements,
+  }), [teamMgmtCommissionRules, performanceTargets, unitProductSettlements]);
+
   // ===================== 自动薪酬成本计算（按月度） =====================
   const salaryCosts = useMemo(() => {
     const unitIds = filterUnit === "all"
@@ -98,9 +105,10 @@ export default function CostManagement() {
       products,
       selectedMonth,
       monthlyAdjustments,
-      productPersonCommissions
+      productPersonCommissions,
+      teamMgmtContext,
     );
-  }, [salesUnits, personnel, salesRecords, filterUnit, products, selectedMonth, monthlyAdjustments, productPersonCommissions]);
+  }, [salesUnits, personnel, salesRecords, filterUnit, products, selectedMonth, monthlyAdjustments, productPersonCommissions, teamMgmtContext]);
 
   // 按月过滤手动成本记录
   const filteredRecords = useMemo(() => {
@@ -407,7 +415,7 @@ export default function CostManagement() {
     <div>
       <PageHeader
         title="成本管理"
-        description="按月度管理人员成本；销售提成（产品×单位×人员）在本页上方配置区设置，自动计入成本"
+        description="按月度管理人员成本；个人提成与团队管理提成在本页上方配置，自动计入成本"
         action={
           <div className="flex gap-2">
             {isSuperadmin && (
@@ -537,13 +545,21 @@ export default function CostManagement() {
             <div>
               <p className="text-sm text-muted-foreground">销售提成合计</p>
               <p className="text-xl font-bold text-violet-600">{formatCurrency(productCommissionTotal)}</p>
-              <p className="text-[10px] text-muted-foreground">见下方配置区</p>
+              <p className="text-[10px] text-muted-foreground">个人+团队管理提成</p>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* 销售提成：整宽常驻配置，避免挤在汇总卡里看不见 */}
+      {/* 团队管理提成：单位级规则 */}
+      <section
+        id="team-mgmt-commission-config"
+        className="mb-6 rounded-xl border-2 border-emerald-300 bg-emerald-50/40 p-5"
+      >
+        <MTeamMgmtCommissionPanel selectedMonth={selectedMonth} />
+      </section>
+
+      {/* 销售个人提成：整宽常驻配置 */}
       <section
         id="sales-commission-config"
         className="mb-6 rounded-xl border-2 border-violet-300 bg-violet-50/40 p-5"
@@ -554,9 +570,9 @@ export default function CostManagement() {
               <Percent className="h-5 w-5 text-violet-600" />
             </div>
             <div className="min-w-0">
-              <h3 className="text-base font-semibold text-violet-900">销售提成配置</h3>
+              <h3 className="text-base font-semibold text-violet-900">销售个人提成配置</h3>
               <p className="text-xs text-muted-foreground">
-                按产品 × 单位 × 人员设置；本月合计{" "}
+                按产品 × 单位 × 人员设置个人提成与特殊奖励；本月提成合计{" "}
                 <span className="font-semibold text-violet-700">
                   {formatCurrency(productCommissionTotal)}
                 </span>
@@ -585,7 +601,7 @@ export default function CostManagement() {
                   <TableHead className="text-right">底薪合计</TableHead>
                   <TableHead className="text-right">绩效合计</TableHead>
                   <TableHead className="text-right">岗位补贴</TableHead>
-                  <TableHead className="text-right">管理提成</TableHead>
+                  <TableHead className="text-right">团队管理提成</TableHead>
                   <TableHead className="text-right">个人提成</TableHead>
                   <TableHead className="text-right">请假扣款</TableHead>
                   <TableHead className="text-right">其他调整</TableHead>

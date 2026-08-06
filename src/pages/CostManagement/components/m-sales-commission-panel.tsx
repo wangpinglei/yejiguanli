@@ -227,9 +227,9 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
         salesUnitId: ppcEditKey.unitId,
         productId: ppcEditKey.productId,
         personnelId: ppcEditKey.personnelId,
-        managementCommissionRate: ppcForm.managementCommissionRate || 0,
-        managementCommissionThreshold: ppcForm.managementCommissionThreshold || 0,
-        managementCommissionCondition: ppcForm.managementCommissionCondition,
+        managementCommissionRate: 0,
+        managementCommissionThreshold: 0,
+        managementCommissionCondition: '',
         personalCommissionType: ppcForm.personalCommissionType || 'percentage',
         personalCommissionRate: ppcForm.personalCommissionRate || 0,
         personalCommissionAmount: ppcForm.personalCommissionAmount || 0,
@@ -268,9 +268,9 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
           salesUnitId: unit.id,
           productId,
           personnelId: person.id,
-          managementCommissionRate: ppcForm.managementCommissionRate || 0,
-          managementCommissionThreshold: ppcForm.managementCommissionThreshold || 0,
-          managementCommissionCondition: ppcForm.managementCommissionCondition,
+          managementCommissionRate: 0,
+          managementCommissionThreshold: 0,
+          managementCommissionCondition: '',
           personalCommissionType: ppcForm.personalCommissionType || 'percentage',
           personalCommissionRate: ppcForm.personalCommissionRate || 0,
           personalCommissionAmount: ppcForm.personalCommissionAmount || 0,
@@ -400,7 +400,7 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
         <Users className="h-5 w-5 text-violet-600" />
         <h3 className="text-base font-semibold">销售提成配置（按产品 × 单位 × 人员）</h3>
         <p className="text-xs text-muted-foreground w-full sm:w-auto">
-          在此配置，自动计入人力成本与收支利润。
+          配置个人提成与特殊奖励；团队管理提成请在上方「团队管理提成」区设置。
         </p>
         <Badge variant="outline" className="border-violet-200 text-violet-700">
           默认折叠 · 展开后再编辑 / 批量设置
@@ -448,7 +448,6 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
             const hasPersonalFixed =
               ppc?.personalCommissionType === 'fixed' && (ppc.personalCommissionAmount || 0) > 0
             return (
-              (ppc?.managementCommissionRate || 0) > 0 ||
               (ppc?.personalCommissionRate || 0) > 0 ||
               hasPersonalFixed ||
               (ppc?.rewardAmount || 0) > 0
@@ -527,9 +526,9 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                             r.ppc?.personalCommissionType === 'fixed'
                             && (r.ppc.personalCommissionAmount || 0) > 0
                           return (
-                            (r.ppc?.managementCommissionRate || 0) > 0 ||
                             (r.ppc?.personalCommissionRate || 0) > 0 ||
-                            hasPersonalFixed
+                            hasPersonalFixed ||
+                            (r.ppc?.rewardAmount || 0) > 0
                           )
                         }).length
                         return (
@@ -581,8 +580,6 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                                   <TableHeader>
                                     <TableRow className="bg-muted/20">
                                       <TableHead>销售人员</TableHead>
-                                      <TableHead className="text-right">管理提成比例</TableHead>
-                                      <TableHead className="text-right">管理起算门槛</TableHead>
                                       <TableHead className="text-right">个人提成</TableHead>
                                       <TableHead className="text-right">特殊奖励</TableHead>
                                       <TableHead className="text-right">
@@ -593,8 +590,6 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                                   </TableHeader>
                                   <TableBody>
                                     {people.map(({ person, ppc, personSales }) => {
-                                      const hasMgmt =
-                                        (ppc?.managementCommissionRate || 0) > 0
                                       const isPersonalFixed = ppc?.personalCommissionType === 'fixed'
                                       const hasPersonal = isPersonalFixed
                                         ? (ppc?.personalCommissionAmount || 0) > 0
@@ -612,26 +607,6 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                                                 ({person.position})
                                               </span>
                                             </div>
-                                          </TableCell>
-                                          <TableCell className="text-right">
-                                            {hasMgmt ? (
-                                              <Badge className="bg-emerald-100 text-emerald-700">
-                                                {ppc!.managementCommissionRate}%
-                                              </Badge>
-                                            ) : (
-                                              <span className="text-xs text-muted-foreground">
-                                                未设置
-                                              </span>
-                                            )}
-                                          </TableCell>
-                                          <TableCell className="text-right text-sm">
-                                            {ppc?.managementCommissionThreshold ? (
-                                              formatCurrency(ppc.managementCommissionThreshold)
-                                            ) : (
-                                              <span className="text-xs text-muted-foreground">
-                                                -
-                                              </span>
-                                            )}
                                           </TableCell>
                                           <TableCell className="text-right">
                                             {hasPersonal ? (
@@ -736,14 +711,14 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
         </div>
         <div className="grid grid-cols-1 gap-1 text-xs text-muted-foreground md:grid-cols-2">
           <div>
-            <strong>管理提成</strong> = max(0, 团队销售额 - 起算门槛) × 管理提成比例%
+            <strong>个人提成</strong>（比例）= max(0, 销售额 - 门槛) × 比例%；
+            （固定）= 销售数量 × 每件提成金额；可叠加特殊时段按件奖励
           </div>
           <div>
-            <strong>个人提成</strong>（比例）= max(0, 销售额 - 门槛) × 比例%；
-            （固定）= 销售数量 × 每件提成金额
+            <strong>团队管理提成</strong>在上方单独配置：可计实收 × 档位比例，再按管理人员权重分摊
           </div>
-          <div>销售提成 = 管理提成 + 个人提成，按单位×人员配置，自动进入人力成本与收支利润</div>
-          <div>未配置人员提成时，沿用「人员管理」中的默认提成参数（如有）</div>
+          <div>销售提成合计 = 个人提成 + 团队管理提成，自动进入人力成本与收支利润</div>
+          <div>未配置个人提成时，沿用「人员管理」中的默认提成参数（如有）</div>
         </div>
       </div>
 
@@ -769,58 +744,8 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
             </div>
           )}
           <div className="space-y-4 py-2">
-            <div className="rounded-lg border-2 border-emerald-200 p-4 space-y-3">
-              <div className="flex items-center gap-2">
-                <Badge className="bg-emerald-100 text-emerald-700">管理提成</Badge>
-                <span className="text-xs text-muted-foreground">按团队销售额计算</span>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <Label className="text-xs">提成比例 (%)</Label>
-                  <Input
-                    type="number"
-                    step="0.1"
-                    value={ppcForm.managementCommissionRate}
-                    onChange={(e) =>
-                      setPpcForm({
-                        ...ppcForm,
-                        managementCommissionRate: Number(e.target.value),
-                      })
-                    }
-                    placeholder="如：2"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">起算门槛 (¥)</Label>
-                  <Input
-                    type="number"
-                    value={ppcForm.managementCommissionThreshold}
-                    onChange={(e) =>
-                      setPpcForm({
-                        ...ppcForm,
-                        managementCommissionThreshold: Number(e.target.value),
-                      })
-                    }
-                    placeholder="如：100000"
-                  />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">发放条件</Label>
-                <Input
-                  value={ppcForm.managementCommissionCondition}
-                  onChange={(e) =>
-                    setPpcForm({
-                      ...ppcForm,
-                      managementCommissionCondition: e.target.value,
-                    })
-                  }
-                  placeholder="如：团队达标后发放"
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                计算公式：(团队销售额 - 起算门槛) × 提成比例%
-              </p>
+            <div className="rounded-lg border border-emerald-100 bg-emerald-50/40 px-3 py-2 text-xs text-emerald-800">
+              管理提成已改为单位级「团队管理提成」，请在成本管理上方配置区设置。
             </div>
 
             <div className="rounded-lg border-2 border-orange-200 p-4 space-y-3">
@@ -1126,55 +1051,8 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
           </div>
 
           <div className="space-y-4 py-2">
-            <div className="rounded-lg border-2 border-emerald-200 p-4 space-y-3">
-              <div className="flex items-center gap-2">
-                <Badge className="bg-emerald-100 text-emerald-700">管理提成</Badge>
-                <span className="text-xs text-muted-foreground">按团队销售额计算</span>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <Label className="text-xs">提成比例 (%)</Label>
-                  <Input
-                    type="number"
-                    step="0.1"
-                    value={ppcForm.managementCommissionRate}
-                    onChange={(e) =>
-                      setPpcForm({
-                        ...ppcForm,
-                        managementCommissionRate: Number(e.target.value),
-                      })
-                    }
-                    placeholder="如：2"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">起算门槛 (¥)</Label>
-                  <Input
-                    type="number"
-                    value={ppcForm.managementCommissionThreshold}
-                    onChange={(e) =>
-                      setPpcForm({
-                        ...ppcForm,
-                        managementCommissionThreshold: Number(e.target.value),
-                      })
-                    }
-                    placeholder="如：100000"
-                  />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">发放条件</Label>
-                <Input
-                  value={ppcForm.managementCommissionCondition}
-                  onChange={(e) =>
-                    setPpcForm({
-                      ...ppcForm,
-                      managementCommissionCondition: e.target.value,
-                    })
-                  }
-                  placeholder="如：团队达标后发放"
-                />
-              </div>
+            <div className="rounded-lg border border-emerald-100 bg-emerald-50/40 px-3 py-2 text-xs text-emerald-800">
+              管理提成请到「团队管理提成」配置；此处仅设置个人提成与特殊奖励。
             </div>
             <div className="rounded-lg border-2 border-orange-200 p-4 space-y-3">
               <div className="flex items-center gap-2">

@@ -23,6 +23,7 @@ import type {
   RevenueSettlement,
   UnitProductSettlement,
   ProductPersonCommission,
+  TeamMgmtCommissionRule,
 } from "@/types";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -41,6 +42,7 @@ import {
   monthlyAdjustmentsApi,
   performanceTargetsApi,
   positionGroupLabelsApi,
+  teamMgmtCommissionRulesApi,
 } from "@/lib/api";
 
 /** 旧版 localStorage key，仅用于「导入到服务器」 */
@@ -87,6 +89,7 @@ interface DataContextType {
   revenueSettlements: RevenueSettlement[];
   unitProductSettlements: UnitProductSettlement[];
   productPersonCommissions: ProductPersonCommission[];
+  teamMgmtCommissionRules: TeamMgmtCommissionRule[];
   costChangeLogs: CostChangeLog[];
   notifications: AppNotification[];
   monthlyAdjustments: MonthlyAdjustment[];
@@ -146,6 +149,11 @@ interface DataContextType {
   ) => Promise<void>;
   deleteProductPersonCommission: (id: string) => Promise<void>;
 
+  upsertTeamMgmtCommissionRule: (
+    r: Omit<TeamMgmtCommissionRule, "id" | "createdAt">,
+  ) => Promise<void>;
+  deleteTeamMgmtCommissionRule: (id: string) => Promise<void>;
+
   upsertMonthlyAdjustment: (a: Omit<MonthlyAdjustment, "id" | "createdAt">) => Promise<void>;
   deleteMonthlyAdjustment: (id: string) => Promise<void>;
 
@@ -183,6 +191,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [revenueSettlements, setRevenueSettlements] = useState<RevenueSettlement[]>([]);
   const [unitProductSettlements, setUnitProductSettlements] = useState<UnitProductSettlement[]>([]);
   const [productPersonCommissions, setProductPersonCommissions] = useState<ProductPersonCommission[]>([]);
+  const [teamMgmtCommissionRules, setTeamMgmtCommissionRules] = useState<TeamMgmtCommissionRule[]>([]);
   const [costChangeLogs, setCostChangeLogs] = useState<CostChangeLog[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [monthlyAdjustments, setMonthlyAdjustments] = useState<MonthlyAdjustment[]>([]);
@@ -221,6 +230,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         monthlyAdjustmentsApi.list(),
         performanceTargetsApi.list(),
         positionGroupLabelsApi.list(),
+        teamMgmtCommissionRulesApi.list(),
       ]);
 
       function value<T>(i: number, fallback: T): T {
@@ -245,6 +255,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setPerformanceTargets(value(12, []));
       const labels = value(13, [] as PositionGroupLabel[]);
       setPositionGroupLabels(labels.length ? labels : []);
+      setTeamMgmtCommissionRules(value(14, []));
       await refreshSyncedOrders();
     } catch (e) {
       console.error("[DataContext] refreshAll failed", e);
@@ -274,6 +285,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setMonthlyAdjustments([]);
       setPerformanceTargets([]);
       setPositionGroupLabels([]);
+      setTeamMgmtCommissionRules([]);
       setLoading(false);
       return;
     }
@@ -531,6 +543,25 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setProductPersonCommissions((prev) => prev.filter((x) => x.id !== id));
   }, []);
 
+  const upsertTeamMgmtCommissionRule = useCallback(async (
+    r: Omit<TeamMgmtCommissionRule, "id" | "createdAt">,
+  ) => {
+    const saved = await teamMgmtCommissionRulesApi.upsert(r);
+    setTeamMgmtCommissionRules((prev) => {
+      const idx = prev.findIndex((x) => x.salesUnitId === saved.salesUnitId);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = saved;
+        return next;
+      }
+      return [...prev, saved];
+    });
+  }, []);
+  const deleteTeamMgmtCommissionRule = useCallback(async (id: string) => {
+    await teamMgmtCommissionRulesApi.delete(id);
+    setTeamMgmtCommissionRules((prev) => prev.filter((x) => x.id !== id));
+  }, []);
+
   // -------- Monthly / Targets / Labels --------
   const upsertMonthlyAdjustment = useCallback(async (a: Omit<MonthlyAdjustment, "id" | "createdAt">) => {
     const saved = await monthlyAdjustmentsApi.upsert(a);
@@ -609,6 +640,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const value: DataContextType = {
     salesUnits, personnel, products, salesRecords, allSalesRecords, syncedOrders, syncedLoading,
     costRecords, incomeRecords, revenueSettlements, unitProductSettlements, productPersonCommissions,
+    teamMgmtCommissionRules,
     costChangeLogs, notifications, monthlyAdjustments, loading,
     addSalesUnit, updateSalesUnit, deleteSalesUnit,
     addPersonnel, updatePersonnel, deletePersonnel,
@@ -619,6 +651,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     upsertRevenueSettlement, deleteRevenueSettlement,
     upsertUnitProductSettlement, batchUpsertUnitProductSettlements, deleteUnitProductSettlement,
     upsertProductPersonCommission, batchUpsertProductPersonCommissions, deleteProductPersonCommission,
+    upsertTeamMgmtCommissionRule, deleteTeamMgmtCommissionRule,
     upsertMonthlyAdjustment, deleteMonthlyAdjustment,
     performanceTargets, upsertPerformanceTarget, deletePerformanceTarget, batchUpsertPerformanceTargets,
     positionGroupLabels, addPositionGroupLabel, updatePositionGroupLabel, deletePositionGroupLabel, matchPositionLabel,

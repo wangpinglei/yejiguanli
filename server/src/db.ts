@@ -268,6 +268,16 @@ function initSchema() {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS team_mgmt_commission_rules (
+      id TEXT PRIMARY KEY,
+      sales_unit_id TEXT NOT NULL UNIQUE,
+      managers_json TEXT DEFAULT '[]',
+      tiers_json TEXT DEFAULT '[]',
+      note TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT
+    );
+
     CREATE INDEX IF NOT EXISTS idx_personnel_unit ON personnel(sales_unit_id);
     CREATE INDEX IF NOT EXISTS idx_sales_unit ON sales_records(sales_unit_id);
     CREATE INDEX IF NOT EXISTS idx_sales_personnel ON sales_records(personnel_id);
@@ -314,6 +324,7 @@ function initSchema() {
     { name: "reward_amount", ddl: "reward_amount REAL DEFAULT 0" },
     { name: "reward_from", ddl: "reward_from TEXT DEFAULT ''" },
     { name: "reward_to", ddl: "reward_to TEXT DEFAULT ''" },
+    { name: "exclude_from_team_mgmt", ddl: "exclude_from_team_mgmt INTEGER DEFAULT 0" },
   ]);
 
   ensureColumns("sales_records", [
@@ -514,6 +525,38 @@ export function rowToUnitProductSettlement(row: any) {
     rewardAmount: row.reward_amount || 0,
     rewardFrom: row.reward_from || "",
     rewardTo: row.reward_to || "",
+    excludeFromTeamMgmt: Boolean(row.exclude_from_team_mgmt),
+    note: row.note || undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at || undefined,
+  };
+}
+
+function parseJsonArray(raw: any, fallback: any[] = []) {
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw !== "string" || !raw.trim()) return fallback;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function rowToTeamMgmtCommissionRule(row: any) {
+  const managers = parseJsonArray(row.managers_json).map((m: any) => ({
+    personnelId: String(m.personnelId || m.personnel_id || ""),
+    weight: Number(m.weight) || 0,
+  })).filter((m: any) => m.personnelId);
+  const tiers = parseJsonArray(row.tiers_json).map((t: any) => ({
+    minCompletionPercent: Number(t.minCompletionPercent ?? t.min_completion_percent) || 0,
+    commissionRatePercent: Number(t.commissionRatePercent ?? t.commission_rate_percent) || 0,
+  }));
+  return {
+    id: row.id,
+    salesUnitId: row.sales_unit_id,
+    managers,
+    tiers,
     note: row.note || undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at || undefined,

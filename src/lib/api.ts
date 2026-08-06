@@ -208,6 +208,12 @@ export const positionGroupLabelsApi = {
   delete: (id: string) => api.delete(`/position-group-labels/${id}`),
 };
 
+export const teamMgmtCommissionRulesApi = {
+  list: () => api.get<any[]>("/team-mgmt-commission-rules"),
+  upsert: (data: any) => api.post<any>("/team-mgmt-commission-rules/upsert", data),
+  delete: (id: string) => api.delete(`/team-mgmt-commission-rules/${id}`),
+};
+
 export const migrateApi = {
   migrate: (data: Record<string, any>) =>
     api.post<{ message: string; stats: any }>("/migrate", data),

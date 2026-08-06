@@ -4,6 +4,7 @@ import {
   rowToIncomeRecord, rowToRevenueSettlement, rowToUnitProductSettlement,
   rowToProductPersonCommission, rowToCostChangeLog, rowToNotification,
   rowToMonthlyAdjustment, rowToPerformanceTarget, rowToPositionGroupLabel,
+  rowToTeamMgmtCommissionRule,
 } from "../db";
 import { authMiddleware } from "../auth";
 import { getVisibleUnitIds, requireEditPermission } from "../middleware";
@@ -138,7 +139,7 @@ router.get("/unit-product-settlements", (req, res) => {
 router.post("/unit-product-settlements/upsert", requireEditPermission, (req, res) => {
   const {
     salesUnitId, productId, settlementType, settlementRate, settlementAmount, note,
-    effectiveFrom, effectiveTo, rewardAmount, rewardFrom, rewardTo,
+    effectiveFrom, effectiveTo, rewardAmount, rewardFrom, rewardTo, excludeFromTeamMgmt,
   } = req.body;
   if (!salesUnitId || !productId) return res.status(400).json({ error: "单位和产品不能为空" });
   const db = getDb();
@@ -146,11 +147,13 @@ router.post("/unit-product-settlements/upsert", requireEditPermission, (req, res
     "SELECT * FROM unit_product_settlements WHERE sales_unit_id=? AND product_id=?"
   ).get(salesUnitId, productId);
   const now = new Date().toISOString();
+  const excludeVal = excludeFromTeamMgmt ? 1 : 0;
   if (existing) {
     db.prepare(`
       UPDATE unit_product_settlements SET
         settlement_type=?, settlement_rate=?, settlement_amount=?, note=?,
-        effective_from=?, effective_to=?, reward_amount=?, reward_from=?, reward_to=?, updated_at=?
+        effective_from=?, effective_to=?, reward_amount=?, reward_from=?, reward_to=?,
+        exclude_from_team_mgmt=?, updated_at=?
       WHERE id=?
     `).run(
       settlementType || existing.settlement_type,
@@ -162,6 +165,7 @@ router.post("/unit-product-settlements/upsert", requireEditPermission, (req, res
       rewardAmount ?? existing.reward_amount ?? 0,
       rewardFrom ?? existing.reward_from ?? "",
       rewardTo ?? existing.reward_to ?? "",
+      excludeFromTeamMgmt == null ? (existing.exclude_from_team_mgmt || 0) : excludeVal,
       now, existing.id
     );
     return res.json(rowToUnitProductSettlement(db.prepare("SELECT * FROM unit_product_settlements WHERE id=?").get(existing.id)));
@@ -170,11 +174,11 @@ router.post("/unit-product-settlements/upsert", requireEditPermission, (req, res
   db.prepare(`
     INSERT INTO unit_product_settlements (
       id, sales_unit_id, product_id, settlement_type, settlement_rate, settlement_amount, note,
-      effective_from, effective_to, reward_amount, reward_from, reward_to, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      effective_from, effective_to, reward_amount, reward_from, reward_to, exclude_from_team_mgmt, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id, salesUnitId, productId, settlementType || "percentage", settlementRate ?? 100, settlementAmount || 0, note || "",
-    effectiveFrom || "", effectiveTo || "", rewardAmount || 0, rewardFrom || "", rewardTo || "", now
+    effectiveFrom || "", effectiveTo || "", rewardAmount || 0, rewardFrom || "", rewardTo || "", excludeVal, now
   );
   res.json(rowToUnitProductSettlement(db.prepare("SELECT * FROM unit_product_settlements WHERE id=?").get(id)));
 });
@@ -187,23 +191,25 @@ router.post("/unit-product-settlements/batch", requireEditPermission, (req, res)
     for (const item of items) {
       const {
         salesUnitId, productId, settlementType, settlementRate, settlementAmount, note,
-        effectiveFrom, effectiveTo, rewardAmount, rewardFrom, rewardTo,
+        effectiveFrom, effectiveTo, rewardAmount, rewardFrom, rewardTo, excludeFromTeamMgmt,
       } = item;
       if (!salesUnitId || !productId) continue;
       const existing = db.prepare(
         "SELECT * FROM unit_product_settlements WHERE sales_unit_id=? AND product_id=?"
       ).get(salesUnitId, productId);
       const now = new Date().toISOString();
+      const excludeVal = excludeFromTeamMgmt ? 1 : 0;
       if (existing) {
         db.prepare(`
           UPDATE unit_product_settlements SET
             settlement_type=?, settlement_rate=?, settlement_amount=?, note=?,
-            effective_from=?, effective_to=?, reward_amount=?, reward_from=?, reward_to=?, updated_at=?
+            effective_from=?, effective_to=?, reward_amount=?, reward_from=?, reward_to=?,
+            exclude_from_team_mgmt=?, updated_at=?
           WHERE id=?
         `).run(
           settlementType || "percentage", settlementRate ?? 100, settlementAmount || 0, note || "",
           effectiveFrom || "", effectiveTo || "", rewardAmount || 0, rewardFrom || "", rewardTo || "",
-          now, existing.id
+          excludeVal, now, existing.id
         );
         results.push(rowToUnitProductSettlement(db.prepare("SELECT * FROM unit_product_settlements WHERE id=?").get(existing.id)));
       } else {
@@ -211,11 +217,11 @@ router.post("/unit-product-settlements/batch", requireEditPermission, (req, res)
         db.prepare(`
           INSERT INTO unit_product_settlements (
             id, sales_unit_id, product_id, settlement_type, settlement_rate, settlement_amount, note,
-            effective_from, effective_to, reward_amount, reward_from, reward_to, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            effective_from, effective_to, reward_amount, reward_from, reward_to, exclude_from_team_mgmt, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           id, salesUnitId, productId, settlementType || "percentage", settlementRate ?? 100, settlementAmount || 0, note || "",
-          effectiveFrom || "", effectiveTo || "", rewardAmount || 0, rewardFrom || "", rewardTo || "", now
+          effectiveFrom || "", effectiveTo || "", rewardAmount || 0, rewardFrom || "", rewardTo || "", excludeVal, now
         );
         results.push(rowToUnitProductSettlement(db.prepare("SELECT * FROM unit_product_settlements WHERE id=?").get(id)));
       }
@@ -559,6 +565,75 @@ router.delete("/position-group-labels/:id", requireEditPermission, (req, res) =>
   const db = getDb();
   const result = db.prepare("DELETE FROM position_group_labels WHERE id=?").run(req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: "标签不存在" });
+  res.json({ message: "删除成功" });
+});
+
+// ---------- team management commission rules ----------
+const DEFAULT_TIERS = [
+  { minCompletionPercent: 0, commissionRatePercent: 0 },
+  { minCompletionPercent: 80, commissionRatePercent: 1 },
+  { minCompletionPercent: 100, commissionRatePercent: 2 },
+];
+
+router.get("/team-mgmt-commission-rules", (req, res) => {
+  const db = getDb();
+  let rows = db.prepare("SELECT * FROM team_mgmt_commission_rules").all();
+  rows = filterByUnit(rows, req.user);
+  res.json(rows.map(rowToTeamMgmtCommissionRule));
+});
+
+router.post("/team-mgmt-commission-rules/upsert", requireEditPermission, (req, res) => {
+  const { salesUnitId, managers, tiers, note } = req.body;
+  if (!salesUnitId) return res.status(400).json({ error: "销售单位不能为空" });
+  const managersJson = JSON.stringify(
+    (Array.isArray(managers) ? managers : [])
+      .map((m: any) => ({
+        personnelId: m.personnelId,
+        weight: Number(m.weight) || 0,
+      }))
+      .filter((m: any) => m.personnelId && m.weight > 0)
+  );
+  const tiersJson = JSON.stringify(
+    Array.isArray(tiers) && tiers.length > 0
+      ? tiers.map((t: any) => ({
+          minCompletionPercent: Number(t.minCompletionPercent) || 0,
+          commissionRatePercent: Number(t.commissionRatePercent) || 0,
+        }))
+      : DEFAULT_TIERS
+  );
+  const db = getDb();
+  const existing = db.prepare(
+    "SELECT * FROM team_mgmt_commission_rules WHERE sales_unit_id=?"
+  ).get(salesUnitId);
+  const now = new Date().toISOString();
+  if (existing) {
+    db.prepare(`
+      UPDATE team_mgmt_commission_rules SET managers_json=?, tiers_json=?, note=?, updated_at=?
+      WHERE id=?
+    `).run(managersJson, tiersJson, note || "", now, existing.id);
+    return res.json(
+      rowToTeamMgmtCommissionRule(
+        db.prepare("SELECT * FROM team_mgmt_commission_rules WHERE id=?").get(existing.id)
+      )
+    );
+  }
+  const id = generateId("tmr");
+  db.prepare(`
+    INSERT INTO team_mgmt_commission_rules (
+      id, sales_unit_id, managers_json, tiers_json, note, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `).run(id, salesUnitId, managersJson, tiersJson, note || "", now);
+  res.json(
+    rowToTeamMgmtCommissionRule(
+      db.prepare("SELECT * FROM team_mgmt_commission_rules WHERE id=?").get(id)
+    )
+  );
+});
+
+router.delete("/team-mgmt-commission-rules/:id", requireEditPermission, (req, res) => {
+  const db = getDb();
+  const result = db.prepare("DELETE FROM team_mgmt_commission_rules WHERE id=?").run(req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: "记录不存在" });
   res.json({ message: "删除成功" });
 });
 

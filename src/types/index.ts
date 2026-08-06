@@ -218,6 +218,8 @@ export interface UnitProductSettlement {
   rewardFrom?: string;
   /** 奖励生效止，空则与结算生效时间相同 */
   rewardTo?: string;
+  /** 不参与团队管理提成基数（默认 false=参与） */
+  excludeFromTeamMgmt?: boolean;
   note?: string; // 结算说明
   createdAt: string;
   updatedAt?: string;
@@ -245,6 +247,32 @@ export interface ProductPersonCommission {
   rewardFrom?: string;
   /** 奖励生效止（YYYY-MM-DD），空=不限 */
   rewardTo?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+/** 团队管理提成：完成率档位 */
+export interface TeamMgmtCommissionTier {
+  /** 完成率下限（%），匹配时取 <= 完成率 的最高档 */
+  minCompletionPercent: number;
+  /** 对该档适用的管理提成比例（%），基数为可计实收 */
+  commissionRatePercent: number;
+}
+
+/** 团队管理提成：管理人员及权重 */
+export interface TeamMgmtCommissionManager {
+  personnelId: string;
+  /** 分摊权重，>0；分摊 = 提成池 × weight / Σweight */
+  weight: number;
+}
+
+/** 单位级团队管理提成规则（一单位一条） */
+export interface TeamMgmtCommissionRule {
+  id: string;
+  salesUnitId: string;
+  managers: TeamMgmtCommissionManager[];
+  tiers: TeamMgmtCommissionTier[];
+  note?: string;
   createdAt: string;
   updatedAt?: string;
 }

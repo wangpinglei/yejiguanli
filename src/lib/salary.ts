@@ -1,5 +1,23 @@
 import { calcSaleCommissionReward } from "@/lib/commissionReward";
-import type { SalaryStructure, SalesRecord, Personnel, Product, MonthlyAdjustment, ProductPersonCommission } from "@/types";
+import { getPersonTeamMgmtCommission } from "@/lib/teamMgmtCommission";
+import type {
+  SalaryStructure,
+  SalesRecord,
+  Personnel,
+  Product,
+  MonthlyAdjustment,
+  ProductPersonCommission,
+  TeamMgmtCommissionRule,
+  PerformanceTarget,
+  UnitProductSettlement,
+} from "@/types";
+
+/** 团队管理提成计算上下文（传入后用人头分摊替代旧管理提成） */
+export type TeamMgmtSalaryContext = {
+  rules: TeamMgmtCommissionRule[];
+  targets: PerformanceTarget[];
+  upsList: UnitProductSettlement[];
+};
 
 // 每月法定计薪天数（中国劳动法标准）
 export const MONTHLY_WORK_DAYS = 21.75;
@@ -292,7 +310,8 @@ export function calculateMonthlySalary(
   products: Product[] = [],
   yearMonth?: string,
   adjustment?: MonthlyAdjustment,
-  productPersonCommissions?: ProductPersonCommission[]  // 新增：产品级提成配置
+  productPersonCommissions?: ProductPersonCommission[],
+  teamMgmtContext?: TeamMgmtSalaryContext,
 ): {
   baseSalary: number;
   performance: number;
@@ -310,17 +329,27 @@ export function calculateMonthlySalary(
 
   const s = person.salary || EMPTY_SALARY;
   const personalSales = getPersonalSales(person.id, monthlyRecords, person.name);
-  const teamSales = getTeamSales(person.salesUnitId, monthlyRecords);
 
-  // 优先使用产品×单位×人员提成配置（按产品逐个计算），未传入则用人员默认薪资结构
+  // 个人提成：优先产品×单位×人员配置
   const usePpc = productPersonCommissions !== undefined;
-  const managementCommission = usePpc
-    ? calcManagementCommissionByProduct(person, monthlyRecords, products, productPersonCommissions)
-    : calcManagementCommission(s, teamSales);
   const personalCommission = usePpc
     ? calcPersonalCommissionByProduct(person, monthlyRecords, products, productPersonCommissions)
     : calcPersonalCommission(s, personalSales);
-  // 旧产品级提成已废弃，统一为 0（改由单位×人员个人/管理提成计入）
+
+  // 管理提成：仅团队规则分摊；未传上下文则为 0（停用旧每人×产品管理提成）
+  const managementCommission = teamMgmtContext && yearMonth
+    ? getPersonTeamMgmtCommission(
+        person.id,
+        person.salesUnitId,
+        yearMonth,
+        salesRecords,
+        teamMgmtContext.upsList,
+        teamMgmtContext.targets,
+        teamMgmtContext.rules,
+      )
+    : 0;
+
+  // 旧产品级提成已废弃
   const productCommission = 0;
 
   const leaveDeduction = adjustment
@@ -407,7 +436,8 @@ export function getUnitSalaryCost(
   products: Product[] = [],
   yearMonth?: string,
   monthlyAdjustments: MonthlyAdjustment[] = [],
-  productPersonCommissions?: ProductPersonCommission[]
+  productPersonCommissions?: ProductPersonCommission[],
+  teamMgmtContext?: TeamMgmtSalaryContext,
 ): UnitSalaryCost {
   const activeMembers = personnel.filter(
     (p) => p.salesUnitId === unitId && p.status === "active"
@@ -423,7 +453,8 @@ export function getUnitSalaryCost(
       products,
       yearMonth,
       adj,
-      productPersonCommissions
+      productPersonCommissions,
+      teamMgmtContext,
     );
     const socialInsurance = p.socialInsurance || 0;
     const housingFund = p.housingFund || 0;
@@ -489,7 +520,8 @@ export function getTotalSalaryCost(
   products: Product[] = [],
   yearMonth?: string,
   monthlyAdjustments: MonthlyAdjustment[] = [],
-  productPersonCommissions?: ProductPersonCommission[]
+  productPersonCommissions?: ProductPersonCommission[],
+  teamMgmtContext?: TeamMgmtSalaryContext,
 ): {
   units: UnitSalaryCost[];
   grandTotal: number;
@@ -509,7 +541,8 @@ export function getTotalSalaryCost(
       products,
       yearMonth,
       monthlyAdjustments,
-      productPersonCommissions
+      productPersonCommissions,
+      teamMgmtContext,
     )
   );
   const grandTotal = units.reduce((sum, u) => sum + u.totalCost, 0);

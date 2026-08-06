@@ -212,19 +212,22 @@ router.post("/", (req, res) => {
       (r) => ({
         sql: `INSERT INTO unit_product_settlements (
           id, sales_unit_id, product_id, settlement_type, settlement_rate, settlement_amount, note,
-          effective_from, effective_to, reward_amount, reward_from, reward_to, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          effective_from, effective_to, reward_amount, reward_from, reward_to, exclude_from_team_mgmt,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [r.id, r.salesUnitId, r.productId, r.settlementType || "percentage", r.settlementRate ?? 100,
           r.settlementAmount || 0, r.note || "",
           r.effectiveFrom || "", r.effectiveTo || "", r.rewardAmount || 0, r.rewardFrom || "", r.rewardTo || "",
+          r.excludeFromTeamMgmt ? 1 : 0,
           r.createdAt || new Date().toISOString(), r.updatedAt || null],
       }),
       (r) => ({
         sql: `UPDATE unit_product_settlements SET sales_unit_id=?, product_id=?, settlement_type=?, settlement_rate=?, settlement_amount=?, note=?,
-          effective_from=?, effective_to=?, reward_amount=?, reward_from=?, reward_to=?, updated_at=? WHERE id=?`,
+          effective_from=?, effective_to=?, reward_amount=?, reward_from=?, reward_to=?, exclude_from_team_mgmt=?, updated_at=? WHERE id=?`,
         args: [r.salesUnitId, r.productId, r.settlementType || "percentage", r.settlementRate ?? 100,
           r.settlementAmount || 0, r.note || "",
           r.effectiveFrom || "", r.effectiveTo || "", r.rewardAmount || 0, r.rewardFrom || "", r.rewardTo || "",
+          r.excludeFromTeamMgmt ? 1 : 0,
           r.updatedAt || new Date().toISOString(), r.id],
       })
     );
@@ -321,6 +324,31 @@ router.post("/", (req, res) => {
       (r) => ({
         sql: `UPDATE notifications SET type=?, title=?, message=?, timestamp=?, read=? WHERE id=?`,
         args: [r.type || "cost_change", r.title || "", r.message || "", r.timestamp || new Date().toISOString(), r.read ? 1 : 0, r.id],
+      })
+    );
+
+    upsertSimple("teamMgmtCommissionRules", "team_mgmt_commission_rules", body.teamMgmtCommissionRules || [],
+      (r) => ({
+        sql: `INSERT INTO team_mgmt_commission_rules (
+          id, sales_unit_id, managers_json, tiers_json, note, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          r.id, r.salesUnitId,
+          JSON.stringify(r.managers || []),
+          JSON.stringify(r.tiers || []),
+          r.note || "",
+          r.createdAt || new Date().toISOString(), r.updatedAt || null,
+        ],
+      }),
+      (r) => ({
+        sql: `UPDATE team_mgmt_commission_rules SET sales_unit_id=?, managers_json=?, tiers_json=?, note=?, updated_at=? WHERE id=?`,
+        args: [
+          r.salesUnitId,
+          JSON.stringify(r.managers || []),
+          JSON.stringify(r.tiers || []),
+          r.note || "",
+          r.updatedAt || new Date().toISOString(), r.id,
+        ],
       })
     );
     });
