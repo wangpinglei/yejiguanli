@@ -50,7 +50,7 @@ const navItems: NavItem[] = [
   { path: "/cost-management", label: "成本管理", icon: Wallet, moduleKey: "cost_management" },
   { path: "/profit-analysis", label: "收支利润", icon: TrendingUp, moduleKey: "profit_analysis" },
   { path: "/sales-battle-report", label: "单位战报", icon: Swords, moduleKey: "sales_battle_report" },
-  { path: "/product-settlement", label: "产品结算设置", icon: Scale, moduleKey: "product_settlement" },
+  { path: "/product-settlement", label: "业务域产品结算和分类", icon: Scale, moduleKey: "product_settlement" },
   { path: "/users", label: "权限分配", icon: ShieldCheck, moduleKey: "users" },
 ];
 

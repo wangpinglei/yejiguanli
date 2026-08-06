@@ -29,6 +29,9 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import MBusinessDomainSection, {
+  MProductDomainSelect,
+} from "./ProductSettlement/components/m-business-domain-section";
 
 function toggleIdInSet(prev: Set<string>, id: string): Set<string> {
   const next = new Set(prev);
@@ -60,6 +63,7 @@ export default function ProductSettlement() {
     performanceTargets,
     upsertUnitProductSettlement, deleteUnitProductSettlement,
     batchUpsertUnitProductSettlements,
+    updateProduct,
   } = useData();
   const teamMgmtContext = useMemo(() => ({
     rules: teamMgmtCommissionRules,
@@ -256,6 +260,31 @@ export default function ProductSettlement() {
     return options;
   }, []);
 
+  const [extraDomains, setExtraDomains] = useState<string[]>([]);
+
+  const domainOptions = useMemo(() => {
+    const set = new Set<string>();
+    productsFromSales.forEach((p) => {
+      const c = (p.category || '').trim();
+      if (c) set.add(c);
+    });
+    extraDomains.forEach((d) => {
+      const c = d.trim();
+      if (c) set.add(c);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'zh-CN'));
+  }, [productsFromSales, extraDomains]);
+
+  function handleAddDomain(name: string) {
+    const c = name.trim();
+    if (!c) return;
+    setExtraDomains((prev) => (prev.includes(c) ? prev : [...prev, c]));
+  }
+
+  async function handleUpdateProductCategory(productId: string, category: string) {
+    await updateProduct(productId, { category });
+  }
+
   const canEdit = canEditProduct && !isReadOnly;
   const editTarget = editKey
     ? { product: products.find((p) => p.id === editKey.productId), unit: units.find((u) => u.id === editKey.unitId) }
@@ -263,8 +292,8 @@ export default function ProductSettlement() {
   return (
     <div>
       <PageHeader
-        title="产品结算设置"
-        description="配置单位×产品结算比例、生效时间、特殊奖励，以及是否计入团队管理提成基数。销售个人提成请到「成本管理」配置。"
+        title="业务域产品结算和分类"
+        description="为产品设置业务域分类并查看汇总；同时配置单位×产品结算比例、生效期与特殊奖励。"
         action={
           <Select value={selectedMonth} onValueChange={setSelectedMonth}>
             <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
@@ -349,6 +378,17 @@ export default function ProductSettlement() {
         )}
       </div>
 
+      <MBusinessDomainSection
+        products={filteredProducts}
+        monthlySales={monthlySales}
+        upsList={upsList}
+        selectedMonth={selectedMonth}
+        canEdit={canEdit}
+        domainOptions={domainOptions}
+        onAddDomain={handleAddDomain}
+        onUpdateCategory={handleUpdateProductCategory}
+      />
+
       {/* ==================== 第一部分：产品 × 单位 结算配置 ==================== */}
       <div className="mb-8 space-y-4">
         <div>
@@ -357,7 +397,7 @@ export default function ProductSettlement() {
             可设置结算比例/金额、生效时间、特殊时段按件结算奖励，以及是否不参与团队管理提成基数
           </p>
           <p className="text-xs text-muted-foreground mt-1">
-            产品来自销售记录自动同步。销售个人提成与团队管理提成请到「成本管理」配置。
+            产品来自销售记录；业务域请在上方分类区或本行下拉中设置。个人/团队管理提成在「成本管理」。
           </p>
         </div>
         {filteredProducts.map((product: Product) => {
@@ -382,14 +422,26 @@ export default function ProductSettlement() {
                     <div className="flex-1 min-w-0">
                       <p className="font-medium truncate">{product.name}</p>
                       <p className="text-xs text-muted-foreground">
-                        {product.category || "未分类"}
-                        <span className="ml-2">
-                          · {productUnits.length} 个单位
+                        <span className="ml-0">
+                          {productUnits.length} 个单位
                           · 结算已配 {configuredCount}
                         </span>
                       </p>
                     </div>
                   </button>
+                  <div
+                    className="shrink-0"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <MProductDomainSelect
+                      product={product}
+                      domainOptions={domainOptions}
+                      canEdit={canEdit}
+                      onChange={(category) =>
+                        handleUpdateProductCategory(product.id, category)
+                      }
+                    />
+                  </div>
                   {canEdit && productUnits.length > 0 && (
                     <Button
                       variant="outline"
