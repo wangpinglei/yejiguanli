@@ -866,7 +866,7 @@ export default function SalesRecords() {
     setImportStep("input");
     const productTip = createdProductCount > 0
       ? `\n已自动新建 ${createdProductCount} 个产品，请到「结算与提成」配置结算比例与销售提成。`
-      : "\n可在「结算与提成」中配置各单位结算比例与人员提成。";
+      : "\n可在「结算与提成」配置单位结算比例，在「成本管理」配置销售提成。";
     const extraTips = [
       overwriteCount > 0 ? `覆盖 ${overwriteCount} 条` : "",
       skippedInFileDup > 0 ? `表内重复跳过 ${skippedInFileDup} 条` : "",

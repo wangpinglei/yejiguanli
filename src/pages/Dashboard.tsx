@@ -64,12 +64,12 @@ export default function Dashboard() {
     visibleCostRecords: costRecords,
   } = usePermissions();
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
-  // 空数组 = 全部单位；有值 = 仅这些单位
-  const [selectedUnitIds, setSelectedUnitIds] = useState<string[]>([]);
+  // null = 全部单位；[] = 全不选；非空 = 仅这些单位
+  const [selectedUnitIds, setSelectedUnitIds] = useState<string[] | null>(null);
   const [unitFilterOpen, setUnitFilterOpen] = useState(false);
 
   const filterUnitIds = useMemo(() => {
-    if (selectedUnitIds.length === 0) return salesUnits.map((u) => u.id);
+    if (selectedUnitIds === null) return salesUnits.map((u) => u.id);
     return selectedUnitIds.filter((id) => salesUnits.some((u) => u.id === id));
   }, [selectedUnitIds, salesUnits]);
 
@@ -90,34 +90,42 @@ export default function Dashboard() {
     [costRecords, filterUnitIds]
   );
 
-  const isAllUnits = selectedUnitIds.length === 0
+  const isAllUnits = selectedUnitIds === null
     || (salesUnits.length > 0 && selectedUnitIds.length === salesUnits.length);
+  const isNoUnits = selectedUnitIds !== null && selectedUnitIds.length === 0;
   const unitFilterLabel = useMemo(() => {
-    if (isAllUnits || selectedUnitIds.length === 0) return "全部单位";
-    if (selectedUnitIds.length === 1) {
-      return salesUnits.find((u) => u.id === selectedUnitIds[0])?.name || "已选 1 个";
+    if (isNoUnits) return "未选单位";
+    if (isAllUnits) return "全部单位";
+    if (selectedUnitIds!.length === 1) {
+      return salesUnits.find((u) => u.id === selectedUnitIds![0])?.name || "已选 1 个";
     }
-    return `已选 ${selectedUnitIds.length} 个单位`;
-  }, [isAllUnits, selectedUnitIds, salesUnits]);
+    return `已选 ${selectedUnitIds!.length} 个单位`;
+  }, [isAllUnits, isNoUnits, selectedUnitIds, salesUnits]);
 
   function handleToggleUnit(unitId: string, checked: boolean) {
     setSelectedUnitIds((prev) => {
-      const base = prev.length === 0 ? salesUnits.map((u) => u.id) : [...prev];
+      const base = prev === null ? salesUnits.map((u) => u.id) : [...prev];
       if (checked) {
         if (base.includes(unitId)) return base;
-        return [...base, unitId];
+        const next = [...base, unitId];
+        // 勾满后折叠为「全部」
+        if (salesUnits.length > 0 && next.length === salesUnits.length) return null;
+        return next;
       }
       return base.filter((id) => id !== unitId);
     });
   }
 
   function handleSelectAllUnits() {
+    setSelectedUnitIds(null);
+  }
+
+  function handleDeselectAllUnits() {
     setSelectedUnitIds([]);
   }
 
   function handleClearUnits() {
-    // 清空后仍视为「全部」，避免看板无数据；如需强制空态可改为 sentinel
-    setSelectedUnitIds([]);
+    setSelectedUnitIds(null);
   }
 
   // 按月过滤的销售记录和成本记录
@@ -346,7 +354,7 @@ export default function Dashboard() {
   }, []);
 
   const checkedUnitSet = useMemo(() => {
-    if (selectedUnitIds.length === 0) return new Set(salesUnits.map((u) => u.id));
+    if (selectedUnitIds === null) return new Set(salesUnits.map((u) => u.id));
     return new Set(selectedUnitIds);
   }, [selectedUnitIds, salesUnits]);
 
@@ -389,6 +397,14 @@ export default function Dashboard() {
                 >
                   全选
                 </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  onClick={handleDeselectAllUnits}
+                >
+                  全不选
+                </Button>
               </div>
             </div>
             <div className="max-h-64 overflow-y-auto p-2">
@@ -413,7 +429,7 @@ export default function Dashboard() {
                 })
               )}
             </div>
-            {!isAllUnits && selectedUnitIds.length > 0 && (
+            {!isAllUnits && (
               <div className="border-t px-3 py-2">
                 <Button
                   variant="outline"

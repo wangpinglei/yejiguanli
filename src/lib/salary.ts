@@ -380,7 +380,7 @@ export interface UnitSalaryCost {
  * 计算某个销售单位的在职人员薪酬总成本（含社保公积金）
  * @param yearMonth 可选，按月过滤销售记录
  * @param monthlyAdjustments 可选，月度调整列表
- * @param productPersonCommissions 可选，产品×单位×人员提成（结算页配置）；传入后个人/管理提成按此计算
+ * @param productPersonCommissions 可选，产品×单位×人员提成（成本管理配置）；传入后个人/管理提成按此计算
  */
 export function getUnitSalaryCost(
   unitId: string,

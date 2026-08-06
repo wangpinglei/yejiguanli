@@ -1,5 +1,4 @@
 import { useState, useMemo, useEffect } from "react";
-import { Link } from "react-router-dom";
 import { useData } from "@/context/DataContext";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -9,7 +8,7 @@ import { getTotalSalaryCost, calcLeaveDeduction, MONTHLY_WORK_DAYS } from "@/lib
 import type { CostRecord, CostItem, IncomeRecord, IncomeItem } from "@/types";
 import {
   Plus, Search, Pencil, Trash2, Wallet, X, ChevronDown, ChevronRight, Clock,
-  Users, Calculator, History, Percent, CalendarDays, Save, TrendingUp, Repeat, AlertTriangle, Scale,
+  Users, Calculator, History, Percent, CalendarDays, Save, TrendingUp, Repeat, AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +31,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import MSalesCommissionPanel from "./CostManagement/components/m-sales-commission-panel";
 
 const costCategories = ["人力成本", "办公租金", "营销推广", "差旅交通", "运营杂费", "设备采购", "其他"];
 const incomeCategories = ["服务费收入", "咨询费收入", "技术支持费", "培训费收入", "退款收入", "其他收入"];
@@ -43,6 +43,7 @@ export default function CostManagement() {
   const [search, setSearch] = useState("");
   const [filterUnit, setFilterUnit] = useState("all");
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // "2026-08"
+  const [salesCommissionOpen, setSalesCommissionOpen] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<CostRecord | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -493,16 +494,22 @@ export default function CostManagement() {
             </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card
+          className={`cursor-pointer transition-shadow hover:shadow-md ${salesCommissionOpen ? "ring-2 ring-violet-300" : ""}`}
+          onClick={() => setSalesCommissionOpen((v) => !v)}
+        >
           <CardContent className="flex items-center gap-4 p-5">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-violet-50">
               <Percent className="h-6 w-6 text-violet-600" />
             </div>
-            <div>
+            <div className="flex-1 min-w-0">
               <p className="text-sm text-muted-foreground">销售提成</p>
               <p className="text-xl font-bold text-violet-600">{formatCurrency(productCommissionTotal)}</p>
-              <p className="text-[10px] text-muted-foreground">按单位×人员自动汇总</p>
+              <p className="text-[10px] text-muted-foreground">按单位×人员配置 · 点击展开</p>
             </div>
+            {salesCommissionOpen
+              ? <ChevronDown className="h-5 w-5 shrink-0 text-violet-500" />
+              : <ChevronRight className="h-5 w-5 shrink-0 text-violet-500" />}
           </CardContent>
         </Card>
         <Card>
@@ -542,6 +549,14 @@ export default function CostManagement() {
           </CardContent>
         </Card>
       </div>
+
+      {salesCommissionOpen && (
+        <Card className="mb-6 border-violet-200">
+          <CardContent className="p-5">
+            <MSalesCommissionPanel selectedMonth={selectedMonth} />
+          </CardContent>
+        </Card>
+      )}
 
       {/* ===================== 自动薪酬成本明细 ===================== */}
       <Card className="mb-6">
@@ -902,27 +917,6 @@ export default function CostManagement() {
               </TableBody>
             </Table>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* 结算与提成已统一到独立页面 */}
-      <Card className="mt-8 border-dashed">
-        <CardContent className="flex flex-wrap items-center justify-between gap-4 p-5">
-          <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-50 shrink-0">
-              <Scale className="h-5 w-5 text-cyan-600" />
-            </div>
-            <div>
-              <p className="font-medium">结算与提成</p>
-              <p className="text-sm text-muted-foreground mt-0.5">
-                销售产品与单位结算、按单位×人员配置的销售提成，请到「结算与提成」维护；
-                本页自动汇总当月销售提成到人力成本。
-              </p>
-            </div>
-          </div>
-          <Button asChild variant="outline" size="sm">
-            <Link to="/product-settlement">前往结算与提成</Link>
-          </Button>
         </CardContent>
       </Card>
 
