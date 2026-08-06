@@ -281,6 +281,24 @@ export default function ProductSettlement() {
     setExtraDomains((prev) => (prev.includes(c) ? prev : [...prev, c]));
   }
 
+  async function handleRemoveDomain(name: string) {
+    const c = name.trim();
+    if (!c) return;
+    setExtraDomains((prev) => prev.filter((d) => d !== c));
+    const targets = productsFromSales.filter((p) => (p.category || '').trim() === c);
+    for (const p of targets) {
+      await updateProduct(p.id, { category: '' });
+    }
+  }
+
+  async function handleClearAllDomains() {
+    setExtraDomains([]);
+    const targets = productsFromSales.filter((p) => (p.category || '').trim());
+    for (const p of targets) {
+      await updateProduct(p.id, { category: '' });
+    }
+  }
+
   async function handleUpdateProductCategory(productId: string, category: string) {
     await updateProduct(productId, { category });
   }
@@ -386,6 +404,8 @@ export default function ProductSettlement() {
         canEdit={canEdit}
         domainOptions={domainOptions}
         onAddDomain={handleAddDomain}
+        onRemoveDomain={handleRemoveDomain}
+        onClearAllDomains={handleClearAllDomains}
         onUpdateCategory={handleUpdateProductCategory}
       />
 

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import type { Product, SalesRecord, UnitProductSettlement } from '@/types'
 import { formatCurrency } from '@/lib/format'
 import { calcSaleSettlementIncome } from '@/lib/settlement'
-import { Tags, Plus, CheckSquare } from 'lucide-react'
+import { Tags, Plus, CheckSquare, X, Eraser } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -38,6 +38,8 @@ type Props = {
   canEdit: boolean
   domainOptions: string[]
   onAddDomain?: (name: string) => void
+  onRemoveDomain?: (name: string) => Promise<void> | void
+  onClearAllDomains?: () => Promise<void> | void
   onUpdateCategory: (productId: string, category: string) => Promise<void>
 }
 
@@ -49,6 +51,8 @@ export default function MBusinessDomainSection({
   canEdit,
   domainOptions,
   onAddDomain,
+  onRemoveDomain,
+  onClearAllDomains,
   onUpdateCategory,
 }: Props) {
   const [newDomain, setNewDomain] = useState('')
@@ -56,6 +60,34 @@ export default function MBusinessDomainSection({
   const [batchDomain, setBatchDomain] = useState('')
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
+
+  async function handleRemoveDomain(name: string) {
+    if (!onRemoveDomain) return
+    if (!confirm(`确定删除业务域「${name}」？相关产品将变为未分类。`)) return
+    setSaving(true)
+    try {
+      await onRemoveDomain(name)
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '未知错误'
+      alert('删除失败: ' + msg)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleClearAllDomains() {
+    if (!onClearAllDomains) return
+    if (!confirm('确定清空全部业务域？所有产品将变为未分类，可再自行添加。')) return
+    setSaving(true)
+    try {
+      await onClearAllDomains()
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '未知错误'
+      alert('清空失败: ' + msg)
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const summaries = useMemo((): DomainSummary[] => {
     const map = new Map<string, DomainSummary>()
@@ -176,15 +208,42 @@ export default function MBusinessDomainSection({
               }}
             />
           </div>
-          <Button type="button" variant="secondary" onClick={handleAddDomain}>
+          <Button type="button" variant="secondary" onClick={handleAddDomain} disabled={saving}>
             <Plus className="mr-1 h-3.5 w-3.5" />
             添加
           </Button>
+          {domainOptions.length > 0 && onClearAllDomains && (
+            <Button
+              type="button"
+              variant="outline"
+              className="text-destructive border-destructive/30"
+              onClick={handleClearAllDomains}
+              disabled={saving}
+            >
+              <Eraser className="mr-1 h-3.5 w-3.5" />
+              清空全部
+            </Button>
+          )}
           {domainOptions.length > 0 && (
             <div className="w-full flex flex-wrap gap-1.5 pt-1">
               {domainOptions.map((d) => (
-                <Badge key={d} variant="secondary" className="bg-teal-50 text-teal-800">
+                <Badge
+                  key={d}
+                  variant="secondary"
+                  className="bg-teal-50 text-teal-800 gap-1 pr-1"
+                >
                   {d}
+                  {onRemoveDomain && (
+                    <button
+                      type="button"
+                      className="ml-0.5 rounded-sm p-0.5 hover:bg-teal-200/80 disabled:opacity-50"
+                      title={`删除「${d}」`}
+                      disabled={saving}
+                      onClick={() => handleRemoveDomain(d)}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
                 </Badge>
               ))}
             </div>
