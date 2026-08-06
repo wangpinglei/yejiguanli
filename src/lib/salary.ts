@@ -1,3 +1,4 @@
+import { calcSaleCommissionReward } from "@/lib/commissionReward";
 import type { SalaryStructure, SalesRecord, Personnel, Product, MonthlyAdjustment, ProductPersonCommission } from "@/types";
 
 // 每月法定计薪天数（中国劳动法标准）
@@ -211,6 +212,7 @@ export function calcManagementCommissionByProduct(
  * 按产品逐个计算个人提成（优先使用产品级配置，fallback 到默认薪资）
  * - percentage: max(0, 销售额 - 门槛) × 比例%
  * - fixed: 销售数量 × 每件提成金额
+ * - 另加：特殊时段按件奖励（rewardAmount × 数量，按销售日匹配区间）
  */
 export function calcPersonalCommissionByProduct(
   person: Personnel,
@@ -224,29 +226,29 @@ export function calcPersonalCommissionByProduct(
   // 找出该人员本月销售的各产品：金额与数量
   const productSalesMap = new Map<string, number>();
   const productQtyMap = new Map<string, number>();
-  monthlyRecords
-    .filter((r) => r.personnelId === person.id)
-    .forEach((r) => {
-      productSalesMap.set(r.productId, (productSalesMap.get(r.productId) || 0) + r.totalAmount);
-      productQtyMap.set(r.productId, (productQtyMap.get(r.productId) || 0) + (r.quantity || 0));
-    });
+  const personRecords = monthlyRecords.filter((r) => r.personnelId === person.id);
+  personRecords.forEach((r) => {
+    productSalesMap.set(r.productId, (productSalesMap.get(r.productId) || 0) + r.totalAmount);
+    productQtyMap.set(r.productId, (productQtyMap.get(r.productId) || 0) + (r.quantity || 0));
+  });
 
   const configuredProducts = new Set<string>();
-  ppcList
-    .filter((ppc) => ppc.personnelId === person.id && ppc.salesUnitId === person.salesUnitId)
-    .forEach((ppc) => {
-      const sales = productSalesMap.get(ppc.productId) || 0;
-      const qty = productQtyMap.get(ppc.productId) || 0;
-      if (sales <= 0 && qty <= 0) return;
-      configuredProducts.add(ppc.productId);
-      if (ppc.personalCommissionType === "fixed") {
-        totalPersonal += qty * (ppc.personalCommissionAmount || 0);
-        return;
-      }
-      if (sales > (ppc.personalCommissionThreshold || 0)) {
-        totalPersonal += (sales - ppc.personalCommissionThreshold) * (ppc.personalCommissionRate / 100);
-      }
-    });
+  const personPpcList = ppcList.filter(
+    (ppc) => ppc.personnelId === person.id && ppc.salesUnitId === person.salesUnitId
+  );
+  personPpcList.forEach((ppc) => {
+    const sales = productSalesMap.get(ppc.productId) || 0;
+    const qty = productQtyMap.get(ppc.productId) || 0;
+    if (sales <= 0 && qty <= 0) return;
+    configuredProducts.add(ppc.productId);
+    if (ppc.personalCommissionType === "fixed") {
+      totalPersonal += qty * (ppc.personalCommissionAmount || 0);
+      return;
+    }
+    if (sales > (ppc.personalCommissionThreshold || 0)) {
+      totalPersonal += (sales - ppc.personalCommissionThreshold) * (ppc.personalCommissionRate / 100);
+    }
+  });
 
   // 未配置的产品用默认值（仍为比例）
   let unconfiguredSales = 0;
@@ -255,6 +257,12 @@ export function calcPersonalCommissionByProduct(
   });
   if (unconfiguredSales > (s.personalCommissionThreshold || 0) && (s.personalCommissionRate || 0) > 0) {
     totalPersonal += (unconfiguredSales - s.personalCommissionThreshold) * (s.personalCommissionRate / 100);
+  }
+
+  // 特殊时段按件奖励（按销售日匹配）
+  for (const r of personRecords) {
+    const ppc = personPpcList.find((x) => x.productId === r.productId);
+    totalPersonal += calcSaleCommissionReward(r, ppc);
   }
 
   return totalPersonal;

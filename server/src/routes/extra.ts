@@ -254,13 +254,15 @@ router.post("/product-person-commissions/upsert", requireEditPermission, (req, r
       UPDATE product_person_commissions SET
         management_commission_rate=?, management_commission_threshold=?, management_commission_condition=?,
         personal_commission_type=?, personal_commission_rate=?, personal_commission_amount=?,
-        personal_commission_threshold=?, personal_commission_condition=?, updated_at=?
+        personal_commission_threshold=?, personal_commission_condition=?,
+        reward_amount=?, reward_from=?, reward_to=?, updated_at=?
       WHERE id=?
     `).run(
       b.managementCommissionRate ?? 0, b.managementCommissionThreshold ?? 0, b.managementCommissionCondition || "",
       b.personalCommissionType === "fixed" ? "fixed" : "percentage",
       b.personalCommissionRate ?? 0, b.personalCommissionAmount ?? 0,
       b.personalCommissionThreshold ?? 0, b.personalCommissionCondition || "",
+      b.rewardAmount ?? 0, b.rewardFrom || "", b.rewardTo || "",
       now, existing.id
     );
     return res.json(rowToProductPersonCommission(db.prepare("SELECT * FROM product_person_commissions WHERE id=?").get(existing.id)));
@@ -271,14 +273,16 @@ router.post("/product-person-commissions/upsert", requireEditPermission, (req, r
       id, sales_unit_id, product_id, personnel_id,
       management_commission_rate, management_commission_threshold, management_commission_condition,
       personal_commission_type, personal_commission_rate, personal_commission_amount,
-      personal_commission_threshold, personal_commission_condition, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      personal_commission_threshold, personal_commission_condition,
+      reward_amount, reward_from, reward_to, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id, b.salesUnitId, b.productId, b.personnelId,
     b.managementCommissionRate ?? 0, b.managementCommissionThreshold ?? 0, b.managementCommissionCondition || "",
     b.personalCommissionType === "fixed" ? "fixed" : "percentage",
     b.personalCommissionRate ?? 0, b.personalCommissionAmount ?? 0,
-    b.personalCommissionThreshold ?? 0, b.personalCommissionCondition || "", now
+    b.personalCommissionThreshold ?? 0, b.personalCommissionCondition || "",
+    b.rewardAmount ?? 0, b.rewardFrom || "", b.rewardTo || "", now
   );
   res.json(rowToProductPersonCommission(db.prepare("SELECT * FROM product_person_commissions WHERE id=?").get(id)));
 });
@@ -294,6 +298,7 @@ router.post("/product-person-commissions/batch", requireEditPermission, (req, re
         managementCommissionRate, managementCommissionThreshold, managementCommissionCondition,
         personalCommissionType, personalCommissionRate, personalCommissionAmount,
         personalCommissionThreshold, personalCommissionCondition,
+        rewardAmount, rewardFrom, rewardTo,
       } = item;
       if (!salesUnitId || !productId || !personnelId) continue;
       const existing = db.prepare(
@@ -306,12 +311,14 @@ router.post("/product-person-commissions/batch", requireEditPermission, (req, re
           UPDATE product_person_commissions SET
             management_commission_rate=?, management_commission_threshold=?, management_commission_condition=?,
             personal_commission_type=?, personal_commission_rate=?, personal_commission_amount=?,
-            personal_commission_threshold=?, personal_commission_condition=?, updated_at=?
+            personal_commission_threshold=?, personal_commission_condition=?,
+            reward_amount=?, reward_from=?, reward_to=?, updated_at=?
           WHERE id=?
         `).run(
           managementCommissionRate ?? 0, managementCommissionThreshold ?? 0, managementCommissionCondition || "",
           typeVal, personalCommissionRate ?? 0, personalCommissionAmount ?? 0,
           personalCommissionThreshold ?? 0, personalCommissionCondition || "",
+          rewardAmount ?? 0, rewardFrom || "", rewardTo || "",
           now, existing.id
         );
         results.push(rowToProductPersonCommission(
@@ -324,13 +331,15 @@ router.post("/product-person-commissions/batch", requireEditPermission, (req, re
             id, sales_unit_id, product_id, personnel_id,
             management_commission_rate, management_commission_threshold, management_commission_condition,
             personal_commission_type, personal_commission_rate, personal_commission_amount,
-            personal_commission_threshold, personal_commission_condition, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            personal_commission_threshold, personal_commission_condition,
+            reward_amount, reward_from, reward_to, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           id, salesUnitId, productId, personnelId,
           managementCommissionRate ?? 0, managementCommissionThreshold ?? 0, managementCommissionCondition || "",
           typeVal, personalCommissionRate ?? 0, personalCommissionAmount ?? 0,
-          personalCommissionThreshold ?? 0, personalCommissionCondition || "", now
+          personalCommissionThreshold ?? 0, personalCommissionCondition || "",
+          rewardAmount ?? 0, rewardFrom || "", rewardTo || "", now
         );
         results.push(rowToProductPersonCommission(
           db.prepare("SELECT * FROM product_person_commissions WHERE id=?").get(id)

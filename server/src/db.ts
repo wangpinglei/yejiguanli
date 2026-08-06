@@ -303,6 +303,9 @@ function initSchema() {
   ensureColumns("product_person_commissions", [
     { name: "personal_commission_type", ddl: "personal_commission_type TEXT DEFAULT 'percentage'" },
     { name: "personal_commission_amount", ddl: "personal_commission_amount REAL DEFAULT 0" },
+    { name: "reward_amount", ddl: "reward_amount REAL DEFAULT 0" },
+    { name: "reward_from", ddl: "reward_from TEXT DEFAULT ''" },
+    { name: "reward_to", ddl: "reward_to TEXT DEFAULT ''" },
   ]);
 
   ensureColumns("unit_product_settlements", [
@@ -533,6 +536,9 @@ export function rowToProductPersonCommission(row: any) {
     personalCommissionAmount: row.personal_commission_amount || 0,
     personalCommissionThreshold: row.personal_commission_threshold || 0,
     personalCommissionCondition: row.personal_commission_condition || "",
+    rewardAmount: row.reward_amount || 0,
+    rewardFrom: row.reward_from || "",
+    rewardTo: row.reward_to || "",
     createdAt: row.created_at,
     updatedAt: row.updated_at || undefined,
   };

@@ -239,6 +239,12 @@ export interface ProductPersonCommission {
   personalCommissionAmount?: number; // 每件提成 ¥，fixed 时生效
   personalCommissionThreshold: number; // 起算门槛 ¥（仅 percentage）
   personalCommissionCondition: string; // 条件描述
+  /** 特殊时段提成奖励：每件额外金额（¥），计入个人提成 */
+  rewardAmount?: number;
+  /** 奖励生效起（YYYY-MM-DD），空=不限 */
+  rewardFrom?: string;
+  /** 奖励生效止（YYYY-MM-DD），空=不限 */
+  rewardTo?: string;
   createdAt: string;
   updatedAt?: string;
 }

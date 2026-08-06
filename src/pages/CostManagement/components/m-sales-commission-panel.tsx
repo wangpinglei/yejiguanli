@@ -1,12 +1,16 @@
 import { useState, useMemo } from 'react'
 import { useData } from '@/context/DataContext'
 import { usePermissions } from '@/hooks/usePermissions'
-import { formatCurrency } from '@/lib/format'
+import { formatCurrency, formatDate } from '@/lib/format'
 import { filterByMonth } from '@/lib/salary'
+import {
+  formatCommissionRewardPeriod,
+  groupCommissionRewardHits,
+} from '@/lib/commissionReward'
 import type { SalesUnit, ProductPersonCommission, Personnel, Product, UnitProductSettlement } from '@/types'
 import {
   Building2, Package, Pencil, Users, Layers, Calculator,
-  ChevronDown, ChevronRight,
+  ChevronDown, ChevronRight, ListOrdered,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -35,6 +39,9 @@ const EMPTY_PERSON_COMMISSION = {
   personalCommissionAmount: 0,
   personalCommissionThreshold: 0,
   personalCommissionCondition: '',
+  rewardAmount: 0,
+  rewardFrom: '',
+  rewardTo: '',
 }
 
 type BatchPpcTarget =
@@ -106,6 +113,11 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
     personnelId: string
   } | null>(null)
   const [ppcForm, setPpcForm] = useState(EMPTY_PERSON_COMMISSION)
+  const [rewardHitsKey, setRewardHitsKey] = useState<{
+    productId: string
+    unitId?: string
+    personnelId?: string
+  } | null>(null)
 
   const [expandedPpcProductIds, setExpandedPpcProductIds] = useState<Set<string>>(new Set())
   const [expandedPpcUnitKeys, setExpandedPpcUnitKeys] = useState<Set<string>>(new Set())
@@ -193,6 +205,9 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
         ...ppc,
         personalCommissionType: ppc.personalCommissionType || defaultType,
         personalCommissionAmount: ppc.personalCommissionAmount || 0,
+        rewardAmount: ppc.rewardAmount || 0,
+        rewardFrom: ppc.rewardFrom || '',
+        rewardTo: ppc.rewardTo || '',
       })
     } else {
       setPpcForm({
@@ -220,6 +235,9 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
         personalCommissionAmount: ppcForm.personalCommissionAmount || 0,
         personalCommissionThreshold: ppcForm.personalCommissionThreshold || 0,
         personalCommissionCondition: ppcForm.personalCommissionCondition,
+        rewardAmount: ppcForm.rewardAmount || 0,
+        rewardFrom: ppcForm.rewardFrom || '',
+        rewardTo: ppcForm.rewardTo || '',
       })
       setPpcEditKey(null)
     } catch (error: unknown) {
@@ -258,6 +276,9 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
           personalCommissionAmount: ppcForm.personalCommissionAmount || 0,
           personalCommissionThreshold: ppcForm.personalCommissionThreshold || 0,
           personalCommissionCondition: ppcForm.personalCommissionCondition,
+          rewardAmount: ppcForm.rewardAmount || 0,
+          rewardFrom: ppcForm.rewardFrom || '',
+          rewardTo: ppcForm.rewardTo || '',
         })),
       ),
     )
@@ -349,6 +370,30 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
       }
     : null
 
+  const rewardHitGroups = useMemo(() => {
+    if (!rewardHitsKey) return []
+    return groupCommissionRewardHits({
+      salesRecords,
+      ppcList,
+      units,
+      productId: rewardHitsKey.productId,
+      unitId: rewardHitsKey.unitId,
+      personnelId: rewardHitsKey.personnelId,
+    })
+  }, [rewardHitsKey, salesRecords, ppcList, units])
+
+  const rewardHitsMeta = rewardHitsKey
+    ? {
+        product: products.find((p) => p.id === rewardHitsKey.productId),
+        unit: rewardHitsKey.unitId
+          ? units.find((u) => u.id === rewardHitsKey.unitId)
+          : undefined,
+        person: rewardHitsKey.personnelId
+          ? personnel.find((p) => p.id === rewardHitsKey.personnelId)
+          : undefined,
+      }
+    : null
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -405,9 +450,11 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
             return (
               (ppc?.managementCommissionRate || 0) > 0 ||
               (ppc?.personalCommissionRate || 0) > 0 ||
-              hasPersonalFixed
+              hasPersonalFixed ||
+              (ppc?.rewardAmount || 0) > 0
             )
           }).length
+          const hasAnyReward = rows.some((r) => (r.ppc?.rewardAmount || 0) > 0)
 
           return (
             <Card key={'ppc-' + product.id}>
@@ -439,6 +486,20 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                   <Badge variant="secondary" className="shrink-0">
                     {rows.length} 人
                   </Badge>
+                  {hasAnyReward && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0 border-amber-200 text-amber-800"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setRewardHitsKey({ productId: product.id })
+                      }}
+                    >
+                      <ListOrdered className="mr-1.5 h-3.5 w-3.5" />
+                      奖励命中（按单位）
+                    </Button>
+                  )}
                   {canEdit && rows.length > 0 && (
                     <Button
                       variant="outline"
@@ -523,7 +584,7 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                                       <TableHead className="text-right">管理提成比例</TableHead>
                                       <TableHead className="text-right">管理起算门槛</TableHead>
                                       <TableHead className="text-right">个人提成</TableHead>
-                                      <TableHead className="text-right">个人起算门槛</TableHead>
+                                      <TableHead className="text-right">特殊奖励</TableHead>
                                       <TableHead className="text-right">
                                         本月该产品销售额
                                       </TableHead>
@@ -538,6 +599,7 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                                       const hasPersonal = isPersonalFixed
                                         ? (ppc?.personalCommissionAmount || 0) > 0
                                         : (ppc?.personalCommissionRate || 0) > 0
+                                      const hasReward = (ppc?.rewardAmount || 0) > 0
                                       return (
                                         <TableRow key={person.id}>
                                           <TableCell>
@@ -585,14 +647,17 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                                             )}
                                           </TableCell>
                                           <TableCell className="text-right text-sm">
-                                            {isPersonalFixed ? (
-                                              <span className="text-xs text-muted-foreground">按件</span>
-                                            ) : ppc?.personalCommissionThreshold ? (
-                                              formatCurrency(ppc.personalCommissionThreshold)
+                                            {hasReward ? (
+                                              <div className="flex flex-col items-end gap-0.5">
+                                                <span className="text-amber-600 font-medium">
+                                                  +{formatCurrency(ppc!.rewardAmount || 0)}/件
+                                                </span>
+                                                <span className="text-[10px] text-muted-foreground">
+                                                  {formatCommissionRewardPeriod(ppc)}
+                                                </span>
+                                              </div>
                                             ) : (
-                                              <span className="text-xs text-muted-foreground">
-                                                -
-                                              </span>
+                                              <span className="text-xs text-muted-foreground">-</span>
                                             )}
                                           </TableCell>
                                           <TableCell className="text-right text-sm font-medium text-blue-600">
@@ -601,21 +666,39 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                                               : '-'}
                                           </TableCell>
                                           <TableCell className="text-right">
-                                            {canEdit ? (
-                                              <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                onClick={() =>
-                                                  openPpcEdit(product.id, unit.id, person.id)
-                                                }
-                                              >
-                                                <Pencil className="h-4 w-4" />
-                                              </Button>
-                                            ) : (
-                                              <span className="text-xs text-muted-foreground">
-                                                仅查看
-                                              </span>
-                                            )}
+                                            <div className="flex justify-end gap-0.5">
+                                              {hasReward && (
+                                                <Button
+                                                  variant="ghost"
+                                                  size="icon"
+                                                  title="查看命中记录"
+                                                  onClick={() =>
+                                                    setRewardHitsKey({
+                                                      productId: product.id,
+                                                      unitId: unit.id,
+                                                      personnelId: person.id,
+                                                    })
+                                                  }
+                                                >
+                                                  <ListOrdered className="h-4 w-4 text-amber-600" />
+                                                </Button>
+                                              )}
+                                              {canEdit ? (
+                                                <Button
+                                                  variant="ghost"
+                                                  size="icon"
+                                                  onClick={() =>
+                                                    openPpcEdit(product.id, unit.id, person.id)
+                                                  }
+                                                >
+                                                  <Pencil className="h-4 w-4" />
+                                                </Button>
+                                              ) : (
+                                                <span className="text-xs text-muted-foreground">
+                                                  仅查看
+                                                </span>
+                                              )}
+                                            </div>
                                           </TableCell>
                                         </TableRow>
                                       )
@@ -842,6 +925,70 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                   计算公式：(个人该产品销售额 - 起算门槛) × 提成比例%
                 </p>
               )}
+            </div>
+
+            <div className="rounded-lg border-2 border-amber-200 bg-amber-50/40 p-4 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Badge className="bg-amber-100 text-amber-800">特殊时段奖励</Badge>
+                  <span className="text-xs text-muted-foreground">按件额外计入个人提成</span>
+                </div>
+                {ppcEditKey && (ppcForm.rewardAmount || 0) > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() =>
+                      setRewardHitsKey({
+                        productId: ppcEditKey.productId,
+                        unitId: ppcEditKey.unitId,
+                        personnelId: ppcEditKey.personnelId,
+                      })
+                    }
+                  >
+                    <ListOrdered className="mr-1 h-3 w-3" />
+                    查看命中记录
+                  </Button>
+                )}
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">每件奖励金额 (¥)</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={ppcForm.rewardAmount}
+                  onChange={(e) =>
+                    setPpcForm({ ...ppcForm, rewardAmount: Number(e.target.value) })
+                  }
+                  placeholder="0 表示无奖励"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">奖励开始日期</Label>
+                  <Input
+                    type="date"
+                    value={ppcForm.rewardFrom}
+                    onChange={(e) =>
+                      setPpcForm({ ...ppcForm, rewardFrom: e.target.value })
+                    }
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">奖励结束日期</Label>
+                  <Input
+                    type="date"
+                    value={ppcForm.rewardTo}
+                    onChange={(e) =>
+                      setPpcForm({ ...ppcForm, rewardTo: e.target.value })
+                    }
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                留空表示不限；仅销售日落在区间内的成交按件加奖
+              </p>
             </div>
           </div>
           <DialogFooter className="gap-2">
@@ -1124,6 +1271,46 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                 />
               </div>
             </div>
+
+            <div className="rounded-lg border-2 border-amber-200 bg-amber-50/40 p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Badge className="bg-amber-100 text-amber-800">特殊时段奖励</Badge>
+                <span className="text-xs text-muted-foreground">批量写入每人配置</span>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">每件奖励金额 (¥)</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={ppcForm.rewardAmount}
+                  onChange={(e) =>
+                    setPpcForm({ ...ppcForm, rewardAmount: Number(e.target.value) })
+                  }
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">奖励开始</Label>
+                  <Input
+                    type="date"
+                    value={ppcForm.rewardFrom}
+                    onChange={(e) =>
+                      setPpcForm({ ...ppcForm, rewardFrom: e.target.value })
+                    }
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">奖励结束</Label>
+                  <Input
+                    type="date"
+                    value={ppcForm.rewardTo}
+                    onChange={(e) =>
+                      setPpcForm({ ...ppcForm, rewardTo: e.target.value })
+                    }
+                  />
+                </div>
+              </div>
+            </div>
           </div>
           <DialogFooter>
             <Button
@@ -1142,6 +1329,117 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
               onClick={handleBatchPpcSave}
             >
               {batchPpcSaving ? '保存中…' : '一键应用'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!rewardHitsKey} onOpenChange={(open) => !open && setRewardHitsKey(null)}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>特殊奖励命中成交记录</DialogTitle>
+          </DialogHeader>
+          {rewardHitsMeta && (
+            <div className="mb-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-sm space-y-1">
+              <p>
+                <span className="text-muted-foreground">产品：</span>
+                {rewardHitsMeta.product?.name || '-'}
+              </p>
+              {rewardHitsMeta.unit && (
+                <p>
+                  <span className="text-muted-foreground">单位：</span>
+                  {rewardHitsMeta.unit.name}
+                </p>
+              )}
+              {rewardHitsMeta.person && (
+                <p>
+                  <span className="text-muted-foreground">人员：</span>
+                  {rewardHitsMeta.person.name}
+                </p>
+              )}
+              <p className="text-xs text-muted-foreground">
+                按销售单位分组；仅展示已配置奖励且销售日落在奖励区间内的成交
+              </p>
+            </div>
+          )}
+          <div className="space-y-4">
+            {rewardHitGroups.length === 0 && (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                暂无命中记录（请确认已配置奖励金额与时间段，且存在对应成交）
+              </p>
+            )}
+            {rewardHitGroups.map((group) => (
+              <Card key={group.unitId}>
+                <CardContent className="p-0">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/30 px-4 py-2">
+                    <div className="flex items-center gap-2">
+                      <Building2 className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm font-medium">{group.unitName}</span>
+                      <Badge variant="outline" className="text-xs">
+                        {group.hits.length} 笔
+                      </Badge>
+                    </div>
+                    <div className="text-xs text-muted-foreground space-x-3">
+                      <span>数量 {group.totalQty}</span>
+                      <span>订单额 {formatCurrency(group.totalAmount)}</span>
+                      <span className="font-medium text-amber-700">
+                        奖励合计 {formatCurrency(group.totalReward)}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>销售日期</TableHead>
+                          <TableHead>人员</TableHead>
+                          <TableHead>客户</TableHead>
+                          <TableHead className="text-right">数量</TableHead>
+                          <TableHead className="text-right">订单金额</TableHead>
+                          <TableHead className="text-right">本单奖励</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {group.hits
+                          .slice()
+                          .sort((a, b) =>
+                            (b.sale.saleDate || '').localeCompare(a.sale.saleDate || ''),
+                          )
+                          .map((hit) => {
+                            const person = personnel.find((p) => p.id === hit.sale.personnelId)
+                            return (
+                              <TableRow key={hit.sale.id}>
+                                <TableCell className="text-sm">
+                                  {formatDate(hit.sale.saleDate)}
+                                </TableCell>
+                                <TableCell className="text-sm">
+                                  {person?.name || hit.sale.salesPersonName || '-'}
+                                </TableCell>
+                                <TableCell className="text-sm text-muted-foreground">
+                                  {hit.sale.customerName || '-'}
+                                </TableCell>
+                                <TableCell className="text-right text-sm">
+                                  {hit.sale.quantity || 0}
+                                </TableCell>
+                                <TableCell className="text-right text-sm">
+                                  {formatCurrency(hit.sale.totalAmount)}
+                                </TableCell>
+                                <TableCell className="text-right text-sm font-medium text-amber-600">
+                                  {formatCurrency(hit.reward)}
+                                </TableCell>
+                              </TableRow>
+                            )
+                          })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRewardHitsKey(null)}>
+              关闭
             </Button>
           </DialogFooter>
         </DialogContent>
