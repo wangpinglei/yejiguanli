@@ -5,6 +5,7 @@ import { useAuth } from "@/context/AuthContext";
 import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, formatDate, getYearMonth } from "@/lib/format";
 import { getTotalSalaryCost, filterByMonth } from "@/lib/salary";
+import { calcSaleSettlementIncome } from "@/lib/settlement";
 import type { RevenueSettlement } from "@/types";
 import {
   TrendingUp, DollarSign, Award, AlertTriangle,
@@ -59,19 +60,15 @@ export default function ProfitAnalysis() {
     return filterUnit === "all" ? monthlyCosts : monthlyCosts.filter((c) => c.salesUnitId === filterUnit);
   }, [monthlyCosts, filterUnit]);
 
-  // 结算收入（按单位×产品结算比例）
+  // 结算收入（按单位×产品结算规则：生效区间 + 特殊奖励）
   const calcSettlementIncome = (sales: typeof filteredSales) => {
-    return sales.reduce((sum, s) => {
-      const ups = visibleUnitProductSettlements.find(
-        (x) => x.salesUnitId === s.salesUnitId && x.productId === s.productId
-      );
-      if (!ups) return sum + s.totalAmount; // 未配置结算则按全额计入
-      if (ups.settlementType === "fixed") return sum + (ups.settlementAmount || 0) * s.quantity;
-      return sum + s.totalAmount * ((ups.settlementRate || 0) / 100);
-    }, 0);
+    return sales.reduce(
+      (sum, s) => sum + calcSaleSettlementIncome(s, visibleUnitProductSettlements),
+      0,
+    );
   };
 
-  // 销售提成 = 单位×人员的管理提成 + 个人提成（来自结算与提成配置，计入成本）
+  // 销售提成 = 单位×人员的管理提成 + 个人提成（来自成本管理配置，计入成本）
   function getSalesCommission(unitIds: string[], yearMonth: string): number {
     return getTotalSalaryCost(
       unitIds,
@@ -117,12 +114,7 @@ export default function ProfitAnalysis() {
       const ym = getYearMonth(s.saleDate);
       const existing = monthMap.get(ym) || { salesAmount: 0, settlementIncome: 0, cost: 0 };
       existing.salesAmount += s.totalAmount;
-      const ups = visibleUnitProductSettlements.find(
-        (x) => x.salesUnitId === s.salesUnitId && x.productId === s.productId
-      );
-      if (!ups) existing.settlementIncome += s.totalAmount;
-      else if (ups.settlementType === "fixed") existing.settlementIncome += (ups.settlementAmount || 0) * s.quantity;
-      else existing.settlementIncome += s.totalAmount * ((ups.settlementRate || 0) / 100);
+      existing.settlementIncome += calcSaleSettlementIncome(s, visibleUnitProductSettlements);
       monthMap.set(ym, existing);
     });
     costRecords.forEach((c) => {
@@ -263,20 +255,12 @@ export default function ProfitAnalysis() {
   const incomeDetail = useMemo(() => {
     const unitsToShow = filterUnit === "all" ? salesUnits : salesUnits.filter((u) => u.id === filterUnit);
     return unitsToShow.map((unit) => {
-      // 预估业绩收入：根据单位×产品结算比例计算
+      // 预估业绩收入：根据单位×产品结算规则（含生效期与奖励）
       const unitSales = monthlySales.filter((s) => s.salesUnitId === unit.id);
-      const estimatedAmount = unitSales.reduce((sum, s) => {
-        // 查找该单位该产品的结算设置
-        const settlement = visibleUnitProductSettlements.find(
-          (ups) => ups.salesUnitId === unit.id && ups.productId === s.productId
-        );
-        if (!settlement) return sum + s.totalAmount; // 未配置结算则按全额计入
-        if (settlement.settlementType === "fixed") {
-          return sum + (settlement.settlementAmount || 0) * s.quantity;
-        }
-        // percentage
-        return sum + s.totalAmount * ((settlement.settlementRate || 0) / 100);
-      }, 0);
+      const estimatedAmount = unitSales.reduce(
+        (sum, s) => sum + calcSaleSettlementIncome(s, visibleUnitProductSettlements),
+        0,
+      );
       // 查找收入结算记录
       const settlement = revenueSettlements.find((r) => r.salesUnitId === unit.id && r.yearMonth === selectedMonth);
       const isAdjusted = settlement?.isAdjusted || false;
@@ -648,12 +632,10 @@ export default function ProfitAnalysis() {
                                           const product = products.find((p) => p.id === s.productId);
                                           const personName = person?.name || s.salesPersonName || "-";
                                           const prodName = product?.name || s.productName || "-";
-                                          const ups = visibleUnitProductSettlements.find(
-                                            (x) => x.salesUnitId === d.unit.id && x.productId === s.productId
+                                          const settlementAmt = calcSaleSettlementIncome(
+                                            s,
+                                            visibleUnitProductSettlements,
                                           );
-                                          const settlementAmt = !ups ? s.totalAmount
-                                            : ups.settlementType === "fixed" ? (ups.settlementAmount || 0) * s.quantity
-                                            : s.totalAmount * ((ups.settlementRate || 0) / 100);
                                           return (
                                             <TableRow key={s.id}>
                                               <TableCell className="text-sm">{formatDate(s.saleDate)}</TableCell>

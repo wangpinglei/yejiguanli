@@ -305,6 +305,14 @@ function initSchema() {
     { name: "personal_commission_amount", ddl: "personal_commission_amount REAL DEFAULT 0" },
   ]);
 
+  ensureColumns("unit_product_settlements", [
+    { name: "effective_from", ddl: "effective_from TEXT DEFAULT ''" },
+    { name: "effective_to", ddl: "effective_to TEXT DEFAULT ''" },
+    { name: "reward_amount", ddl: "reward_amount REAL DEFAULT 0" },
+    { name: "reward_from", ddl: "reward_from TEXT DEFAULT ''" },
+    { name: "reward_to", ddl: "reward_to TEXT DEFAULT ''" },
+  ]);
+
   ensureColumns("sales_records", [
     { name: "synced", ddl: "synced INTEGER DEFAULT 0" },
     { name: "external_order_id", ddl: "external_order_id TEXT DEFAULT ''" },
@@ -498,6 +506,11 @@ export function rowToUnitProductSettlement(row: any) {
     settlementType: (row.settlement_type || "percentage") as "percentage" | "fixed",
     settlementRate: row.settlement_rate ?? 100,
     settlementAmount: row.settlement_amount || 0,
+    effectiveFrom: row.effective_from || "",
+    effectiveTo: row.effective_to || "",
+    rewardAmount: row.reward_amount || 0,
+    rewardFrom: row.reward_from || "",
+    rewardTo: row.reward_to || "",
     note: row.note || undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at || undefined,

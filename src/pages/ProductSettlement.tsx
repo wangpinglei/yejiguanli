@@ -5,7 +5,11 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency } from "@/lib/format";
 import { filterByMonth, getTotalSalaryCost } from "@/lib/salary";
-import type { Product, SalesUnit, UnitProductSettlement } from "@/types";
+import {
+  calcSaleSettlementIncome,
+  formatSettlementPeriod,
+} from "@/lib/settlement";
+import type { Product, SalesUnit } from "@/types";
 import {
   Building2, Package, Pencil, Trash2, Search, Calculator, Layers,
   ChevronDown, ChevronRight, Percent,
@@ -25,22 +29,24 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 
-// 单笔销售结算金额
-const calcSaleSettlement = (
-  sale: { totalAmount: number; quantity: number },
-  ups?: UnitProductSettlement
-): number => {
-  if (!ups) return sale.totalAmount;
-  if (ups.settlementType === "fixed") return (ups.settlementAmount || 0) * sale.quantity;
-  return sale.totalAmount * ((ups.settlementRate || 0) / 100);
-};
-
 function toggleIdInSet(prev: Set<string>, id: string): Set<string> {
   const next = new Set(prev);
   if (next.has(id)) next.delete(id);
   else next.add(id);
   return next;
 }
+
+const EMPTY_SETTLE_FORM = {
+  settlementType: "percentage" as "percentage" | "fixed",
+  settlementRate: 100,
+  settlementAmount: 0,
+  effectiveFrom: "",
+  effectiveTo: "",
+  rewardAmount: 0,
+  rewardFrom: "",
+  rewardTo: "",
+  note: "",
+};
 
 export default function ProductSettlement() {
   const {
@@ -68,12 +74,7 @@ export default function ProductSettlement() {
 
   // ---- 结算编辑弹窗状态 ----
   const [editKey, setEditKey] = useState<{ productId: string; unitId: string } | null>(null);
-  const [settleForm, setSettleForm] = useState({
-    settlementType: "percentage" as "percentage" | "fixed",
-    settlementRate: 0,
-    settlementAmount: 0,
-    note: "",
-  });
+  const [settleForm, setSettleForm] = useState({ ...EMPTY_SETTLE_FORM });
 
   // ---- 批量结算：null=关闭；'all'=当前列表全部产品；string=单个产品 id ----
   const [batchSettleTarget, setBatchSettleTarget] = useState<string | "all" | null>(null);
@@ -107,12 +108,11 @@ export default function ProductSettlement() {
     return units;
   }
 
-  // 某产品×某单位的本月结算收入预览
+  // 某产品×某单位的本月结算收入预览（按销售日匹配生效区间 + 奖励）
   const calcUnitIncome = (productId: string, unitId: string): number => {
-    const ups = findUps(productId, unitId);
     return monthlySales
       .filter((s) => s.productId === productId && s.salesUnitId === unitId)
-      .reduce((sum, s) => sum + calcSaleSettlement(s, ups), 0);
+      .reduce((sum, s) => sum + calcSaleSettlementIncome(s, upsList), 0);
   };
 
   // 全产品本月结算收入合计
@@ -143,9 +143,13 @@ export default function ProductSettlement() {
     const ups = findUps(productId, unitId);
     setSettleForm({
       settlementType: ups?.settlementType || "percentage",
-      // 未配置时默认 100%，表示按实收全额结算
       settlementRate: ups?.settlementRate ?? 100,
       settlementAmount: ups?.settlementAmount || 0,
+      effectiveFrom: ups?.effectiveFrom || "",
+      effectiveTo: ups?.effectiveTo || "",
+      rewardAmount: ups?.rewardAmount || 0,
+      rewardFrom: ups?.rewardFrom || "",
+      rewardTo: ups?.rewardTo || "",
       note: ups?.note || "",
     });
     setEditKey({ productId, unitId });
@@ -160,6 +164,11 @@ export default function ProductSettlement() {
         settlementType: settleForm.settlementType,
         settlementRate: settleForm.settlementRate || 0,
         settlementAmount: settleForm.settlementAmount || 0,
+        effectiveFrom: settleForm.effectiveFrom || "",
+        effectiveTo: settleForm.effectiveTo || "",
+        rewardAmount: settleForm.rewardAmount || 0,
+        rewardFrom: settleForm.rewardFrom || "",
+        rewardTo: settleForm.rewardTo || "",
         note: settleForm.note,
       });
       setEditKey(null);
@@ -181,12 +190,7 @@ export default function ProductSettlement() {
   };
 
   const openBatchSettle = (target: string | "all") => {
-    setSettleForm({
-      settlementType: "percentage",
-      settlementRate: 100,
-      settlementAmount: 0,
-      note: "",
-    });
+    setSettleForm({ ...EMPTY_SETTLE_FORM });
     setBatchSettleTarget(target);
   };
 
@@ -207,6 +211,11 @@ export default function ProductSettlement() {
         settlementType: settleForm.settlementType,
         settlementRate: settleForm.settlementRate || 0,
         settlementAmount: settleForm.settlementAmount || 0,
+        effectiveFrom: settleForm.effectiveFrom || "",
+        effectiveTo: settleForm.effectiveTo || "",
+        rewardAmount: settleForm.rewardAmount || 0,
+        rewardFrom: settleForm.rewardFrom || "",
+        rewardTo: settleForm.rewardTo || "",
         note: settleForm.note,
       }))
     );
@@ -241,8 +250,8 @@ export default function ProductSettlement() {
   return (
     <div>
       <PageHeader
-        title="结算与提成"
-        description="本页仅配置单位×产品结算比例。销售提成（按单位×人员）请到「成本管理」点击销售提成卡片配置。"
+        title="产品结算设置"
+        description="配置单位×产品结算比例、生效时间及特殊时段结算奖励。销售提成（按单位×人员）请到「成本管理」配置。"
         action={
           <Select value={selectedMonth} onValueChange={setSelectedMonth}>
             <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
@@ -330,7 +339,10 @@ export default function ProductSettlement() {
       {/* ==================== 第一部分：产品 × 单位 结算配置 ==================== */}
       <div className="mb-8 space-y-4">
         <div>
-          <h3 className="text-base font-semibold">单位结算配置</h3>
+          <h3 className="text-base font-semibold">产品结算配置</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            可设置结算比例/金额、生效时间，以及特殊时段按件结算奖励
+          </p>
           <p className="text-xs text-muted-foreground mt-1">
             产品来自销售记录自动同步。此处只配置各单位结算比例；销售提成请到「成本管理」配置。
           </p>
@@ -386,6 +398,8 @@ export default function ProductSettlement() {
                           <TableHead>销售单位</TableHead>
                           <TableHead className="text-right">结算方式</TableHead>
                           <TableHead className="text-right">结算比例 / 金额</TableHead>
+                          <TableHead>生效时间</TableHead>
+                          <TableHead className="text-right">结算奖励</TableHead>
                           <TableHead className="text-right">{selectedMonth} 结算收入</TableHead>
                           <TableHead className="text-right">操作</TableHead>
                         </TableRow>
@@ -413,6 +427,18 @@ export default function ProductSettlement() {
                                     : `${formatCurrency(ups.settlementAmount || 0)}/件`
                                 ) : (
                                   <span className="text-muted-foreground">100%</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-xs text-muted-foreground">
+                                {ups ? formatSettlementPeriod(ups) : "-"}
+                              </TableCell>
+                              <TableCell className="text-right text-sm">
+                                {ups && (ups.rewardAmount || 0) > 0 ? (
+                                  <span className="text-amber-600">
+                                    +{formatCurrency(ups.rewardAmount || 0)}/件
+                                  </span>
+                                ) : (
+                                  <span className="text-muted-foreground">-</span>
                                 )}
                               </TableCell>
                               <TableCell className="text-right text-sm font-medium text-cyan-600">
@@ -446,7 +472,7 @@ export default function ProductSettlement() {
                         })}
                         {productUnits.length === 0 && (
                           <TableRow>
-                            <TableCell colSpan={5} className="text-center py-6 text-muted-foreground">
+                            <TableCell colSpan={7} className="text-center py-6 text-muted-foreground">
                               暂无销售单位，请先在「销售单位」中录入
                             </TableCell>
                           </TableRow>
@@ -470,9 +496,9 @@ export default function ProductSettlement() {
 
       {/* ===== 编辑结算弹窗 ===== */}
       <Dialog open={!!editKey} onOpenChange={(open) => !open && setEditKey(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>配置结算比例</DialogTitle>
+            <DialogTitle>产品结算设置</DialogTitle>
           </DialogHeader>
           {editTarget?.product && editTarget?.unit && (
             <div className="mb-2 rounded-lg bg-muted/50 px-3 py-2 text-sm">
@@ -504,6 +530,40 @@ export default function ProductSettlement() {
                   onChange={(e) => setSettleForm({ ...settleForm, settlementAmount: Number(e.target.value) })} placeholder="如：500" />
               </div>
             )}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>生效开始日期</Label>
+                <Input type="date" value={settleForm.effectiveFrom}
+                  onChange={(e) => setSettleForm({ ...settleForm, effectiveFrom: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>生效结束日期</Label>
+                <Input type="date" value={settleForm.effectiveTo}
+                  onChange={(e) => setSettleForm({ ...settleForm, effectiveTo: e.target.value })} />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground -mt-2">留空表示长期有效；销售日不在区间内则按全额结算</p>
+            <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3 space-y-3">
+              <p className="text-sm font-medium text-amber-800">特殊时段结算奖励（可选）</p>
+              <div className="space-y-2">
+                <Label>每件奖励金额 (¥)</Label>
+                <Input type="number" value={settleForm.rewardAmount}
+                  onChange={(e) => setSettleForm({ ...settleForm, rewardAmount: Number(e.target.value) })} placeholder="0 表示无奖励" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>奖励开始日期</Label>
+                  <Input type="date" value={settleForm.rewardFrom}
+                    onChange={(e) => setSettleForm({ ...settleForm, rewardFrom: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label>奖励结束日期</Label>
+                  <Input type="date" value={settleForm.rewardTo}
+                    onChange={(e) => setSettleForm({ ...settleForm, rewardTo: e.target.value })} />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">奖励区间留空时，与上方结算生效时间相同</p>
+            </div>
             <div className="space-y-2">
               <Label>结算说明</Label>
               <Input value={settleForm.note} onChange={(e) => setSettleForm({ ...settleForm, note: e.target.value })} placeholder="如：该单位特殊结算政策" />
@@ -518,9 +578,9 @@ export default function ProductSettlement() {
 
       {/* ===== 批量结算弹窗 ===== */}
       <Dialog open={!!batchSettleTarget} onOpenChange={(open) => !open && !batchSaving && setBatchSettleTarget(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>一键批量设置结算</DialogTitle>
+            <DialogTitle>一键批量设置产品结算</DialogTitle>
           </DialogHeader>
           <div className="mb-2 rounded-lg bg-cyan-50 border border-cyan-200 px-3 py-2 text-sm space-y-1">
             {batchSettleTarget === "all" ? (
@@ -588,6 +648,38 @@ export default function ProductSettlement() {
                 />
               </div>
             )}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>生效开始日期</Label>
+                <Input type="date" value={settleForm.effectiveFrom}
+                  onChange={(e) => setSettleForm({ ...settleForm, effectiveFrom: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>生效结束日期</Label>
+                <Input type="date" value={settleForm.effectiveTo}
+                  onChange={(e) => setSettleForm({ ...settleForm, effectiveTo: e.target.value })} />
+              </div>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3 space-y-3">
+              <p className="text-sm font-medium text-amber-800">特殊时段结算奖励（可选）</p>
+              <div className="space-y-2">
+                <Label>每件奖励金额 (¥)</Label>
+                <Input type="number" value={settleForm.rewardAmount}
+                  onChange={(e) => setSettleForm({ ...settleForm, rewardAmount: Number(e.target.value) })} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>奖励开始</Label>
+                  <Input type="date" value={settleForm.rewardFrom}
+                    onChange={(e) => setSettleForm({ ...settleForm, rewardFrom: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label>奖励结束</Label>
+                  <Input type="date" value={settleForm.rewardTo}
+                    onChange={(e) => setSettleForm({ ...settleForm, rewardTo: e.target.value })} />
+                </div>
+              </div>
+            </div>
             <div className="space-y-2">
               <Label>结算说明</Label>
               <Input

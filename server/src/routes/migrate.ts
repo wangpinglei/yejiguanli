@@ -210,15 +210,22 @@ router.post("/", (req, res) => {
 
     upsertSimple("unitProductSettlements", "unit_product_settlements", body.unitProductSettlements || [],
       (r) => ({
-        sql: `INSERT INTO unit_product_settlements (id, sales_unit_id, product_id, settlement_type, settlement_rate, settlement_amount, note, created_at, updated_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        sql: `INSERT INTO unit_product_settlements (
+          id, sales_unit_id, product_id, settlement_type, settlement_rate, settlement_amount, note,
+          effective_from, effective_to, reward_amount, reward_from, reward_to, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [r.id, r.salesUnitId, r.productId, r.settlementType || "percentage", r.settlementRate ?? 100,
-          r.settlementAmount || 0, r.note || "", r.createdAt || new Date().toISOString(), r.updatedAt || null],
+          r.settlementAmount || 0, r.note || "",
+          r.effectiveFrom || "", r.effectiveTo || "", r.rewardAmount || 0, r.rewardFrom || "", r.rewardTo || "",
+          r.createdAt || new Date().toISOString(), r.updatedAt || null],
       }),
       (r) => ({
-        sql: `UPDATE unit_product_settlements SET sales_unit_id=?, product_id=?, settlement_type=?, settlement_rate=?, settlement_amount=?, note=?, updated_at=? WHERE id=?`,
+        sql: `UPDATE unit_product_settlements SET sales_unit_id=?, product_id=?, settlement_type=?, settlement_rate=?, settlement_amount=?, note=?,
+          effective_from=?, effective_to=?, reward_amount=?, reward_from=?, reward_to=?, updated_at=? WHERE id=?`,
         args: [r.salesUnitId, r.productId, r.settlementType || "percentage", r.settlementRate ?? 100,
-          r.settlementAmount || 0, r.note || "", r.updatedAt || new Date().toISOString(), r.id],
+          r.settlementAmount || 0, r.note || "",
+          r.effectiveFrom || "", r.effectiveTo || "", r.rewardAmount || 0, r.rewardFrom || "", r.rewardTo || "",
+          r.updatedAt || new Date().toISOString(), r.id],
       })
     );
 

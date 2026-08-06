@@ -33,7 +33,7 @@ export const MODULE_DEFS: ModuleDef[] = [
   { key: "cost_management", label: "成本管理", path: "/cost-management", canEdit: true },
   { key: "profit_analysis", label: "收支利润", path: "/profit-analysis", canEdit: true },
   { key: "sales_battle_report", label: "单位战报", path: "/sales-battle-report", canEdit: false },
-  { key: "product_settlement", label: "结算与提成", path: "/product-settlement", canEdit: true },
+  { key: "product_settlement", label: "产品结算设置", path: "/product-settlement", canEdit: true },
   { key: "users", label: "权限分配", path: "/users", canEdit: true },
 ];
 
@@ -114,7 +114,7 @@ export function normalizePermissions(
       result[def.key] = base[def.key];
     }
   }
-  // 兼容旧「产品管理」权限 → 合并进结算与提成
+  // 兼容旧「产品管理」权限 → 合并进产品结算设置
   const legacyProducts = (raw as { products?: ModulePermission }).products;
   if (legacyProducts) {
     result.product_settlement = {

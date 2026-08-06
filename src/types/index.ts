@@ -208,6 +208,16 @@ export interface UnitProductSettlement {
   settlementType: "percentage" | "fixed"; // 按售价百分比 / 固定金额
   settlementRate?: number; // 结算比例（%），当 settlementType 为 percentage 时生效
   settlementAmount?: number; // 每件结算金额（¥），当 settlementType 为 fixed 时生效
+  /** 结算规则生效起（YYYY-MM-DD），空=不限 */
+  effectiveFrom?: string;
+  /** 结算规则生效止（YYYY-MM-DD），空=不限 */
+  effectiveTo?: string;
+  /** 特殊时段结算奖励：每件额外金额（¥） */
+  rewardAmount?: number;
+  /** 奖励生效起，空则与结算生效时间相同 */
+  rewardFrom?: string;
+  /** 奖励生效止，空则与结算生效时间相同 */
+  rewardTo?: string;
   note?: string; // 结算说明
   createdAt: string;
   updatedAt?: string;

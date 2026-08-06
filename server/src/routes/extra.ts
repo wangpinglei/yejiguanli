@@ -136,7 +136,10 @@ router.get("/unit-product-settlements", (req, res) => {
 });
 
 router.post("/unit-product-settlements/upsert", requireEditPermission, (req, res) => {
-  const { salesUnitId, productId, settlementType, settlementRate, settlementAmount, note } = req.body;
+  const {
+    salesUnitId, productId, settlementType, settlementRate, settlementAmount, note,
+    effectiveFrom, effectiveTo, rewardAmount, rewardFrom, rewardTo,
+  } = req.body;
   if (!salesUnitId || !productId) return res.status(400).json({ error: "单位和产品不能为空" });
   const db = getDb();
   const existing = db.prepare(
@@ -145,22 +148,34 @@ router.post("/unit-product-settlements/upsert", requireEditPermission, (req, res
   const now = new Date().toISOString();
   if (existing) {
     db.prepare(`
-      UPDATE unit_product_settlements SET settlement_type=?, settlement_rate=?, settlement_amount=?, note=?, updated_at=?
+      UPDATE unit_product_settlements SET
+        settlement_type=?, settlement_rate=?, settlement_amount=?, note=?,
+        effective_from=?, effective_to=?, reward_amount=?, reward_from=?, reward_to=?, updated_at=?
       WHERE id=?
     `).run(
       settlementType || existing.settlement_type,
       settlementRate ?? existing.settlement_rate,
       settlementAmount ?? existing.settlement_amount,
-      note ?? existing.note, now, existing.id
+      note ?? existing.note,
+      effectiveFrom ?? existing.effective_from ?? "",
+      effectiveTo ?? existing.effective_to ?? "",
+      rewardAmount ?? existing.reward_amount ?? 0,
+      rewardFrom ?? existing.reward_from ?? "",
+      rewardTo ?? existing.reward_to ?? "",
+      now, existing.id
     );
     return res.json(rowToUnitProductSettlement(db.prepare("SELECT * FROM unit_product_settlements WHERE id=?").get(existing.id)));
   }
   const id = generateId("ups");
   db.prepare(`
     INSERT INTO unit_product_settlements (
-      id, sales_unit_id, product_id, settlement_type, settlement_rate, settlement_amount, note, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, salesUnitId, productId, settlementType || "percentage", settlementRate ?? 100, settlementAmount || 0, note || "", now);
+      id, sales_unit_id, product_id, settlement_type, settlement_rate, settlement_amount, note,
+      effective_from, effective_to, reward_amount, reward_from, reward_to, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id, salesUnitId, productId, settlementType || "percentage", settlementRate ?? 100, settlementAmount || 0, note || "",
+    effectiveFrom || "", effectiveTo || "", rewardAmount || 0, rewardFrom || "", rewardTo || "", now
+  );
   res.json(rowToUnitProductSettlement(db.prepare("SELECT * FROM unit_product_settlements WHERE id=?").get(id)));
 });
 
@@ -170,7 +185,10 @@ router.post("/unit-product-settlements/batch", requireEditPermission, (req, res)
   const results: any[] = [];
   runInTransaction(() => {
     for (const item of items) {
-      const { salesUnitId, productId, settlementType, settlementRate, settlementAmount, note } = item;
+      const {
+        salesUnitId, productId, settlementType, settlementRate, settlementAmount, note,
+        effectiveFrom, effectiveTo, rewardAmount, rewardFrom, rewardTo,
+      } = item;
       if (!salesUnitId || !productId) continue;
       const existing = db.prepare(
         "SELECT * FROM unit_product_settlements WHERE sales_unit_id=? AND product_id=?"
@@ -178,17 +196,27 @@ router.post("/unit-product-settlements/batch", requireEditPermission, (req, res)
       const now = new Date().toISOString();
       if (existing) {
         db.prepare(`
-          UPDATE unit_product_settlements SET settlement_type=?, settlement_rate=?, settlement_amount=?, note=?, updated_at=?
+          UPDATE unit_product_settlements SET
+            settlement_type=?, settlement_rate=?, settlement_amount=?, note=?,
+            effective_from=?, effective_to=?, reward_amount=?, reward_from=?, reward_to=?, updated_at=?
           WHERE id=?
-        `).run(settlementType || "percentage", settlementRate ?? 100, settlementAmount || 0, note || "", now, existing.id);
+        `).run(
+          settlementType || "percentage", settlementRate ?? 100, settlementAmount || 0, note || "",
+          effectiveFrom || "", effectiveTo || "", rewardAmount || 0, rewardFrom || "", rewardTo || "",
+          now, existing.id
+        );
         results.push(rowToUnitProductSettlement(db.prepare("SELECT * FROM unit_product_settlements WHERE id=?").get(existing.id)));
       } else {
         const id = generateId("ups");
         db.prepare(`
           INSERT INTO unit_product_settlements (
-            id, sales_unit_id, product_id, settlement_type, settlement_rate, settlement_amount, note, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(id, salesUnitId, productId, settlementType || "percentage", settlementRate ?? 100, settlementAmount || 0, note || "", now);
+            id, sales_unit_id, product_id, settlement_type, settlement_rate, settlement_amount, note,
+            effective_from, effective_to, reward_amount, reward_from, reward_to, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          id, salesUnitId, productId, settlementType || "percentage", settlementRate ?? 100, settlementAmount || 0, note || "",
+          effectiveFrom || "", effectiveTo || "", rewardAmount || 0, rewardFrom || "", rewardTo || "", now
+        );
         results.push(rowToUnitProductSettlement(db.prepare("SELECT * FROM unit_product_settlements WHERE id=?").get(id)));
       }
     }

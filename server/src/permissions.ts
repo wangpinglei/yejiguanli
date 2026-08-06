@@ -115,7 +115,7 @@ export function normalizePermissions(
       result[key] = base[key];
     }
   }
-  // 兼容旧「产品管理」权限 → 合并进结算与提成
+  // 兼容旧「产品管理」权限 → 合并进产品结算设置
   const legacyProducts = raw.products;
   if (legacyProducts) {
     result.product_settlement = {
