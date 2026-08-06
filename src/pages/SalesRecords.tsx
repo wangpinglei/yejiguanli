@@ -521,7 +521,7 @@ export default function SalesRecords() {
     return set;
   }, [salesRecords, products]);
 
-  const filteredRecords = useMemo(() => {
+  const baseFilteredRecords = useMemo(() => {
     return salesRecords
       .filter((s) => {
         const person = personnel.find((p) => p.id === s.personnelId);
@@ -536,18 +536,28 @@ export default function SalesRecords() {
         const matchUnit = filterUnit === "all" || s.salesUnitId === filterUnit;
         const matchPerson = filterPerson === "all" || s.personnelId === filterPerson;
         const matchSync = filterSync === "all" || (filterSync === "synced" ? s.synced : !s.synced);
-        const isDup = duplicateRecordIdSet.has(s.id);
-        const matchDuplicate =
-          filterDuplicate === "all"
-          || (filterDuplicate === "duplicate" && isDup)
-          || (filterDuplicate === "unique" && !isDup);
         const saleDate = (s.saleDate || "").slice(0, 10);
         const matchFrom = !dateFrom || saleDate >= dateFrom;
         const matchTo = !dateTo || saleDate <= dateTo;
-        return matchSearch && matchUnit && matchPerson && matchSync && matchDuplicate && matchFrom && matchTo;
+        return matchSearch && matchUnit && matchPerson && matchSync && matchFrom && matchTo;
       })
       .sort((a, b) => (b.saleDate || "").localeCompare(a.saleDate || ""));
-  }, [salesRecords, personnel, products, search, filterUnit, filterPerson, filterSync, filterDuplicate, duplicateRecordIdSet, dateFrom, dateTo]);
+  }, [salesRecords, personnel, products, search, filterUnit, filterPerson, filterSync, dateFrom, dateTo]);
+
+  const duplicateCountInFilters = useMemo(
+    () => baseFilteredRecords.filter((s) => duplicateRecordIdSet.has(s.id)).length,
+    [baseFilteredRecords, duplicateRecordIdSet],
+  );
+
+  const filteredRecords = useMemo(() => {
+    if (filterDuplicate === "duplicate") {
+      return baseFilteredRecords.filter((s) => duplicateRecordIdSet.has(s.id));
+    }
+    if (filterDuplicate === "unique") {
+      return baseFilteredRecords.filter((s) => !duplicateRecordIdSet.has(s.id));
+    }
+    return baseFilteredRecords;
+  }, [baseFilteredRecords, filterDuplicate, duplicateRecordIdSet]);
 
   // 筛选条件变化时回到第 1 页
   useEffect(() => {
@@ -684,6 +694,27 @@ export default function SalesRecords() {
     setSelectedIds(select ? new Set(selectableRecords.map((s) => s.id)) : new Set());
   };
   const clearSelection = () => setSelectedIds(new Set());
+
+  /** 点击「重复 N 笔」：打开/关闭仅重复筛选，便于勾选后批量删除 */
+  function handleToggleDuplicateFilter() {
+    if (filterDuplicate === "duplicate") {
+      setFilterDuplicate("all");
+      return;
+    }
+    setFilterDuplicate("duplicate");
+    setPage(1);
+    clearSelection();
+  }
+
+  /** 全选当前筛选结果中可删除的记录（跨页，不含生态圈同步） */
+  function handleSelectAllFilteredDeletable() {
+    const ids = filteredRecords.filter((s) => !s.synced).map((s) => s.id);
+    if (ids.length === 0) {
+      alert("当前筛选结果中没有可删除的记录（生态圈同步记录不可删）");
+      return;
+    }
+    setSelectedIds(new Set(ids));
+  }
 
   // 批量删除（同步记录跳过）
   const handleBatchDelete = async () => {
@@ -1084,16 +1115,82 @@ export default function SalesRecords() {
           )}
         </div>
         <Badge variant="secondary">{filteredRecords.length} 笔</Badge>
-        {duplicateRecordIdSet.size > 0 && (
-          <Badge className="bg-orange-100 text-orange-700">
-            重复 {duplicateRecordIdSet.size} 笔
-          </Badge>
+        {duplicateCountInFilters > 0 && (
+          <button
+            type="button"
+            onClick={handleToggleDuplicateFilter}
+            className={
+              "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors " +
+              (filterDuplicate === "duplicate"
+                ? "border-orange-500 bg-orange-500 text-white"
+                : "border-transparent bg-orange-100 text-orange-700 hover:bg-orange-200")
+            }
+            title={filterDuplicate === "duplicate" ? "点击取消重复筛选" : "点击查看并操作重复记录"}
+          >
+            重复 {duplicateCountInFilters} 笔
+            {filterDuplicate === "duplicate" ? " · 已筛选" : " · 点击查看"}
+          </button>
         )}
         <Badge className="bg-blue-50 text-blue-700">合计 {formatCurrency(totalRevenue)}</Badge>
         <Badge className="bg-violet-50 text-violet-700" title="按成本管理「单位×人员」个人提成+特殊奖励预估（比例不含月门槛）">
           提成预估 {formatCurrency(totalCommission)}
         </Badge>
       </div>
+
+      {filterDuplicate === "duplicate" && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-orange-200 bg-orange-50/60 px-4 py-2.5">
+          <Badge className="bg-orange-100 text-orange-800">重复记录筛选中</Badge>
+          <span className="text-sm text-orange-900">
+            当前 {filteredRecords.length} 笔重复，可勾选后批量删除
+          </span>
+          <div className="flex-1" />
+          {canEditSales && !isReadOnly && (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 border-orange-300"
+                onClick={handleSelectAllFilteredDeletable}
+              >
+                全选可删除重复
+              </Button>
+              {selectedIds.size > 0 && (
+                <>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8"
+                    onClick={clearSelection}
+                  >
+                    取消选择 ({selectedIds.size})
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="sm"
+                    className="h-8"
+                    onClick={() => setBatchDeleteOpen(true)}
+                  >
+                    <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                    批量删除 ({selectedIds.size})
+                  </Button>
+                </>
+              )}
+            </>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 text-orange-800"
+            onClick={() => setFilterDuplicate("all")}
+          >
+            退出筛选
+          </Button>
+        </div>
+      )}
 
       <Card>
         <CardContent className="p-0">
@@ -1197,7 +1294,22 @@ export default function SalesRecords() {
                           <Badge variant="outline" className="text-xs">手动</Badge>
                         )}
                         {duplicateRecordIdSet.has(record.id) && (
-                          <Badge className="bg-orange-100 text-orange-700 text-xs">重复</Badge>
+                          <button
+                            type="button"
+                            className="inline-flex"
+                            title="查看全部重复记录"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (filterDuplicate !== "duplicate") {
+                                setFilterDuplicate("duplicate");
+                                setPage(1);
+                              }
+                            }}
+                          >
+                            <Badge className="bg-orange-100 text-orange-700 text-xs cursor-pointer hover:bg-orange-200">
+                              重复
+                            </Badge>
+                          </button>
                         )}
                       </div>
                     </TableCell>
