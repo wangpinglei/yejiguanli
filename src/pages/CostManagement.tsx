@@ -408,7 +408,7 @@ export default function CostManagement() {
     <div>
       <PageHeader
         title="成本管理"
-        description="按月度管理人员成本：在职人员薪酬+社保+公积金+请假扣款+月度调整，自动计入成本"
+        description="按月度管理人员成本；销售提成（产品×单位×人员）在本页上方配置区设置，自动计入成本"
         action={
           <div className="flex gap-2">
             {isSuperadmin && (
