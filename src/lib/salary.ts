@@ -350,7 +350,8 @@ export interface UnitSalaryCost {
   totalSalary: number; // 薪酬合计（不含社保公积金）
   totalSocialInsurance: number; // 社保合计
   totalHousingFund: number; // 公积金合计
-  totalProductCommission: number; // 产品销售提成合计
+  totalProductCommission: number; // 产品销售提成合计（产品级，已逐步废弃）
+  totalSalesCommission: number; // 销售提成合计 = 管理提成 + 个人提成（单位×人员）
   totalLeaveDeduction: number; // 请假扣款合计
   totalOtherAdjustment: number; // 其他调整净额合计
   totalCost: number; // 总人力成本 = 薪酬 + 社保 + 公积金
@@ -434,6 +435,10 @@ export function getUnitSalaryCost(
   const totalSocialInsurance = details.reduce((sum, d) => sum + d.socialInsurance, 0);
   const totalHousingFund = details.reduce((sum, d) => sum + d.housingFund, 0);
   const totalProductCommission = details.reduce((sum, d) => sum + d.productCommission, 0);
+  const totalSalesCommission = details.reduce(
+    (sum, d) => sum + d.managementCommission + d.personalCommission,
+    0
+  );
   const totalLeaveDeduction = details.reduce((sum, d) => sum + d.leaveDeduction, 0);
   const totalOtherAdjustment = details.reduce((sum, d) => sum + d.otherBonus - d.otherDeduction, 0);
   const totalCost = totalSalary + totalSocialInsurance + totalHousingFund;
@@ -445,6 +450,7 @@ export function getUnitSalaryCost(
     totalSocialInsurance,
     totalHousingFund,
     totalProductCommission,
+    totalSalesCommission,
     totalLeaveDeduction,
     totalOtherAdjustment,
     totalCost,
@@ -473,6 +479,7 @@ export function getTotalSalaryCost(
   grandSocialInsurance: number;
   grandHousingFund: number;
   grandProductCommission: number;
+  grandSalesCommission: number;
   grandLeaveDeduction: number;
   grandOtherAdjustment: number;
 } {
@@ -492,6 +499,7 @@ export function getTotalSalaryCost(
   const grandSocialInsurance = units.reduce((sum, u) => sum + u.totalSocialInsurance, 0);
   const grandHousingFund = units.reduce((sum, u) => sum + u.totalHousingFund, 0);
   const grandProductCommission = units.reduce((sum, u) => sum + u.totalProductCommission, 0);
+  const grandSalesCommission = units.reduce((sum, u) => sum + u.totalSalesCommission, 0);
   const grandLeaveDeduction = units.reduce((sum, u) => sum + u.totalLeaveDeduction, 0);
   const grandOtherAdjustment = units.reduce((sum, u) => sum + u.totalOtherAdjustment, 0);
   return {
@@ -501,6 +509,7 @@ export function getTotalSalaryCost(
     grandSocialInsurance,
     grandHousingFund,
     grandProductCommission,
+    grandSalesCommission,
     grandLeaveDeduction,
     grandOtherAdjustment,
   };

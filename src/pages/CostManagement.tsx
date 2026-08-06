@@ -146,7 +146,7 @@ export default function CostManagement() {
     return filteredIncomeRecords.reduce((sum, r) => sum + r.totalAmount, 0);
   }, [filteredIncomeRecords]);
 
-  const productCommissionTotal = salaryCosts.grandProductCommission;
+  const productCommissionTotal = salaryCosts.grandSalesCommission;
   const leaveDeductionTotal = salaryCosts.grandLeaveDeduction;
   const otherAdjustmentTotal = salaryCosts.grandOtherAdjustment;
 
@@ -499,9 +499,9 @@ export default function CostManagement() {
               <Percent className="h-6 w-6 text-violet-600" />
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">产品销售提成</p>
+              <p className="text-sm text-muted-foreground">销售提成</p>
               <p className="text-xl font-bold text-violet-600">{formatCurrency(productCommissionTotal)}</p>
-              <p className="text-[10px] text-muted-foreground">按月度销售自动计算</p>
+              <p className="text-[10px] text-muted-foreground">按单位×人员自动汇总</p>
             </div>
           </CardContent>
         </Card>
@@ -915,7 +915,8 @@ export default function CostManagement() {
             <div>
               <p className="font-medium">结算与提成</p>
               <p className="text-sm text-muted-foreground mt-0.5">
-                单位×产品结算比例、人员管理/个人提成已统一到「结算与提成」页配置，成本页不再维护结算矩阵。
+                销售产品与单位结算、按单位×人员配置的销售提成，请到「结算与提成」维护；
+                本页自动汇总当月销售提成到人力成本。
               </p>
             </div>
           </div>

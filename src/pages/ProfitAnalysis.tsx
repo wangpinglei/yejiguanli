@@ -59,7 +59,7 @@ export default function ProfitAnalysis() {
     return filterUnit === "all" ? monthlyCosts : monthlyCosts.filter((c) => c.salesUnitId === filterUnit);
   }, [monthlyCosts, filterUnit]);
 
-  // 计算结算收入（按单位×产品结算比例）
+  // 结算收入（按单位×产品结算比例）
   const calcSettlementIncome = (sales: typeof filteredSales) => {
     return sales.reduce((sum, s) => {
       const ups = visibleUnitProductSettlements.find(
@@ -71,25 +71,26 @@ export default function ProfitAnalysis() {
     }, 0);
   };
 
-  // 计算销售提成
-  const calcCommission = (sales: typeof filteredSales) => {
-    return sales.reduce((sum, s) => {
-      const product = products.find((p) => p.id === s.productId);
-      if (!product) return sum;
-      if (product.commissionType === "fixed") return sum + (product.commissionAmount || 0) * s.quantity;
-      return sum + s.totalAmount * ((product.commissionRate || 0) / 100);
-    }, 0);
-  };
+  // 销售提成 = 单位×人员的管理提成 + 个人提成（来自结算与提成配置，计入成本）
+  function getSalesCommission(unitIds: string[], yearMonth: string): number {
+    return getTotalSalaryCost(
+      unitIds,
+      personnel,
+      salesRecords,
+      products,
+      yearMonth,
+      monthlyAdjustments,
+      productPersonCommissions
+    ).grandSalesCommission;
+  }
 
   // 汇总（按月度）
   const summary = useMemo(() => {
     const totalSalesAmount = filteredSales.reduce((sum, s) => sum + s.totalAmount, 0); // 实收总额
     const totalSettlementIncome = calcSettlementIncome(filteredSales); // 结算收入
-    const totalCommission = calcCommission(filteredSales); // 销售提成
-    const productProfit = totalSettlementIncome - totalCommission; // 产品利润 = 结算收入 - 提成
-    const manualCost = filteredCosts.reduce((sum, c) => sum + c.totalCost, 0);
+    const unitIds = filterUnit === "all" ? salesUnits.map((u) => u.id) : [filterUnit];
     const salaryData = getTotalSalaryCost(
-      filterUnit === "all" ? salesUnits.map((u) => u.id) : [filterUnit],
+      unitIds,
       personnel,
       salesRecords,
       products,
@@ -97,9 +98,12 @@ export default function ProfitAnalysis() {
       monthlyAdjustments,
       productPersonCommissions
     );
+    const totalCommission = salaryData.grandSalesCommission; // 销售提成（按人）
+    const productProfit = totalSettlementIncome - totalCommission; // 产品利润 = 结算收入 - 提成
+    const manualCost = filteredCosts.reduce((sum, c) => sum + c.totalCost, 0);
     const salaryCost = salaryData.grandTotal;
     const totalCost = manualCost + salaryCost;
-    // 净利润 = 结算收入 - 总成本（总成本已含提成）
+    // 净利润 = 结算收入 - 总成本（总成本已含人员提成）
     const totalProfit = totalSettlementIncome - totalCost;
     const profitMargin = totalSettlementIncome > 0 ? (totalProfit / totalSettlementIncome) * 100 : 0;
     return { totalSalesAmount, totalSettlementIncome, totalCommission, productProfit, totalCost, manualCost, salaryCost, totalProfit, profitMargin };
@@ -107,51 +111,49 @@ export default function ProfitAnalysis() {
 
   // 月度趋势
   const monthlyData = useMemo(() => {
-    const monthMap = new Map<string, { salesAmount: number; settlementIncome: number; commission: number; cost: number }>();
+    const monthMap = new Map<string, { salesAmount: number; settlementIncome: number; cost: number }>();
     salesRecords.forEach((s) => {
+      if (filterUnit !== "all" && s.salesUnitId !== filterUnit) return;
       const ym = getYearMonth(s.saleDate);
-      const existing = monthMap.get(ym) || { salesAmount: 0, settlementIncome: 0, commission: 0, cost: 0 };
+      const existing = monthMap.get(ym) || { salesAmount: 0, settlementIncome: 0, cost: 0 };
       existing.salesAmount += s.totalAmount;
-      // 结算收入
       const ups = visibleUnitProductSettlements.find(
         (x) => x.salesUnitId === s.salesUnitId && x.productId === s.productId
       );
       if (!ups) existing.settlementIncome += s.totalAmount;
       else if (ups.settlementType === "fixed") existing.settlementIncome += (ups.settlementAmount || 0) * s.quantity;
       else existing.settlementIncome += s.totalAmount * ((ups.settlementRate || 0) / 100);
-      // 提成
-      const product = products.find((p) => p.id === s.productId);
-      if (product) {
-        if (product.commissionType === "fixed") existing.commission += (product.commissionAmount || 0) * s.quantity;
-        else existing.commission += s.totalAmount * ((product.commissionRate || 0) / 100);
-      }
       monthMap.set(ym, existing);
     });
     costRecords.forEach((c) => {
+      if (filterUnit !== "all" && c.salesUnitId !== filterUnit) return;
       const ym = getYearMonth(c.date);
-      const existing = monthMap.get(ym) || { salesAmount: 0, settlementIncome: 0, commission: 0, cost: 0 };
+      const existing = monthMap.get(ym) || { salesAmount: 0, settlementIncome: 0, cost: 0 };
       existing.cost += c.totalCost;
       monthMap.set(ym, existing);
     });
-    // 按月分配薪酬成本
+    const unitIds = filterUnit === "all" ? salesUnits.map((u) => u.id) : [filterUnit];
     return Array.from(monthMap.entries())
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([month, data]) => {
-        const monthSalary = getTotalSalaryCost(
-          filterUnit === "all" ? salesUnits.map((u) => u.id) : [filterUnit],
+        const monthSalaryData = getTotalSalaryCost(
+          unitIds,
           personnel,
           salesRecords,
           products,
           month,
           monthlyAdjustments,
           productPersonCommissions
-        ).grandTotal;
+        );
+        const monthSalary = monthSalaryData.grandTotal;
         return {
           month: month.split("-")[1] + "月",
           revenue: data.settlementIncome,
           cost: data.cost + monthSalary,
           profit: data.settlementIncome - data.cost - monthSalary,
-          margin: data.settlementIncome > 0 ? ((data.settlementIncome - data.cost - monthSalary) / data.settlementIncome) * 100 : 0,
+          margin: data.settlementIncome > 0
+            ? ((data.settlementIncome - data.cost - monthSalary) / data.settlementIncome) * 100
+            : 0,
         };
       });
   }, [filterUnit, salesUnits, personnel, salesRecords, products, costRecords, monthlyAdjustments, visibleUnitProductSettlements, productPersonCommissions]);
@@ -160,12 +162,9 @@ export default function ProfitAnalysis() {
   const unitComparison = useMemo(() => {
     return salesUnits.map((unit) => {
       const unitSales = monthlySales.filter((s) => s.salesUnitId === unit.id);
-      const salesAmount = unitSales.reduce((sum, s) => sum + s.totalAmount, 0); // 实收金额
-      const settlementIncome = calcSettlementIncome(unitSales); // 结算收入
-      const commission = calcCommission(unitSales); // 销售提成
-      const productProfit = settlementIncome - commission; // 产品利润
-      const manualCost = monthlyCosts.filter((c) => c.salesUnitId === unit.id).reduce((sum, c) => sum + c.totalCost, 0);
-      const salaryCost = getTotalSalaryCost(
+      const salesAmount = unitSales.reduce((sum, s) => sum + s.totalAmount, 0);
+      const settlementIncome = calcSettlementIncome(unitSales);
+      const unitSalary = getTotalSalaryCost(
         [unit.id],
         personnel,
         salesRecords,
@@ -173,9 +172,13 @@ export default function ProfitAnalysis() {
         selectedMonth,
         monthlyAdjustments,
         productPersonCommissions
-      ).grandTotal;
+      );
+      const commission = unitSalary.grandSalesCommission;
+      const productProfit = settlementIncome - commission;
+      const manualCost = monthlyCosts.filter((c) => c.salesUnitId === unit.id).reduce((sum, c) => sum + c.totalCost, 0);
+      const salaryCost = unitSalary.grandTotal;
       const cost = manualCost + salaryCost;
-      const profit = settlementIncome - cost; // 净利润 = 结算收入 - 总成本
+      const profit = settlementIncome - cost;
       const margin = settlementIncome > 0 ? (profit / settlementIncome) * 100 : 0;
       return { name: unit.name, salesAmount, settlementIncome, commission, productProfit, cost, profit, margin };
     }).sort((a, b) => b.profit - a.profit);
@@ -202,9 +205,9 @@ export default function ProfitAnalysis() {
     if (salaryData.grandTotal > 0) {
       catMap.set("人力成本（薪酬+社保+公积金）", salaryData.grandTotal);
     }
-    // 添加产品销售提成（作为子项单独展示）
-    if (salaryData.grandProductCommission > 0) {
-      catMap.set("产品销售提成", salaryData.grandProductCommission);
+    // 销售提成（管理+个人，按单位×人员配置）单独展示便于核对
+    if (salaryData.grandSalesCommission > 0) {
+      catMap.set("销售提成（单位×人员）", salaryData.grandSalesCommission);
     }
     return Array.from(catMap.entries())
       .map(([name, value]) => ({ name, value }))
@@ -348,6 +351,7 @@ export default function ProfitAnalysis() {
     {
       title: "销售提成", value: formatCurrency(summary.totalCommission),
       icon: Award, color: "text-violet-600", bg: "bg-violet-50",
+      hint: "按单位×人员配置，计入成本",
     },
     {
       title: "净利润", value: formatCurrency(summary.totalProfit),
@@ -406,6 +410,9 @@ export default function ProfitAnalysis() {
                 <div>
                   <p className="text-sm text-muted-foreground">{card.title}</p>
                   <p className={`text-xl font-bold ${card.color}`}>{card.value}</p>
+                  {"hint" in card && card.hint ? (
+                    <p className="text-[10px] text-muted-foreground mt-0.5">{card.hint}</p>
+                  ) : null}
                 </div>
               </CardContent>
             </Card>
@@ -632,7 +639,6 @@ export default function ProfitAnalysis() {
                                           <TableHead>客户</TableHead>
                                           <TableHead className="text-right">订单金额</TableHead>
                                           <TableHead className="text-right">结算金额</TableHead>
-                                          <TableHead className="text-right">提成</TableHead>
                                           <TableHead>来源</TableHead>
                                         </TableRow>
                                       </TableHeader>
@@ -642,17 +648,12 @@ export default function ProfitAnalysis() {
                                           const product = products.find((p) => p.id === s.productId);
                                           const personName = person?.name || s.salesPersonName || "-";
                                           const prodName = product?.name || s.productName || "-";
-                                          // 计算该笔销售的结算金额
                                           const ups = visibleUnitProductSettlements.find(
                                             (x) => x.salesUnitId === d.unit.id && x.productId === s.productId
                                           );
                                           const settlementAmt = !ups ? s.totalAmount
                                             : ups.settlementType === "fixed" ? (ups.settlementAmount || 0) * s.quantity
                                             : s.totalAmount * ((ups.settlementRate || 0) / 100);
-                                          // 计算该笔销售的提成
-                                          const commissionAmt = !product ? 0
-                                            : product.commissionType === "fixed" ? (product.commissionAmount || 0) * s.quantity
-                                            : s.totalAmount * ((product.commissionRate || 0) / 100);
                                           return (
                                             <TableRow key={s.id}>
                                               <TableCell className="text-sm">{formatDate(s.saleDate)}</TableCell>
@@ -661,7 +662,6 @@ export default function ProfitAnalysis() {
                                               <TableCell className="text-sm text-muted-foreground">{s.customerName || "-"}</TableCell>
                                               <TableCell className="text-right text-sm text-muted-foreground">{formatCurrency(s.totalAmount)}</TableCell>
                                               <TableCell className="text-right text-sm font-medium text-cyan-600">{formatCurrency(settlementAmt)}</TableCell>
-                                              <TableCell className="text-right text-sm text-violet-600">{formatCurrency(commissionAmt)}</TableCell>
                                               <TableCell>
                                                 {s.synced ? (
                                                   <Badge className="bg-blue-100 text-blue-700 text-xs">生态圈</Badge>
@@ -676,7 +676,15 @@ export default function ProfitAnalysis() {
                                           <TableCell colSpan={4} className="text-right text-sm">合计</TableCell>
                                           <TableCell className="text-right text-sm text-muted-foreground">{formatCurrency(d.unitSales.reduce((sum, s) => sum + s.totalAmount, 0))}</TableCell>
                                           <TableCell className="text-right text-sm font-bold text-cyan-600">{formatCurrency(d.estimatedAmount)}</TableCell>
-                                          <TableCell className="text-right text-sm font-bold text-violet-600">{formatCurrency(calcCommission(d.unitSales))}</TableCell>
+                                          <TableCell></TableCell>
+                                        </TableRow>
+                                        <TableRow className="bg-violet-50/50">
+                                          <TableCell colSpan={5} className="text-right text-sm text-violet-700">
+                                            本单位销售提成（管理+个人，按人配置）
+                                          </TableCell>
+                                          <TableCell className="text-right text-sm font-bold text-violet-600">
+                                            {formatCurrency(getSalesCommission([d.unit.id], selectedMonth))}
+                                          </TableCell>
                                           <TableCell></TableCell>
                                         </TableRow>
                                       </TableBody>

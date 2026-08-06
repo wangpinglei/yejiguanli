@@ -144,7 +144,7 @@ export default function Dashboard() {
       productPersonCommissions
     );
     const salaryCost = salaryData.grandTotal;
-    const productCommission = salaryData.grandProductCommission;
+    const productCommission = salaryData.grandSalesCommission;
     const totalCost = manualCost + salaryCost;
     const totalProfit = totalRevenue - totalCost;
     const profitMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
@@ -265,8 +265,8 @@ export default function Dashboard() {
     if (salaryData.grandTotal > 0) {
       catMap.set("人力成本（薪酬+社保+公积金）", salaryData.grandTotal);
     }
-    if (salaryData.grandProductCommission > 0) {
-      catMap.set("产品销售提成", salaryData.grandProductCommission);
+    if (salaryData.grandSalesCommission > 0) {
+      catMap.set("销售提成（单位×人员）", salaryData.grandSalesCommission);
     }
     return Array.from(catMap.entries())
       .map(([name, value]) => ({ name, value }))
