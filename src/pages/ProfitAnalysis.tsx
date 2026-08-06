@@ -44,9 +44,10 @@ export default function ProfitAnalysis() {
     targets: performanceTargets,
     upsList: visibleUnitProductSettlements,
   }), [teamMgmtCommissionRules, performanceTargets, visibleUnitProductSettlements]);
+
   const [filterUnit, setFilterUnit] = useState("all");
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
-  // 收入明细展开状�?
+  // 收入明细展开状态
   const [expandedIncomeRows, setExpandedIncomeRows] = useState<Set<string>>(new Set());
   // 结算调整弹窗
   const [settlementDialog, setSettlementDialog] = useState<{ unitId: string; unitName: string; estimated: number } | null>(null);
@@ -56,7 +57,7 @@ export default function ProfitAnalysis() {
   const monthlySales = useMemo(() => filterByMonth(salesRecords, selectedMonth), [salesRecords, selectedMonth]);
   const monthlyCosts = useMemo(() => costRecords.filter((c) => getYearMonth(c.date) === selectedMonth), [costRecords, selectedMonth]);
 
-  // 筛选数�?
+  // 筛选数据
   const filteredSales = useMemo(() => {
     return filterUnit === "all" ? monthlySales : monthlySales.filter((s) => s.salesUnitId === filterUnit);
   }, [monthlySales, filterUnit]);
@@ -65,7 +66,7 @@ export default function ProfitAnalysis() {
     return filterUnit === "all" ? monthlyCosts : monthlyCosts.filter((c) => c.salesUnitId === filterUnit);
   }, [monthlyCosts, filterUnit]);
 
-  // 结算收入（按单位×产品结算规则：生效区�?+ 特殊奖励�?
+  // 结算收入（按单位×产品结算规则：生效区间 + 特殊奖励）
   const calcSettlementIncome = (sales: typeof filteredSales) => {
     return sales.reduce(
       (sum, s) => sum + calcSaleSettlementIncome(s, visibleUnitProductSettlements),
@@ -73,17 +74,16 @@ export default function ProfitAnalysis() {
     );
   };
 
-  // 销售提�?= 单位×人员的管理提�?+ 个人提成（来自成本管理配置，计入成本�?
+  // 销售提成 = 单位×人员的管理提成 + 个人提成（来自成本管理配置，计入成本）
   function getSalesCommission(unitIds: string[], yearMonth: string): number {
     return getTotalSalaryCost(
-      unitIds,
+unitIds,
       personnel,
       salesRecords,
       products,
       yearMonth,
-      monthlyAdjustments,
-      productPersonCommissions,
-    teamMgmtContext,
+      monthlyAdjustments,productPersonCommissions,
+      teamMgmtContext,
     ).grandSalesCommission;
   }
 
@@ -93,16 +93,15 @@ export default function ProfitAnalysis() {
     const totalSettlementIncome = calcSettlementIncome(filteredSales); // 结算收入
     const unitIds = filterUnit === "all" ? salesUnits.map((u) => u.id) : [filterUnit];
     const salaryData = getTotalSalaryCost(
-      unitIds,
+unitIds,
       personnel,
       salesRecords,
       products,
       selectedMonth,
-      monthlyAdjustments,
-      productPersonCommissions,
-    teamMgmtContext,
+      monthlyAdjustments,productPersonCommissions,
+      teamMgmtContext,
     );
-    const totalCommission = salaryData.grandSalesCommission; // 销售提成（按人�?
+    const totalCommission = salaryData.grandSalesCommission; // 销售提成（按人）
     const productProfit = totalSettlementIncome - totalCommission; // 产品利润 = 结算收入 - 提成
     const manualCost = filteredCosts.reduce((sum, c) => sum + c.totalCost, 0);
     const salaryCost = salaryData.grandTotal;
@@ -111,7 +110,7 @@ export default function ProfitAnalysis() {
     const totalProfit = totalSettlementIncome - totalCost;
     const profitMargin = totalSettlementIncome > 0 ? (totalProfit / totalSettlementIncome) * 100 : 0;
     return { totalSalesAmount, totalSettlementIncome, totalCommission, productProfit, totalCost, manualCost, salaryCost, totalProfit, profitMargin };
-  }, [filteredSales, filteredCosts, filterUnit, salesUnits, personnel, salesRecords, products, selectedMonth, monthlyAdjustments, visibleUnitProductSettlements, productPersonCommissions]);
+  }, [filteredSales, filteredCosts, filterUnit, salesUnits, personnel, salesRecords, products, selectedMonth, monthlyAdjustments, visibleUnitProductSettlements, productPersonCommissions, teamMgmtContext]);
 
   // 月度趋势
   const monthlyData = useMemo(() => {
@@ -136,18 +135,17 @@ export default function ProfitAnalysis() {
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([month, data]) => {
         const monthSalaryData = getTotalSalaryCost(
-          unitIds,
+unitIds,
           personnel,
           salesRecords,
           products,
           month,
-          monthlyAdjustments,
-          productPersonCommissions,
-        teamMgmtContext,
-        );
+          monthlyAdjustments,productPersonCommissions,
+      teamMgmtContext,
+    );
         const monthSalary = monthSalaryData.grandTotal;
         return {
-          month: month.split("-")[1] + "�?,
+          month: month.split("-")[1] + "月",
           revenue: data.settlementIncome,
           cost: data.cost + monthSalary,
           profit: data.settlementIncome - data.cost - monthSalary,
@@ -156,7 +154,7 @@ export default function ProfitAnalysis() {
             : 0,
         };
       });
-  }, [filterUnit, salesUnits, personnel, salesRecords, products, costRecords, monthlyAdjustments, visibleUnitProductSettlements, productPersonCommissions]);
+  }, [filterUnit, salesUnits, personnel, salesRecords, products, costRecords, monthlyAdjustments, visibleUnitProductSettlements, productPersonCommissions, teamMgmtContext]);
 
   // 各单位对比（按月度）
   const unitComparison = useMemo(() => {
@@ -165,15 +163,14 @@ export default function ProfitAnalysis() {
       const salesAmount = unitSales.reduce((sum, s) => sum + s.totalAmount, 0);
       const settlementIncome = calcSettlementIncome(unitSales);
       const unitSalary = getTotalSalaryCost(
-        [unit.id],
+[unit.id],
         personnel,
         salesRecords,
         products,
         selectedMonth,
-        monthlyAdjustments,
-        productPersonCommissions,
+        monthlyAdjustments,productPersonCommissions,
       teamMgmtContext,
-      );
+    );
       const commission = unitSalary.grandSalesCommission;
       const productProfit = settlementIncome - commission;
       const manualCost = monthlyCosts.filter((c) => c.salesUnitId === unit.id).reduce((sum, c) => sum + c.totalCost, 0);
@@ -183,9 +180,9 @@ export default function ProfitAnalysis() {
       const margin = settlementIncome > 0 ? (profit / settlementIncome) * 100 : 0;
       return { name: unit.name, salesAmount, settlementIncome, commission, productProfit, cost, profit, margin };
     }).sort((a, b) => b.profit - a.profit);
-  }, [salesUnits, monthlySales, monthlyCosts, personnel, salesRecords, products, selectedMonth, monthlyAdjustments, visibleUnitProductSettlements, productPersonCommissions]);
+  }, [salesUnits, monthlySales, monthlyCosts, personnel, salesRecords, products, selectedMonth, monthlyAdjustments, visibleUnitProductSettlements, productPersonCommissions, teamMgmtContext]);
 
-  // 成本结构（按月度�?
+  // 成本结构（按月度）
   const costStructure = useMemo(() => {
     const catMap = new Map<string, number>();
     filteredCosts.forEach((c) => {
@@ -201,20 +198,19 @@ export default function ProfitAnalysis() {
       products,
       selectedMonth,
       monthlyAdjustments,
-      productPersonCommissions,
-    teamMgmtContext,
+      productPersonCommissions
     );
     if (salaryData.grandTotal > 0) {
-      catMap.set("人力成本（薪�?社保+公积金）", salaryData.grandTotal);
+      catMap.set("人力成本（薪酬+社保+公积金）", salaryData.grandTotal);
     }
-    // 销售提成（管理+个人，按单位×人员配置）单独展示便于核�?
+    // 销售提成（管理+个人，按单位×人员配置）单独展示便于核对
     if (salaryData.grandSalesCommission > 0) {
-      catMap.set("销售提成（单位×人员�?, salaryData.grandSalesCommission);
+      catMap.set("销售提成（单位×人员）", salaryData.grandSalesCommission);
     }
     return Array.from(catMap.entries())
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value);
-  }, [filteredCosts, filterUnit, salesUnits, personnel, salesRecords, products, selectedMonth, monthlyAdjustments, productPersonCommissions]);
+  }, [filteredCosts, filterUnit, salesUnits, personnel, salesRecords, products, selectedMonth, monthlyAdjustments, productPersonCommissions, teamMgmtContext]);
 
   // 人员业绩排行
   const personnelRanking = useMemo(() => {
@@ -229,7 +225,7 @@ export default function ProfitAnalysis() {
       .slice(0, 8);
   }, [personnel, filteredSales, salesUnits]);
 
-  // 产品销售占�?
+  // 产品销售占比
   const productSales = useMemo(() => {
     const prodMap = new Map<string, number>();
     filteredSales.forEach((s) => {
@@ -241,8 +237,8 @@ export default function ProfitAnalysis() {
       .slice(0, 6);
   }, [filteredSales, products]);
 
-  // ===================== 收入明细与结�?=====================
-  // 按月过滤收入记录（含月度固定�?
+  // ===================== 收入明细与结算 =====================
+  // 按月过滤收入记录（含月度固定）
   const monthlyIncomeRecords = useMemo(() => {
     const targetM = parseInt(selectedMonth.slice(5, 7), 10);
     return incomeRecords
@@ -261,7 +257,7 @@ export default function ProfitAnalysis() {
       .sort((a, b) => (b.createdAt || b.date).localeCompare(a.createdAt || a.date));
   }, [incomeRecords, filterUnit, selectedMonth]);
 
-  // 按单位计算收入明�?
+  // 按单位计算收入明细
   const incomeDetail = useMemo(() => {
     const unitsToShow = filterUnit === "all" ? salesUnits : salesUnits.filter((u) => u.id === filterUnit);
     return unitsToShow.map((unit) => {
@@ -297,7 +293,7 @@ export default function ProfitAnalysis() {
     return { totalEstimated, totalActual, totalOther, grandTotal, adjustedCount };
   }, [incomeDetail]);
 
-  // 展开/折叠收入明细�?
+  // 展开/折叠收入明细行
   const toggleIncomeRow = (unitId: string) => {
     setExpandedIncomeRows((prev) => {
       const next = new Set(prev);
@@ -343,7 +339,7 @@ export default function ProfitAnalysis() {
       icon: DollarSign, color: "text-cyan-600", bg: "bg-cyan-50",
     },
     {
-      title: "销售提�?, value: formatCurrency(summary.totalCommission),
+      title: "销售提成", value: formatCurrency(summary.totalCommission),
       icon: Award, color: "text-violet-600", bg: "bg-violet-50",
       hint: "按单位×人员配置，计入成本",
     },
@@ -361,7 +357,7 @@ export default function ProfitAnalysis() {
     for (let i = 0; i < 12; i++) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      const label = `${d.getFullYear()}�?{d.getMonth() + 1}月`;
+      const label = `${d.getFullYear()}年${d.getMonth() + 1}月`;
       options.push({ value, label });
     }
     return options;
@@ -371,7 +367,7 @@ export default function ProfitAnalysis() {
     <div>
       <PageHeader
         title="收支利润分析"
-        description="按月度观测营收、成本与利润，洞察业务盈亏状�?
+        description="按月度观测营收、成本与利润，洞察业务盈亏状况"
         action={
           <div className="flex gap-2">
             <Select value={selectedMonth} onValueChange={setSelectedMonth}>
@@ -418,7 +414,7 @@ export default function ProfitAnalysis() {
       <Card className="mb-6">
         <CardHeader>
           <CardTitle className="text-base">营收·成本·利润月度趋势</CardTitle>
-          <CardDescription>组合图展示每月营收、成本、利润及利润率变�?/CardDescription>
+          <CardDescription>组合图展示每月营收、成本、利润及利润率变化</CardDescription>
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={320}>
@@ -428,14 +424,14 @@ export default function ProfitAnalysis() {
               <YAxis yAxisId="left" tick={{ fontSize: 12 }} tickFormatter={(v) => `${(v / 10000).toFixed(0)}万`} />
               <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 12 }} tickFormatter={(v) => `${v.toFixed(0)}%`} />
               <Tooltip
-                formatter={(value: number, name: string) => name === "利润�? ? `${value.toFixed(1)}%` : formatCurrency(value)}
+                formatter={(value: number, name: string) => name === "利润率" ? `${value.toFixed(1)}%` : formatCurrency(value)}
                 contentStyle={{ borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 12 }}
               />
               <Legend wrapperStyle={{ fontSize: 12 }} />
               <Bar yAxisId="left" dataKey="revenue" name="营收" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={20} />
               <Bar yAxisId="left" dataKey="cost" name="成本" fill="#f97316" radius={[4, 4, 0, 0]} barSize={20} />
               <Bar yAxisId="left" dataKey="profit" name="利润" fill="#10b981" radius={[4, 4, 0, 0]} barSize={20} />
-              <Line yAxisId="right" type="monotone" dataKey="margin" name="利润�? stroke="#8b5cf6" strokeWidth={2} dot={{ r: 4 }} />
+              <Line yAxisId="right" type="monotone" dataKey="margin" name="利润率" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 4 }} />
             </ComposedChart>
           </ResponsiveContainer>
         </CardContent>
@@ -466,8 +462,8 @@ export default function ProfitAnalysis() {
         {/* Product Sales */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">产品销售占�?/CardTitle>
-            <CardDescription>各产品营收贡献占�?/CardDescription>
+            <CardTitle className="text-base">产品销售占比</CardTitle>
+            <CardDescription>各产品营收贡献占比</CardDescription>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={280}>
@@ -488,7 +484,7 @@ export default function ProfitAnalysis() {
       {/* Unit Comparison Table */}
       <Card className="mb-6">
         <CardHeader>
-          <CardTitle className="text-base">各单位收支利润明�?/CardTitle>
+          <CardTitle className="text-base">各单位收支利润明细</CardTitle>
           <CardDescription>按销售单位对比营收、成本与利润</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -497,10 +493,10 @@ export default function ProfitAnalysis() {
               <TableHeader>
                 <TableRow>
                   <TableHead>排名</TableHead>
-                  <TableHead>销售单�?/TableHead>
+                  <TableHead>销售单位</TableHead>
                   <TableHead className="text-right">实收金额</TableHead>
                   <TableHead className="text-right">结算收入</TableHead>
-                  <TableHead className="text-right">销售提�?/TableHead>
+                  <TableHead className="text-right">销售提成</TableHead>
                   <TableHead className="text-right">产品利润</TableHead>
                   <TableHead className="text-right">运营成本</TableHead>
                   <TableHead className="text-right">净利润</TableHead>
@@ -544,15 +540,15 @@ export default function ProfitAnalysis() {
         </CardContent>
       </Card>
 
-      {/* ===================== 收入明细与结�?===================== */}
+      {/* ===================== 收入明细与结算 ===================== */}
       <Card className="mb-6">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Receipt className="h-5 w-5 text-emerald-600" />
-            收入明细与结�?
+            收入明细与结算
           </CardTitle>
           <CardDescription>
-            业绩收入自动从销售记录预估，可手动纠正实际结算金�?· 其他收入来自成本管理录入
+            业绩收入自动从销售记录预估，可手动纠正实际结算金额 · 其他收入来自成本管理录入
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -561,13 +557,13 @@ export default function ProfitAnalysis() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-8"></TableHead>
-                  <TableHead>销售单�?/TableHead>
+                  <TableHead>销售单位</TableHead>
                   <TableHead className="text-right">预估结算收入</TableHead>
                   <TableHead className="text-right">实际结算金额</TableHead>
                   <TableHead className="text-right">差额</TableHead>
                   <TableHead className="text-right">其他收入</TableHead>
                   <TableHead className="text-right">收入合计</TableHead>
-                  <TableHead>状�?/TableHead>
+                  <TableHead>状态</TableHead>
                   <TableHead className="text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
@@ -595,10 +591,10 @@ export default function ProfitAnalysis() {
                         <TableCell>
                           {d.isAdjusted ? (
                             <Badge className="bg-amber-100 text-amber-700 text-xs">
-                              <CheckCircle2 className="mr-1 h-3 w-3" />已调�?
+                              <CheckCircle2 className="mr-1 h-3 w-3" />已调整
                             </Badge>
                           ) : (
-                            <Badge variant="outline" className="text-xs">待确�?/Badge>
+                            <Badge variant="outline" className="text-xs">待确认</Badge>
                           )}
                         </TableCell>
                         <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
@@ -608,7 +604,7 @@ export default function ProfitAnalysis() {
                               {d.isAdjusted ? "重新调整" : "调整结算"}
                             </Button>
                           ) : (
-                            <span className="text-xs text-muted-foreground">仅查�?/span>
+                            <span className="text-xs text-muted-foreground">仅查看</span>
                           )}
                         </TableCell>
                       </TableRow>
@@ -628,7 +624,7 @@ export default function ProfitAnalysis() {
                                       <TableHeader>
                                         <TableRow className="bg-muted/50">
                                           <TableHead>成交日期</TableHead>
-                                          <TableHead>销售人�?/TableHead>
+                                          <TableHead>销售人员</TableHead>
                                           <TableHead>产品</TableHead>
                                           <TableHead>客户</TableHead>
                                           <TableHead className="text-right">订单金额</TableHead>
@@ -683,7 +679,7 @@ export default function ProfitAnalysis() {
                                     </Table>
                                   </div>
                                 ) : (
-                                  <p className="text-sm text-muted-foreground py-2">本月暂无销售记�?/p>
+                                  <p className="text-sm text-muted-foreground py-2">本月暂无销售记录</p>
                                 )}
                               </div>
 
@@ -731,7 +727,7 @@ export default function ProfitAnalysis() {
                                 )}
                               </div>
 
-                              {/* 收入汇�?*/}
+                              {/* 收入汇总 */}
                               <div className="flex items-center justify-between rounded-lg border-2 border-emerald-200 bg-emerald-50/50 px-4 py-3">
                                 <div className="flex items-center gap-6 text-sm">
                                   <div>
@@ -759,7 +755,7 @@ export default function ProfitAnalysis() {
                     </>
                   );
                 })}
-                {/* 合计�?*/}
+                {/* 合计行 */}
                 <TableRow className="border-t-2 bg-muted/30 font-bold">
                   <TableCell></TableCell>
                   <TableCell>合计</TableCell>
@@ -790,8 +786,8 @@ export default function ProfitAnalysis() {
       {/* Personnel Ranking */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">销售人员业绩排�?TOP 8</CardTitle>
-          <CardDescription>按销售额排名展示Top销售人�?/CardDescription>
+          <CardTitle className="text-base">销售人员业绩排行 TOP 8</CardTitle>
+          <CardDescription>按销售额排名展示Top销售人员</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
@@ -823,13 +819,13 @@ export default function ProfitAnalysis() {
                     </div>
                   </div>
                   <div className="w-16 shrink-0 text-right">
-                    <span className="text-xs text-muted-foreground">{person.count}�?/span>
+                    <span className="text-xs text-muted-foreground">{person.count}笔</span>
                   </div>
                 </div>
               );
             })}
             {personnelRanking.length === 0 && (
-              <p className="text-center py-8 text-muted-foreground">暂无销售数�?/p>
+              <p className="text-center py-8 text-muted-foreground">暂无销售数据</p>
             )}
           </div>
         </CardContent>
@@ -851,7 +847,7 @@ export default function ProfitAnalysis() {
                 <p className="text-xs text-muted-foreground">{selectedMonth}</p>
               </div>
               <div className="text-right">
-                <p className="text-xs text-muted-foreground">预估结算收入（按结算比例�?/p>
+                <p className="text-xs text-muted-foreground">预估结算收入（按结算比例）</p>
                 <p className="text-lg font-bold text-blue-600">{settlementDialog && formatCurrency(settlementDialog.estimated)}</p>
               </div>
             </div>
@@ -864,7 +860,7 @@ export default function ProfitAnalysis() {
                 placeholder="输入实际结算金额"
               />
               <p className="text-xs text-muted-foreground">
-                如与预估金额一致则标记�?待确�?，不一致则标记�?已调�?
+                如与预估金额一致则标记为"待确认"，不一致则标记为"已调整"
               </p>
             </div>
             <div className="space-y-2">

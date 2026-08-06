@@ -76,18 +76,17 @@ export default function SalesBattleReport() {
     teamMgmtCommissionRules,
     unitProductSettlements,
   } = useData();
-  const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleSalesRecords: salesRecords } = usePermissions();
-
   const teamMgmtContext = useMemo(() => ({
     rules: teamMgmtCommissionRules,
     targets: performanceTargets,
     upsList: unitProductSettlements,
   }), [teamMgmtCommissionRules, performanceTargets, unitProductSettlements]);
+  const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleSalesRecords: salesRecords } = usePermissions();
 
   const [yearMonth, setYearMonth] = useState(getCurrentYearMonth());
   const [unitId, setUnitId] = useState<string>("");
 
-  // 默认选中第一个单�?
+  // 默认选中第一个单位
   useMemo(() => {
     if (!unitId && salesUnits.length > 0) {
       setUnitId(salesUnits[0].id);
@@ -101,29 +100,29 @@ export default function SalesBattleReport() {
     );
     return personnel.filter((p) => {
       if (p.salesUnitId !== unitId) return false;
-      // 按入�?离职日期判断该月是否在职
+      // 按入职/离职日期判断该月是否在职
       if (wasEmployedInMonth(p, yearMonth)) return true;
-      // 兜底：当月本单位确有业绩（离职日期未�?填错时仍能进战报�?
+      // 兜底：当月本单位确有业绩（离职日期未填/填错时仍能进战报）
       return getPersonalSales(p.id, monthUnitSales, p.name) > 0;
     });
   }, [personnel, unitId, yearMonth, salesRecords]);
 
-  // 战报仅展示销售相关岗位（排除组织部、售后等非销售岗�?
+  // 战报仅展示销售相关岗位（排除组织部、售后等非销售岗）
   const battlePersonnel = useMemo(() => {
     return unitPersonnel.filter((p) => isSalesBattlePosition(p.position));
   }, [unitPersonnel]);
 
-  // 当月销售记�?
+  // 当月销售记录
   const monthlyRecords = useMemo(() => {
     return filterByMonth(salesRecords, yearMonth);
   }, [salesRecords, yearMonth]);
 
-  // 当月单位的所有销售记录（按销售单位汇总，个人业绩再按任命人员归集�?
+  // 当月单位的所有销售记录（按销售单位汇总，个人业绩再按任命人员归集）
   const unitMonthlyRecords = useMemo(() => {
     return monthlyRecords.filter((r) => r.salesUnitId === unitId);
   }, [monthlyRecords, unitId]);
 
-  // 团队总业�?
+  // 团队总业绩
   const teamTotal = useMemo(() => {
     return unitMonthlyRecords.reduce((sum, r) => sum + r.totalAmount, 0);
   }, [unitMonthlyRecords]);
@@ -135,9 +134,9 @@ export default function SalesBattleReport() {
     );
   }, [performanceTargets, unitId, yearMonth]);
 
-  // 团队完成率（已使�?effectiveTeamCompletionRate，删除未使用变量�?
+  // 团队完成率（已使用 effectiveTeamCompletionRate，删除未使用变量）
 
-  // 各人员目标（不含单位整体目标�?
+  // 各人员目标（不含单位整体目标）
   const personnelTargets = useMemo(() => {
     const map = new Map<string, number>();
     performanceTargets.forEach((t) => {
@@ -150,7 +149,7 @@ export default function SalesBattleReport() {
 
   // 计算每个人员的战报行
   const battleRows = useMemo(() => {
-    // 1. 系统内在职销售岗位；个人业绩 = 本单位当月销售记录按任命人员汇�?
+    // 1. 系统内在职销售岗位；个人业绩 = 本单位当月销售记录按任命人员汇总
     const rows = battlePersonnel.map((p) => {
       const personalSales = getPersonalSales(p.id, unitMonthlyRecords, p.name);
       const targetAmount = personnelTargets.get(p.id);
@@ -160,7 +159,7 @@ export default function SalesBattleReport() {
         ? (personalSales / targetAmount) * 100
         : 0;
 
-      // 实时计算该人员薪�?
+      // 实时计算该人员薪资
       const adj = monthlyAdjustments.find(
         (a) => a.personnelId === p.id && a.yearMonth === yearMonth
       );
@@ -168,7 +167,7 @@ export default function SalesBattleReport() {
       const totalCost =
         salary.total + (p.socialInsurance || 0) + (p.housingFund || 0);
 
-      // 按岗位匹配特殊分组（如外援团�?
+      // 按岗位匹配特殊分组（如外援团）
       const positionMatch = matchPositionLabel(p.position || "");
 
       return {
@@ -184,7 +183,7 @@ export default function SalesBattleReport() {
       };
     });
 
-    // 2. 外部人员（生态圈同步/表格导入但未匹配到系统人员的�?
+    // 2. 外部人员（生态圈同步/表格导入但未匹配到系统人员的）
     //    personnelId 为空但有 salesPersonName 的记录，按人员名聚合
     const externalRecords = unitMonthlyRecords.filter(
       (r) => !r.personnelId && r.salesPersonName && r.salesPersonName.trim()
@@ -201,7 +200,7 @@ export default function SalesBattleReport() {
     const existingNames = new Set(unitPersonnel.map((p) => p.name));
     externalMap.forEach((sales, name) => {
       if (existingNames.has(name)) return; // 重名跳过
-      // 构造伪 Personnel，position 设为"外援"以自动命中默�?外援�?规则
+      // 构造伪 Personnel，position 设为"外援"以自动命中默认"外援团"规则
       const fakePerson: Personnel = {
         id: `ext_${name}`,
         name,
@@ -245,9 +244,9 @@ export default function SalesBattleReport() {
     battlePersonnel, unitPersonnel, unitMonthlyRecords, personnelTargets,
     monthlyAdjustments, yearMonth, salesRecords, products, matchPositionLabel,
     unitId, productPersonCommissions,
-  ]);
+  , teamMgmtContext]);
 
-  // 团队合计（仅战报表内人员目标�?
+  // 团队合计（仅战报表内人员目标）
   const totalTarget = useMemo(() => {
     return battleRows.reduce((sum, row) => sum + (row.targetAmount || 0), 0);
   }, [battleRows]);
@@ -256,7 +255,7 @@ export default function SalesBattleReport() {
     return battleRows.reduce((sum, row) => sum + row.personalSales, 0);
   }, [battleRows]);
 
-  // 状态编辑相�?
+  // 状态编辑相关
   const [editingUnitTarget, setEditingUnitTarget] = useState(false);
   const [unitTargetDraft, setUnitTargetDraft] = useState(0);
   const [unitTargetNote, setUnitTargetNote] = useState("");
@@ -383,7 +382,7 @@ export default function SalesBattleReport() {
     }
   };
 
-  // 列出当前单位中所有命中的岗位，供配置参�?
+  // 列出当前单位中所有命中的岗位，供配置参考
   const unitPositions = useMemo(() => {
     const set = new Set<string>();
     unitPersonnel.forEach((p) => {
@@ -400,10 +399,10 @@ export default function SalesBattleReport() {
     return battleRows.reduce((sum, r) => sum + r.totalCost, 0);
   }, [battleRows]);
 
-  // 团队目标（人员目标合�?+ 单位整体目标）取最�?
+  // 团队目标（人员目标合计 + 单位整体目标）取最大
   const effectiveTeamTarget = totalTarget > 0 ? totalTarget : (unitTarget?.targetAmount || 0);
 
-  // 单位目标与人员目标合计的差额（正=单位目标>人员合计，负=人员合计>单位目标�?
+  // 单位目标与人员目标合计的差额（正=单位目标>人员合计，负=人员合计>单位目标）
   const targetGap = useMemo(() => {
     const ut = unitTarget?.targetAmount || 0;
     return ut - totalTarget;
@@ -418,7 +417,7 @@ export default function SalesBattleReport() {
   // 团队差额
   const teamDiff = effectiveTeamTarget > 0 ? teamTotal - effectiveTeamTarget : 0;
 
-  // 生成可选月份（最�?2个月�?
+  // 生成可选月份（最近12个月）
   const monthOptions = useMemo(() => {
     const options: string[] = [];
     const now = new Date();
@@ -434,7 +433,7 @@ export default function SalesBattleReport() {
     return (
       <div>
         <PageHeader
-          title="销售单位战�?
+          title="销售单位战报"
           description="按月份和单位实时跟踪业绩目标完成情况"
         />
         <Card>
@@ -452,7 +451,7 @@ export default function SalesBattleReport() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="销售单位战�?
+        title="销售单位战报"
         description="按月份和单位实时跟踪业绩目标完成情况，关联后台绩效条件显示实时薪资和单位成本"
       />
 
@@ -470,7 +469,7 @@ export default function SalesBattleReport() {
                 <SelectContent>
                   {monthOptions.map((m) => (
                     <SelectItem key={m} value={m}>
-                      {m.split("-")[0]}年{m.split("-")[1]}�?
+                      {m.split("-")[0]}年{m.split("-")[1]}月
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -480,7 +479,7 @@ export default function SalesBattleReport() {
             <div className="space-y-2 min-w-[220px]">
               <Label className="flex items-center gap-1 text-sm">
                 <Building2 className="h-3.5 w-3.5" />
-                销售单�?
+                销售单位
               </Label>
               <Select value={unitId} onValueChange={setUnitId}>
                 <SelectTrigger><SelectValue placeholder="选择单位" /></SelectTrigger>
@@ -518,7 +517,7 @@ export default function SalesBattleReport() {
           <CardContent className="pt-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-muted-foreground">团队总业�?/p>
+                <p className="text-xs text-muted-foreground">团队总业绩</p>
                 <p className="text-2xl font-bold text-blue-700">{formatCurrency(teamTotal)}</p>
               </div>
               <TrendingUp className="h-8 w-8 text-blue-500 opacity-50" />
@@ -626,7 +625,7 @@ export default function SalesBattleReport() {
                   <Edit3 className="mr-2 h-4 w-4" />编辑
                 </Button>
               </div>
-              {/* 人员目标汇总对�?*/}
+              {/* 人员目标汇总对比 */}
               {totalTarget > 0 || unitTarget.targetAmount > 0 ? (
                 <div className={`rounded-lg border p-3 ${Math.abs(targetGap) > 0 ? "border-amber-300 bg-amber-50/50" : "border-emerald-200 bg-emerald-50/30"}`}>
                   <div className="flex items-center justify-between text-sm">
@@ -644,7 +643,7 @@ export default function SalesBattleReport() {
                     <div className={`flex items-center gap-1 font-bold ${targetGap > 0 ? "text-amber-600" : targetGap < 0 ? "text-red-600" : "text-emerald-600"}`}>
                       {targetGap > 0 ? (
                         <>
-                          <span>未分�?/span>
+                          <span>未分配</span>
                           <span>+{formatCurrency(targetGap)}</span>
                         </>
                       ) : targetGap < 0 ? (
@@ -659,12 +658,12 @@ export default function SalesBattleReport() {
                   </div>
                   {Math.abs(targetGap) > 0 && targetGap > 0 && (
                     <p className="mt-1.5 text-xs text-amber-600/70">
-                      提示：单位目标比人员目标总和�?{formatCurrency(targetGap)}，可继续为其他人员设定个人目标或调整单位目标
+                      提示：单位目标比人员目标总和多 {formatCurrency(targetGap)}，可继续为其他人员设定个人目标或调整单位目标
                     </p>
                   )}
                   {targetGap < 0 && (
                     <p className="mt-1.5 text-xs text-red-500/70">
-                      提示：人员目标合计超出单位目�?{formatCurrency(Math.abs(targetGap))}，请确认是否需要调高单位目标或降低部分人员目标
+                      提示：人员目标合计超出单位目标 {formatCurrency(Math.abs(targetGap))}，请确认是否需要调高单位目标或降低部分人员目标
                     </p>
                   )}
                 </div>
@@ -673,7 +672,7 @@ export default function SalesBattleReport() {
           ) : (
             <div className="flex items-center justify-between">
               <p className="text-sm text-muted-foreground">
-                尚未录入单位整体目标。可在右侧批量录入人员目标，或录入整体目标�?
+                尚未录入单位整体目标。可在右侧批量录入人员目标，或录入整体目标。
               </p>
               <Button variant="outline" size="sm" onClick={startEditUnitTarget}>
                 <Edit3 className="mr-2 h-4 w-4" />录入目标
@@ -686,8 +685,8 @@ export default function SalesBattleReport() {
       {/* 战报表格 */}
       <Card className="overflow-hidden">
         <div className="border-b bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
-          展示所选月份在职期间的销售相关岗位（含当月后才离职人员）�?
-          组织部、售后等非销售岗不显示。个人业绩按本单位销售记录归集�?
+          展示所选月份在职期间的销售相关岗位（含当月后才离职人员）；
+          组织部、售后等非销售岗不显示。个人业绩按本单位销售记录归集。
         </div>
         <div className="overflow-x-auto">
           <Table>
@@ -697,7 +696,7 @@ export default function SalesBattleReport() {
                 <TableHead className="text-center font-bold text-pink-900 border-r border-pink-200">业绩目标</TableHead>
                 <TableHead className="text-center font-bold text-pink-900 border-r border-pink-200">个人业绩合计</TableHead>
                 <TableHead className="text-center font-bold text-pink-900 border-r border-pink-200">业绩差额</TableHead>
-                <TableHead className="text-center font-bold text-pink-900 border-r border-pink-200">个人完成�?/TableHead>
+                <TableHead className="text-center font-bold text-pink-900 border-r border-pink-200">个人完成率</TableHead>
                 <TableHead className="text-center font-bold text-pink-900">实时薪资</TableHead>
               </TableRow>
             </TableHeader>
@@ -730,7 +729,7 @@ export default function SalesBattleReport() {
                       {person.position && (
                         <div className="text-[10px] text-muted-foreground mt-0.5">
                           {person.position}
-                          {isExternalPerson && <span className="ml-1 text-blue-500">（同�?导入�?/span>}
+                          {isExternalPerson && <span className="ml-1 text-blue-500">（同步/导入）</span>}
                         </div>
                       )}
                     </TableCell>
@@ -757,7 +756,7 @@ export default function SalesBattleReport() {
                           onClick={() => startEditPersonTarget(person.id, targetAmount)}
                           className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm hover:bg-muted transition-colors ${targetAmount > 0 ? "font-medium" : "text-muted-foreground"}`}
                         >
-                          {targetAmount > 0 ? formatCurrency(targetAmount) : "�?}
+                          {targetAmount > 0 ? formatCurrency(targetAmount) : "—"}
                           <Edit3 className="h-3 w-3 opacity-40 hover:opacity-100" />
                         </button>
                       ) : (
@@ -766,7 +765,7 @@ export default function SalesBattleReport() {
                           onClick={() => startEditPersonTarget(person.id, undefined)}
                           className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
                         >
-                          �?
+                          —
                           <Edit3 className="h-3 w-3 opacity-40 hover:opacity-100" />
                         </button>
                       )}
@@ -777,7 +776,7 @@ export default function SalesBattleReport() {
                     <TableCell className={`text-center border-r font-semibold ${diff < 0 ? "text-red-600" : diff > 0 ? "text-emerald-600" : "text-muted-foreground"}`}>
                       {targetAmount !== null ? (
                         diff < 0 ? `-${formatCurrency(Math.abs(diff))}` : formatCurrency(diff)
-                      ) : "�?}
+                      ) : "—"}
                     </TableCell>
                     <TableCell className="text-center border-r">
                       {targetAmount !== null && targetAmount > 0 ? (
@@ -785,12 +784,12 @@ export default function SalesBattleReport() {
                           {formatPercent(completionRate)}
                         </Badge>
                       ) : (
-                        <span className="text-muted-foreground">�?/span>
+                        <span className="text-muted-foreground">—</span>
                       )}
                     </TableCell>
                     <TableCell className="text-center">
                       {isExternalPerson ? (
-                        <span className="text-muted-foreground text-sm">�?/span>
+                        <span className="text-muted-foreground text-sm">—</span>
                       ) : (
                         <Button
                           variant="ghost"
@@ -807,7 +806,7 @@ export default function SalesBattleReport() {
                 );
               })}
 
-              {/* 个人合计�?*/}
+              {/* 个人合计行 */}
               <TableRow className="bg-pink-50/40 font-bold border-t-2 border-pink-300">
                 <TableCell className="text-center text-pink-900">合计</TableCell>
                 <TableCell className="text-center text-pink-900">
@@ -819,7 +818,7 @@ export default function SalesBattleReport() {
                 <TableCell className={`text-center ${teamDiff < 0 ? "text-red-600" : "text-pink-900"}`}>
                   {effectiveTeamTarget > 0 ? (
                     teamDiff < 0 ? `-${formatCurrency(Math.abs(teamDiff))}` : formatCurrency(teamDiff)
-                  ) : "�?}
+                  ) : "—"}
                 </TableCell>
                 <TableCell className="text-center text-pink-900">
                   {formatPercent(
@@ -837,7 +836,7 @@ export default function SalesBattleReport() {
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center justify-center gap-8 flex-wrap">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-muted-foreground">团队总业�?/span>
+                        <span className="text-sm font-medium text-muted-foreground">团队总业绩</span>
                         <span className="text-lg font-bold text-blue-700">{formatCurrency(teamTotal)}</span>
                       </div>
                       <div className="h-6 w-px bg-yellow-300" />
@@ -856,7 +855,7 @@ export default function SalesBattleReport() {
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium text-muted-foreground">团队总完成率</span>
                         <span className={`text-lg font-bold ${effectiveTeamCompletionRate >= 100 ? "text-emerald-600" : "text-red-600"}`}>
-                          {effectiveTeamTarget > 0 ? formatPercent(effectiveTeamCompletionRate) : "�?}
+                          {effectiveTeamTarget > 0 ? formatPercent(effectiveTeamCompletionRate) : "—"}
                         </span>
                       </div>
                     </div>
@@ -878,7 +877,7 @@ export default function SalesBattleReport() {
               {battleRows.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={6} className="py-12 text-center text-muted-foreground">
-                    该单位该月暂无在职销售人�?
+                    该单位该月暂无在职销售人员
                   </TableCell>
                 </TableRow>
               )}
@@ -887,7 +886,7 @@ export default function SalesBattleReport() {
         </div>
       </Card>
 
-      {/* 单位总成本卡�?*/}
+      {/* 单位总成本卡片 */}
       <Card className="border-primary/20 bg-primary/5">
         <CardContent className="pt-4">
           <div className="flex items-center justify-between">
@@ -897,11 +896,11 @@ export default function SalesBattleReport() {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">
-                  {currentUnit?.name} · {yearMonth.split("-")[0]}年{yearMonth.split("-")[1]}�?· 单位总人力成�?
+                  {currentUnit?.name} · {yearMonth.split("-")[0]}年{yearMonth.split("-")[1]}月 · 单位总人力成本
                 </p>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  含薪�?+ 社保（企业）+ 公积金（企业�? 请假扣款 + 其他调整
-                  （销售提成已计入管理/个人提成�?
+                  含薪资 + 社保（企业）+ 公积金（企业）- 请假扣款 + 其他调整
+                  （销售提成已计入管理/个人提成）
                 </p>
               </div>
             </div>
@@ -919,8 +918,8 @@ export default function SalesBattleReport() {
               人员目标批量录入
             </DialogTitle>
             <DialogDescription>
-              �?{currentUnit?.name} �?{yearMonth.split("-")[0]}年{yearMonth.split("-")[1]}�?
-              录入销售岗位人员的业绩目标（非销售岗不在战报中显示，也不在此录入）�?
+              为 {currentUnit?.name} 在 {yearMonth.split("-")[0]}年{yearMonth.split("-")[1]}月
+              录入销售岗位人员的业绩目标（非销售岗不在战报中显示，也不在此录入）。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">
@@ -940,7 +939,7 @@ export default function SalesBattleReport() {
             ))}
             {battlePersonnel.length === 0 && (
               <p className="py-8 text-center text-sm text-muted-foreground">
-                该单位该月暂无销售岗位在职人�?
+                该单位该月暂无销售岗位在职人员
               </p>
             )}
           </div>
@@ -960,7 +959,7 @@ export default function SalesBattleReport() {
           <DialogHeader>
             <DialogTitle>实时薪资明细 - {salaryDetailPerson?.name}</DialogTitle>
             <DialogDescription>
-              {yearMonth.split("-")[0]}年{yearMonth.split("-")[1]}�?· 基于后台设置的绩效条件实时计�?
+              {yearMonth.split("-")[0]}年{yearMonth.split("-")[1]}月 · 基于后台设置的绩效条件实时计算
             </DialogDescription>
           </DialogHeader>
           {salaryDetailPerson && (() => {
@@ -1011,7 +1010,7 @@ export default function SalesBattleReport() {
                     <span className="font-medium text-red-600">{formatCurrency(person.socialInsurance || 0)}</span>
                   </div>
                   <div className="flex justify-between rounded-md border border-cyan-200 bg-cyan-50/30 px-3 py-2">
-                    <span className="text-muted-foreground">公积金（企业�?/span>
+                    <span className="text-muted-foreground">公积金（企业）</span>
                     <span className="font-medium text-cyan-600">{formatCurrency(person.housingFund || 0)}</span>
                   </div>
                 </div>
@@ -1023,12 +1022,12 @@ export default function SalesBattleReport() {
 
                 {/* 绩效条件 */}
                 <div className="space-y-1.5 rounded-md border p-3">
-                  <p className="text-xs font-medium text-muted-foreground">后台绩效条件�?/p>
+                  <p className="text-xs font-medium text-muted-foreground">后台绩效条件：</p>
                   {person.salary.managementCommissionCondition && (
-                    <p className="text-xs">· 管理提成：{person.salary.managementCommissionCondition}（团队超 ¥{person.salary.managementCommissionThreshold.toLocaleString()} 部分�?{person.salary.managementCommissionRate}%�?/p>
+                    <p className="text-xs">· 管理提成：{person.salary.managementCommissionCondition}（团队超 ¥{person.salary.managementCommissionThreshold.toLocaleString()} 部分按 {person.salary.managementCommissionRate}%）</p>
                   )}
                   {person.salary.personalCommissionCondition && (
-                    <p className="text-xs">· 个人提成：{person.salary.personalCommissionCondition}（个人超 ¥{person.salary.personalCommissionThreshold.toLocaleString()} 部分�?{person.salary.personalCommissionRate}%�?/p>
+                    <p className="text-xs">· 个人提成：{person.salary.personalCommissionCondition}（个人超 ¥{person.salary.personalCommissionThreshold.toLocaleString()} 部分按 {person.salary.personalCommissionRate}%）</p>
                   )}
                   {person.salary.performanceCondition && (
                     <p className="text-xs">· 绩效：{person.salary.performanceCondition}</p>
@@ -1055,7 +1054,7 @@ export default function SalesBattleReport() {
               岗位分组配置
             </DialogTitle>
             <DialogDescription>
-              按人员「岗位」字段匹配特殊分组。命中规则的人员在战报中会显示对应徽章，灰色斜体行展示。匹配规则：不区分大小写，岗位名包含「关键词」即生效�?
+              按人员「岗位」字段匹配特殊分组。命中规则的人员在战报中会显示对应徽章，灰色斜体行展示。匹配规则：不区分大小写，岗位名包含「关键词」即生效。
             </DialogDescription>
           </DialogHeader>
 
@@ -1073,7 +1072,7 @@ export default function SalesBattleReport() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label className="text-xs">岗位关键�?/Label>
+                <Label className="text-xs">岗位关键词</Label>
                 <Input
                   value={labelDraft.keyword}
                   onChange={(e) => setLabelDraft({ ...labelDraft, keyword: e.target.value })}
@@ -1100,7 +1099,7 @@ export default function SalesBattleReport() {
                 <Input
                   value={labelDraft.label}
                   onChange={(e) => setLabelDraft({ ...labelDraft, label: e.target.value })}
-                  placeholder="如：外援�?/ 实习�?
+                  placeholder="如：外援团 / 实习生"
                 />
               </div>
             </div>
@@ -1131,7 +1130,7 @@ export default function SalesBattleReport() {
             {/* 预览 */}
             {labelDraft.label && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span>预览�?/span>
+                <span>预览：</span>
                 <Badge variant="outline" className={({
                   gray: "bg-gray-100 text-gray-700 border-gray-300",
                   blue: "bg-blue-50 text-blue-700 border-blue-300",
@@ -1142,7 +1141,7 @@ export default function SalesBattleReport() {
                 } as Record<string, string>)[labelDraft.color || "gray"] || "bg-gray-100 text-gray-700 border-gray-300"}>
                   {labelDraft.label}
                 </Badge>
-                {labelDraft.keyword && <span>· 匹配岗位包含「{labelDraft.keyword}�?/span>}
+                {labelDraft.keyword && <span>· 匹配岗位包含「{labelDraft.keyword}」</span>}
               </div>
             )}
             <div className="flex justify-end">
@@ -1156,10 +1155,10 @@ export default function SalesBattleReport() {
           {/* 现有规则列表 */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <p className="text-sm font-medium">现有规则（{positionGroupLabels.length}�?/p>
+              <p className="text-sm font-medium">现有规则（{positionGroupLabels.length}）</p>
             </div>
             {positionGroupLabels.length === 0 ? (
-              <p className="py-6 text-center text-sm text-muted-foreground">暂无规则，请在上方新�?/p>
+              <p className="py-6 text-center text-sm text-muted-foreground">暂无规则，请在上方新增</p>
             ) : (
               <div className="space-y-2">
                 {positionGroupLabels.map((rule) => {
@@ -1183,7 +1182,7 @@ export default function SalesBattleReport() {
                             {rule.label}
                           </Badge>
                           <div className="text-sm">
-                            <span className="text-muted-foreground">岗位包含�?/span>
+                            <span className="text-muted-foreground">岗位包含：</span>
                             <span className="font-medium">{rule.keyword}</span>
                           </div>
                           {rule.description && (

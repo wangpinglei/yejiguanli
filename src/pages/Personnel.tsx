@@ -106,10 +106,10 @@ function getDateRange(range: SalesRange, customStart?: string, customEnd?: strin
 
 const RANGE_LABELS: Record<SalesRange, string> = {
   all: "全部时间",
-  year: "本年�?,
-  quarter: "本季�?,
+  year: "本年度",
+  quarter: "本季度",
   month: "本月",
-  custom: "自定�?,
+  custom: "自定义",
 };
 
 export default function PersonnelPage() {
@@ -235,14 +235,14 @@ export default function PersonnelPage() {
 
   const showActions = canEditPersonnel || datesOnly;
 
-  // 薪资明细计算（按月度�?
+  // 薪资明细计算（按月度）
   const salaryDetail = useMemo(() => {
     if (!salaryDetailPerson) return null;
     const adj = monthlyAdjustments.find(
       (a) => a.personnelId === salaryDetailPerson.id && a.yearMonth === salaryDetailMonth
     );
     return calculateMonthlySalary(salaryDetailPerson, salesRecords, products, salaryDetailMonth, adj, productPersonCommissions, teamMgmtContext);
-  }, [salaryDetailPerson, salaryDetailMonth, salesRecords, products, monthlyAdjustments, productPersonCommissions]);
+  }, [salaryDetailPerson, salaryDetailMonth, salesRecords, products, monthlyAdjustments, productPersonCommissions, teamMgmtContext]);
 
   // 月度销售额
   const monthlyPersonnelSales = useMemo(() => {
@@ -256,7 +256,7 @@ export default function PersonnelPage() {
     <div>
       <PageHeader
         title="人员管理"
-        description="管理各销售单位人员信息、入离职时间、薪资结构与销售业�?
+        description="管理各销售单位人员信息、入离职时间、薪资结构与销售业绩"
         action={
           showActions && !isReadOnly && (
             <Button onClick={openAdd}>
@@ -272,7 +272,7 @@ export default function PersonnelPage() {
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="搜索姓名或职�?.."
+            placeholder="搜索姓名或职位..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-10"
@@ -280,7 +280,7 @@ export default function PersonnelPage() {
         </div>
         <Select value={filterUnit} onValueChange={setFilterUnit}>
           <SelectTrigger className="w-48">
-            <SelectValue placeholder="筛选单�? />
+            <SelectValue placeholder="筛选单位" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部单位</SelectItem>
@@ -296,11 +296,11 @@ export default function PersonnelPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="year">本年�?/SelectItem>
-              <SelectItem value="quarter">本季�?/SelectItem>
+              <SelectItem value="year">本年度</SelectItem>
+              <SelectItem value="quarter">本季度</SelectItem>
               <SelectItem value="month">本月</SelectItem>
               <SelectItem value="all">全部时间</SelectItem>
-              <SelectItem value="custom">自定�?/SelectItem>
+              <SelectItem value="custom">自定义</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -312,7 +312,7 @@ export default function PersonnelPage() {
               onChange={(e) => setCustomStart(e.target.value)}
               className="w-36 h-9"
             />
-            <span className="text-muted-foreground text-sm">�?/span>
+            <span className="text-muted-foreground text-sm">至</span>
             <Input
               type="date"
               value={customEnd}
@@ -321,7 +321,7 @@ export default function PersonnelPage() {
             />
           </div>
         )}
-        <Badge variant="secondary">�?{filteredPersonnel.length} �?/Badge>
+        <Badge variant="secondary">共 {filteredPersonnel.length} 人</Badge>
       </div>
 
       {/* Table */}
@@ -332,7 +332,7 @@ export default function PersonnelPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>姓名</TableHead>
-                  <TableHead>所属单�?/TableHead>
+                  <TableHead>所属单位</TableHead>
                   <TableHead>职位</TableHead>
                   <TableHead className="text-right">底薪</TableHead>
                   <TableHead className="text-right">固定月薪</TableHead>
@@ -342,12 +342,12 @@ export default function PersonnelPage() {
                       <span className="text-[10px] font-normal text-blue-600">
                         {RANGE_LABELS[salesRange]}
                         {salesRange === "custom" && customStart && customEnd
-                          ? `�?{customStart} ~ ${customEnd}）`
+                          ? `（${customStart} ~ ${customEnd}）`
                           : ""}
                       </span>
                     </div>
                   </TableHead>
-                  <TableHead>状�?/TableHead>
+                  <TableHead>状态</TableHead>
                   <TableHead>入职日期</TableHead>
                   <TableHead>离职日期</TableHead>
                   <TableHead className="text-right">操作</TableHead>
@@ -421,7 +421,7 @@ export default function PersonnelPage() {
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {editingPerson ? (datesOnly ? "编辑入离职时�? : "编辑人员") : "新增人员"}
+              {editingPerson ? (datesOnly ? "编辑入离职时间" : "编辑人员") : "新增人员"}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -446,7 +446,7 @@ export default function PersonnelPage() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>状�?/Label>
+                  <Label>状态</Label>
                   <Select value={form.resignDate ? "inactive" : form.status} onValueChange={(v) => setForm({ ...form, status: v as Personnel["status"] })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -464,7 +464,7 @@ export default function PersonnelPage() {
                     <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="姓名" />
                   </div>
                   <div className="space-y-2">
-                    <Label>所属单�?*</Label>
+                    <Label>所属单位 *</Label>
                     <Select value={form.salesUnitId} onValueChange={(v) => setForm({ ...form, salesUnitId: v })}>
                       <SelectTrigger><SelectValue placeholder="选择单位" /></SelectTrigger>
                       <SelectContent>
@@ -478,10 +478,10 @@ export default function PersonnelPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>职位</Label>
-                    <Input value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} placeholder="如：销售经�? />
+                    <Input value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} placeholder="如：销售经理" />
                   </div>
                   <div className="space-y-2">
-                    <Label>状�?/Label>
+                    <Label>状态</Label>
                     <Select value={form.resignDate ? "inactive" : form.status} onValueChange={(v) => setForm({ ...form, status: v as Personnel["status"] })}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -493,8 +493,8 @@ export default function PersonnelPage() {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>手机�?/Label>
-                    <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="手机�? />
+                    <Label>手机号</Label>
+                    <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="手机号" />
                   </div>
                   <div className="space-y-2">
                     <Label>邮箱</Label>
@@ -509,7 +509,7 @@ export default function PersonnelPage() {
                   <div className="space-y-2">
                     <Label>离职日期</Label>
                     <Input type="date" value={form.resignDate} onChange={(e) => setForm({ ...form, resignDate: e.target.value })} />
-                    <p className="text-xs text-muted-foreground">填写后状态自动变�?离职"</p>
+                    <p className="text-xs text-muted-foreground">填写后状态自动变为"离职"</p>
                   </div>
                 </div>
 
@@ -545,7 +545,7 @@ export default function PersonnelPage() {
                       </div>
                       <div className="space-y-1">
                         <Label className="text-xs">发放条件</Label>
-                        <Input value={form.salary.performanceCondition} onChange={(e) => updateSalary("performanceCondition", e.target.value)} placeholder="如：完成月度销售目�?0%以上发放" />
+                        <Input value={form.salary.performanceCondition} onChange={(e) => updateSalary("performanceCondition", e.target.value)} placeholder="如：完成月度销售目标80%以上发放" />
                       </div>
                     </div>
                   </div>
@@ -562,17 +562,17 @@ export default function PersonnelPage() {
                       </div>
                       <div className="space-y-1">
                         <Label className="text-xs">发放条件</Label>
-                        <Input value={form.salary.positionAllowanceCondition} onChange={(e) => updateSalary("positionAllowanceCondition", e.target.value)} placeholder="如：管理岗位或特定职级发�? />
+                        <Input value={form.salary.positionAllowanceCondition} onChange={(e) => updateSalary("positionAllowanceCondition", e.target.value)} placeholder="如：管理岗位或特定职级发放" />
                       </div>
                     </div>
                   </div>
 
                 </div>
 
-                {/* 社保公积�?*/}
+                {/* 社保公积金 */}
                 <div className="space-y-3 rounded-lg border p-4">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-semibold">社保公积金（企业承担部分�?/h4>
+                    <h4 className="text-sm font-semibold">社保公积金（企业承担部分）</h4>
                     <Badge variant="secondary">
                       月度合计：{formatCurrency((form.socialInsurance || 0) + (form.housingFund || 0))}
                     </Badge>
@@ -586,19 +586,19 @@ export default function PersonnelPage() {
                         <Badge className="bg-red-100 text-red-700">社保</Badge>
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-xs">社保金额 (¥/�?</Label>
+                        <Label className="text-xs">社保金额 (¥/月)</Label>
                         <Input type="number" value={form.socialInsurance} onChange={(e) => setForm({ ...form, socialInsurance: Number(e.target.value) })} placeholder="0" />
-                        <p className="text-[10px] text-muted-foreground">养老、医疗、失业、工伤、生育（企业承担部分�?/p>
+                        <p className="text-[10px] text-muted-foreground">养老、医疗、失业、工伤、生育（企业承担部分）</p>
                       </div>
                     </div>
                     <div className="space-y-2 rounded-md bg-cyan-50/50 p-3">
                       <div className="flex items-center gap-2">
-                        <Badge className="bg-cyan-100 text-cyan-700">公积�?/Badge>
+                        <Badge className="bg-cyan-100 text-cyan-700">公积金</Badge>
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-xs">公积金金�?(¥/�?</Label>
+                        <Label className="text-xs">公积金金额 (¥/月)</Label>
                         <Input type="number" value={form.housingFund} onChange={(e) => setForm({ ...form, housingFund: Number(e.target.value) })} placeholder="0" />
-                        <p className="text-[10px] text-muted-foreground">住房公积金（企业承担部分�?/p>
+                        <p className="text-[10px] text-muted-foreground">住房公积金（企业承担部分）</p>
                       </div>
                     </div>
                   </div>
@@ -623,7 +623,7 @@ export default function PersonnelPage() {
           </DialogHeader>
           {salaryDetailPerson && salaryDetail && (
             <div className="space-y-3 py-2">
-              {/* 月份选择�?*/}
+              {/* 月份选择器 */}
               <div className="flex items-center gap-2">
                 <Label className="text-sm">月份</Label>
                 <Input
@@ -685,14 +685,14 @@ export default function PersonnelPage() {
                 </div>
               </div>
 
-              {/* 社保公积�?*/}
+              {/* 社保公积金 */}
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div className="flex justify-between rounded-md border border-red-200 bg-red-50/30 px-3 py-2">
                   <span className="text-muted-foreground">社保（企业承担）</span>
                   <span className="font-medium text-red-600">{formatCurrency(salaryDetailPerson.socialInsurance || 0)}</span>
                 </div>
                 <div className="flex justify-between rounded-md border border-cyan-200 bg-cyan-50/30 px-3 py-2">
-                  <span className="text-muted-foreground">公积金（企业承担�?/span>
+                  <span className="text-muted-foreground">公积金（企业承担）</span>
                   <span className="font-medium text-cyan-600">{formatCurrency(salaryDetailPerson.housingFund || 0)}</span>
                 </div>
               </div>
@@ -704,14 +704,14 @@ export default function PersonnelPage() {
                 </span>
               </div>
 
-              {/* 日薪参�?*/}
+              {/* 日薪参考 */}
               <div className="rounded-md border px-3 py-2 text-xs text-muted-foreground">
-                日薪参考：底薪 / {MONTHLY_WORK_DAYS} = {formatCurrency(salaryDetailPerson.salary.baseSalary / MONTHLY_WORK_DAYS)} / �?
+                日薪参考：底薪 / {MONTHLY_WORK_DAYS} = {formatCurrency(salaryDetailPerson.salary.baseSalary / MONTHLY_WORK_DAYS)} / 天
               </div>
 
               {/* 条件说明 */}
               <div className="space-y-1.5 rounded-md border p-3">
-                <p className="text-xs font-medium text-muted-foreground">条件说明�?/p>
+                <p className="text-xs font-medium text-muted-foreground">条件说明：</p>
                 {salaryDetailPerson.salary.performanceCondition && (
                   <p className="text-xs">· 绩效：{salaryDetailPerson.salary.performanceCondition}</p>
                 )}
@@ -719,10 +719,10 @@ export default function PersonnelPage() {
                   <p className="text-xs">· 岗位补贴：{salaryDetailPerson.salary.positionAllowanceCondition}</p>
                 )}
                 {salaryDetailPerson.salary.managementCommissionCondition && (
-                  <p className="text-xs">· 管理提成：{salaryDetailPerson.salary.managementCommissionCondition}（团队销售额�?{formatCurrency(salaryDetailPerson.salary.managementCommissionThreshold)} 部分�?{salaryDetailPerson.salary.managementCommissionRate}% 计算�?/p>
+                  <p className="text-xs">· 管理提成：{salaryDetailPerson.salary.managementCommissionCondition}（团队销售额超 {formatCurrency(salaryDetailPerson.salary.managementCommissionThreshold)} 部分按 {salaryDetailPerson.salary.managementCommissionRate}% 计算）</p>
                 )}
                 {salaryDetailPerson.salary.personalCommissionCondition && (
-                  <p className="text-xs">· 个人提成：{salaryDetailPerson.salary.personalCommissionCondition}（个人销售额�?{formatCurrency(salaryDetailPerson.salary.personalCommissionThreshold)} 部分�?{salaryDetailPerson.salary.personalCommissionRate}% 计算�?/p>
+                  <p className="text-xs">· 个人提成：{salaryDetailPerson.salary.personalCommissionCondition}（个人销售额超 {formatCurrency(salaryDetailPerson.salary.personalCommissionThreshold)} 部分按 {salaryDetailPerson.salary.personalCommissionRate}% 计算）</p>
                 )}
               </div>
             </div>
@@ -738,7 +738,7 @@ export default function PersonnelPage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>确认删除</AlertDialogTitle>
-            <AlertDialogDescription>确定要删除该人员吗？此操作不可撤销�?/AlertDialogDescription>
+            <AlertDialogDescription>确定要删除该人员吗？此操作不可撤销。</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>

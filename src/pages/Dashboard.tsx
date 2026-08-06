@@ -57,6 +57,11 @@ const COLORS = ["#3b82f6", "#60a5fa", "#93c5fd", "#1e40af", "#2563eb", "#1d4ed8"
 
 export default function Dashboard() {
   const { products, monthlyAdjustments, productPersonCommissions, teamMgmtCommissionRules, performanceTargets, unitProductSettlements } = useData();
+  const teamMgmtContext = useMemo(() => ({
+    rules: teamMgmtCommissionRules,
+    targets: performanceTargets,
+    upsList: unitProductSettlements,
+  }), [teamMgmtCommissionRules, performanceTargets, unitProductSettlements]);
   const {
     visibleSalesUnits: salesUnits,
     visiblePersonnel: personnel,
@@ -64,15 +69,9 @@ export default function Dashboard() {
     visibleCostRecords: costRecords,
   } = usePermissions();
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
-  // null = 全部单位；[] = 全不选；非空 = 仅这些单�?
+  // null = 全部单位；[] = 全不选；非空 = 仅这些单位
   const [selectedUnitIds, setSelectedUnitIds] = useState<string[] | null>(null);
   const [unitFilterOpen, setUnitFilterOpen] = useState(false);
-
-  const teamMgmtContext = useMemo(() => ({
-    rules: teamMgmtCommissionRules,
-    targets: performanceTargets,
-    upsList: unitProductSettlements,
-  }), [teamMgmtCommissionRules, performanceTargets, unitProductSettlements]);
 
   const filterUnitIds = useMemo(() => {
     if (selectedUnitIds === null) return salesUnits.map((u) => u.id);
@@ -100,12 +99,12 @@ export default function Dashboard() {
     || (salesUnits.length > 0 && selectedUnitIds.length === salesUnits.length);
   const isNoUnits = selectedUnitIds !== null && selectedUnitIds.length === 0;
   const unitFilterLabel = useMemo(() => {
-    if (isNoUnits) return "未选单�?;
+    if (isNoUnits) return "未选单位";
     if (isAllUnits) return "全部单位";
     if (selectedUnitIds!.length === 1) {
-      return salesUnits.find((u) => u.id === selectedUnitIds![0])?.name || "已�?1 �?;
+      return salesUnits.find((u) => u.id === selectedUnitIds![0])?.name || "已选 1 个";
     }
-    return `已�?${selectedUnitIds!.length} 个单位`;
+    return `已选 ${selectedUnitIds!.length} 个单位`;
   }, [isAllUnits, isNoUnits, selectedUnitIds, salesUnits]);
 
   function handleToggleUnit(unitId: string, checked: boolean) {
@@ -114,7 +113,7 @@ export default function Dashboard() {
       if (checked) {
         if (base.includes(unitId)) return base;
         const next = [...base, unitId];
-        // 勾满后折叠为「全部�?
+        // 勾满后折叠为「全部」
         if (salesUnits.length > 0 && next.length === salesUnits.length) return null;
         return next;
       }
@@ -144,18 +143,17 @@ export default function Dashboard() {
     [filteredCostRecords, selectedMonth]
   );
 
-  // 计算统计（按月度�?
+  // 计算统计（按月度）
   const stats = useMemo(() => {
     const totalRevenue = monthlySales.reduce((sum, s) => sum + s.totalAmount, 0);
     const manualCost = monthlyCosts.reduce((sum, c) => sum + c.totalCost, 0);
     const salaryData = getTotalSalaryCost(
-      filterUnitIds,
+filterUnitIds,
       filteredPersonnel,
       filteredSalesRecords,
       products,
       selectedMonth,
-      monthlyAdjustments,
-      productPersonCommissions,
+      monthlyAdjustments,productPersonCommissions,
       teamMgmtContext,
     );
     const salaryCost = salaryData.grandTotal;
@@ -185,7 +183,7 @@ export default function Dashboard() {
   }, [
     monthlySales, monthlyCosts, filterUnitIds, filteredUnits, filteredPersonnel,
     filteredSalesRecords, products, selectedMonth, monthlyAdjustments, productPersonCommissions,
-  ]);
+  , teamMgmtContext]);
 
   // 月度趋势
   const monthlyTrend = useMemo(() => {
@@ -209,17 +207,16 @@ export default function Dashboard() {
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([month, data]) => {
         const monthSalary = getTotalSalaryCost(
-          filterUnitIds,
+filterUnitIds,
           filteredPersonnel,
           filteredSalesRecords,
           products,
           month,
-          monthlyAdjustments,
-          productPersonCommissions,
-        teamMgmtContext,
-        ).grandTotal;
+          monthlyAdjustments,productPersonCommissions,
+      teamMgmtContext,
+    ).grandTotal;
         return {
-          month: month.split("-")[1] + "�?,
+          month: month.split("-")[1] + "月",
           revenue: data.revenue,
           cost: data.cost + monthSalary,
           profit: data.revenue - data.cost - monthSalary,
@@ -228,7 +225,7 @@ export default function Dashboard() {
   }, [
     filteredSalesRecords, filteredCostRecords, filterUnitIds,
     filteredPersonnel, products, monthlyAdjustments, productPersonCommissions,
-  ]);
+  , teamMgmtContext]);
 
   // 各单位销售（按月度）
   const unitSales = useMemo(() => {
@@ -240,15 +237,14 @@ export default function Dashboard() {
         .filter((c) => c.salesUnitId === unit.id)
         .reduce((sum, c) => sum + c.totalCost, 0);
       const salaryCost = getTotalSalaryCost(
-        [unit.id],
+[unit.id],
         filteredPersonnel,
         filteredSalesRecords,
         products,
         selectedMonth,
-        monthlyAdjustments,
-        productPersonCommissions,
+        monthlyAdjustments,productPersonCommissions,
       teamMgmtContext,
-      ).grandTotal;
+    ).grandTotal;
       const cost = manualCost + salaryCost;
       return {
         name: unit.name.length > 6 ? unit.name.slice(0, 6) + "..." : unit.name,
@@ -260,9 +256,9 @@ export default function Dashboard() {
   }, [
     filteredUnits, monthlySales, monthlyCosts, filteredPersonnel,
     filteredSalesRecords, products, selectedMonth, monthlyAdjustments, productPersonCommissions,
-  ]);
+  , teamMgmtContext]);
 
-  // 成本分类（按月度�?
+  // 成本分类（按月度）
   const costByCategory = useMemo(() => {
     const catMap = new Map<string, number>();
     monthlyCosts.forEach((c) => {
@@ -271,20 +267,19 @@ export default function Dashboard() {
       });
     });
     const salaryData = getTotalSalaryCost(
-      filterUnitIds,
+filterUnitIds,
       filteredPersonnel,
       filteredSalesRecords,
       products,
       selectedMonth,
-      monthlyAdjustments,
-      productPersonCommissions,
+      monthlyAdjustments,productPersonCommissions,
       teamMgmtContext,
     );
     if (salaryData.grandTotal > 0) {
-      catMap.set("人力成本（薪�?社保+公积金）", salaryData.grandTotal);
+      catMap.set("人力成本（薪酬+社保+公积金）", salaryData.grandTotal);
     }
     if (salaryData.grandSalesCommission > 0) {
-      catMap.set("销售提成（单位×人员�?, salaryData.grandSalesCommission);
+      catMap.set("销售提成（单位×人员）", salaryData.grandSalesCommission);
     }
     return Array.from(catMap.entries())
       .map(([name, value]) => ({ name, value }))
@@ -292,7 +287,7 @@ export default function Dashboard() {
   }, [
     monthlyCosts, filterUnitIds, filteredPersonnel, filteredSalesRecords,
     products, selectedMonth, monthlyAdjustments, productPersonCommissions,
-  ]);
+  , teamMgmtContext]);
 
   // 最近销售记录（按月度）
   const recentSales = useMemo(() => {
@@ -307,7 +302,7 @@ export default function Dashboard() {
 
   const statCards = [
     {
-      title: "总营�?,
+      title: "总营收",
       value: formatCurrency(stats.totalRevenue),
       icon: TrendingUp,
       change: "+12.5%",
@@ -316,7 +311,7 @@ export default function Dashboard() {
       bg: "bg-blue-50",
     },
     {
-      title: "总成�?,
+      title: "总成本",
       value: formatCurrency(stats.totalCost),
       icon: Wallet,
       change: "+5.2%",
@@ -334,7 +329,7 @@ export default function Dashboard() {
       bg: "bg-emerald-50",
     },
     {
-      title: "利润�?,
+      title: "利润率",
       value: formatPercent(stats.profitMargin),
       icon: ArrowUpRight,
       change: "+3.1%",
@@ -345,9 +340,9 @@ export default function Dashboard() {
   ];
 
   const miniStats = [
-    { label: "销售单�?, value: stats.totalUnits, icon: Building2 },
+    { label: "销售单位", value: stats.totalUnits, icon: Building2 },
     { label: "在岗人员", value: `${stats.activePersonnel}/${stats.totalPersonnel}`, icon: Users },
-    { label: "销售笔�?, value: stats.totalSales, icon: ShoppingCart },
+    { label: "销售笔数", value: stats.totalSales, icon: ShoppingCart },
     { label: "产品数量", value: stats.productCount, icon: TrendingUp },
   ];
 
@@ -357,7 +352,7 @@ export default function Dashboard() {
     for (let i = 0; i < 12; i++) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      const label = `${d.getFullYear()}�?{d.getMonth() + 1}月`;
+      const label = `${d.getFullYear()}年${d.getMonth() + 1}月`;
       options.push({ value, label });
     }
     return options;
@@ -384,7 +379,7 @@ export default function Dashboard() {
         </Select>
 
         <Building2 className="ml-2 h-5 w-5 text-blue-600" />
-        <span className="text-sm font-medium">销售单�?/span>
+        <span className="text-sm font-medium">销售单位</span>
         <Popover open={unitFilterOpen} onOpenChange={setUnitFilterOpen}>
           <PopoverTrigger asChild>
             <Button
@@ -410,7 +405,7 @@ export default function Dashboard() {
                     handleSelectAllUnits();
                   }}
                 >
-                  全�?
+                  全选
                 </Button>
                 <Button
                   type="button"
@@ -423,7 +418,7 @@ export default function Dashboard() {
                     handleDeselectAllUnits();
                   }}
                 >
-                  全不�?
+                  全不选
                 </Button>
               </div>
             </div>
@@ -490,7 +485,7 @@ export default function Dashboard() {
                   <span className={card.isUp ? "text-emerald-600" : "text-red-500"}>
                     {card.change}
                   </span>
-                  <span className="text-muted-foreground">较上�?/span>
+                  <span className="text-muted-foreground">较上期</span>
                 </div>
               </CardContent>
             </Card>
@@ -524,7 +519,7 @@ export default function Dashboard() {
         {/* Revenue Trend */}
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle className="text-base">营收与成本趋�?/CardTitle>
+            <CardTitle className="text-base">营收与成本趋势</CardTitle>
             <CardDescription>按月统计营收、成本和利润变化</CardDescription>
           </CardHeader>
           <CardContent>
@@ -564,7 +559,7 @@ export default function Dashboard() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">成本分类占比</CardTitle>
-            <CardDescription>各成本类别分�?/CardDescription>
+            <CardDescription>各成本类别分布</CardDescription>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
@@ -595,7 +590,7 @@ export default function Dashboard() {
         {/* Unit Performance */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">各单位业绩对�?/CardTitle>
+            <CardTitle className="text-base">各单位业绩对比</CardTitle>
             <CardDescription>各销售单位营收、成本与利润</CardDescription>
           </CardHeader>
           <CardContent>
@@ -617,8 +612,8 @@ export default function Dashboard() {
         {/* Recent Sales */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">最近销售记�?/CardTitle>
-            <CardDescription>最�?6 笔销售交�?/CardDescription>
+            <CardTitle className="text-base">最近销售记录</CardTitle>
+            <CardDescription>最新 6 笔销售交易</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
