@@ -294,12 +294,12 @@ export function calculateMonthlySalary(
   const personalSales = getPersonalSales(person.id, monthlyRecords, person.name);
   const teamSales = getTeamSales(person.salesUnitId, monthlyRecords);
 
-  // 优先使用产品级提成配置（按产品逐个计算），无配置则 fallback 到默认薪资结构
-  const hasPpc = productPersonCommissions && productPersonCommissions.length > 0;
-  const managementCommission = hasPpc
+  // 优先使用产品×单位×人员提成配置（按产品逐个计算），未传入则用人员默认薪资结构
+  const usePpc = productPersonCommissions !== undefined;
+  const managementCommission = usePpc
     ? calcManagementCommissionByProduct(person, monthlyRecords, products, productPersonCommissions)
     : calcManagementCommission(s, teamSales);
-  const personalCommission = hasPpc
+  const personalCommission = usePpc
     ? calcPersonalCommissionByProduct(person, monthlyRecords, products, productPersonCommissions)
     : calcPersonalCommission(s, personalSales);
   const productCommission = getPersonProductCommission(person.id, monthlyRecords, products);
@@ -379,6 +379,7 @@ export interface UnitSalaryCost {
  * 计算某个销售单位的在职人员薪酬总成本（含社保公积金）
  * @param yearMonth 可选，按月过滤销售记录
  * @param monthlyAdjustments 可选，月度调整列表
+ * @param productPersonCommissions 可选，产品×单位×人员提成（结算页配置）；传入后个人/管理提成按此计算
  */
 export function getUnitSalaryCost(
   unitId: string,
@@ -386,7 +387,8 @@ export function getUnitSalaryCost(
   salesRecords: SalesRecord[],
   products: Product[] = [],
   yearMonth?: string,
-  monthlyAdjustments: MonthlyAdjustment[] = []
+  monthlyAdjustments: MonthlyAdjustment[] = [],
+  productPersonCommissions?: ProductPersonCommission[]
 ): UnitSalaryCost {
   const activeMembers = personnel.filter(
     (p) => p.salesUnitId === unitId && p.status === "active"
@@ -396,7 +398,14 @@ export function getUnitSalaryCost(
     const adj = monthlyAdjustments.find(
       (a) => a.personnelId === p.id && a.yearMonth === yearMonth
     );
-    const calc = calculateMonthlySalary(p, salesRecords, products, yearMonth, adj);
+    const calc = calculateMonthlySalary(
+      p,
+      salesRecords,
+      products,
+      yearMonth,
+      adj,
+      productPersonCommissions
+    );
     const socialInsurance = p.socialInsurance || 0;
     const housingFund = p.housingFund || 0;
     const total = calc.total + socialInsurance + housingFund;
@@ -447,6 +456,7 @@ export function getUnitSalaryCost(
  * 计算多个销售单位的薪酬总成本（含社保公积金）
  * @param yearMonth 可选，按月过滤销售记录
  * @param monthlyAdjustments 可选，月度调整列表
+ * @param productPersonCommissions 可选，产品×单位×人员提成配置
  */
 export function getTotalSalaryCost(
   unitIds: string[],
@@ -454,7 +464,8 @@ export function getTotalSalaryCost(
   salesRecords: SalesRecord[],
   products: Product[] = [],
   yearMonth?: string,
-  monthlyAdjustments: MonthlyAdjustment[] = []
+  monthlyAdjustments: MonthlyAdjustment[] = [],
+  productPersonCommissions?: ProductPersonCommission[]
 ): {
   units: UnitSalaryCost[];
   grandTotal: number;
@@ -466,7 +477,15 @@ export function getTotalSalaryCost(
   grandOtherAdjustment: number;
 } {
   const units = unitIds.map((id) =>
-    getUnitSalaryCost(id, personnel, salesRecords, products, yearMonth, monthlyAdjustments)
+    getUnitSalaryCost(
+      id,
+      personnel,
+      salesRecords,
+      products,
+      yearMonth,
+      monthlyAdjustments,
+      productPersonCommissions
+    )
   );
   const grandTotal = units.reduce((sum, u) => sum + u.totalCost, 0);
   const grandSalary = units.reduce((sum, u) => sum + u.totalSalary, 0);

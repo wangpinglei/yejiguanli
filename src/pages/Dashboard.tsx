@@ -56,7 +56,7 @@ import {
 const COLORS = ["#3b82f6", "#60a5fa", "#93c5fd", "#1e40af", "#2563eb", "#1d4ed8"];
 
 export default function Dashboard() {
-  const { products, monthlyAdjustments } = useData();
+  const { products, monthlyAdjustments, productPersonCommissions } = useData();
   const {
     visibleSalesUnits: salesUnits,
     visiblePersonnel: personnel,
@@ -140,7 +140,8 @@ export default function Dashboard() {
       filteredSalesRecords,
       products,
       selectedMonth,
-      monthlyAdjustments
+      monthlyAdjustments,
+      productPersonCommissions
     );
     const salaryCost = salaryData.grandTotal;
     const productCommission = salaryData.grandProductCommission;
@@ -168,7 +169,7 @@ export default function Dashboard() {
     };
   }, [
     monthlySales, monthlyCosts, filterUnitIds, filteredUnits, filteredPersonnel,
-    filteredSalesRecords, products, selectedMonth, monthlyAdjustments,
+    filteredSalesRecords, products, selectedMonth, monthlyAdjustments, productPersonCommissions,
   ]);
 
   // 月度趋势
@@ -198,7 +199,8 @@ export default function Dashboard() {
           filteredSalesRecords,
           products,
           month,
-          monthlyAdjustments
+          monthlyAdjustments,
+          productPersonCommissions
         ).grandTotal;
         return {
           month: month.split("-")[1] + "月",
@@ -209,7 +211,7 @@ export default function Dashboard() {
       });
   }, [
     filteredSalesRecords, filteredCostRecords, filterUnitIds,
-    filteredPersonnel, products, monthlyAdjustments,
+    filteredPersonnel, products, monthlyAdjustments, productPersonCommissions,
   ]);
 
   // 各单位销售（按月度）
@@ -227,7 +229,8 @@ export default function Dashboard() {
         filteredSalesRecords,
         products,
         selectedMonth,
-        monthlyAdjustments
+        monthlyAdjustments,
+        productPersonCommissions
       ).grandTotal;
       const cost = manualCost + salaryCost;
       return {
@@ -239,7 +242,7 @@ export default function Dashboard() {
     });
   }, [
     filteredUnits, monthlySales, monthlyCosts, filteredPersonnel,
-    filteredSalesRecords, products, selectedMonth, monthlyAdjustments,
+    filteredSalesRecords, products, selectedMonth, monthlyAdjustments, productPersonCommissions,
   ]);
 
   // 成本分类（按月度）
@@ -256,7 +259,8 @@ export default function Dashboard() {
       filteredSalesRecords,
       products,
       selectedMonth,
-      monthlyAdjustments
+      monthlyAdjustments,
+      productPersonCommissions
     );
     if (salaryData.grandTotal > 0) {
       catMap.set("人力成本（薪酬+社保+公积金）", salaryData.grandTotal);
@@ -269,7 +273,7 @@ export default function Dashboard() {
       .sort((a, b) => b.value - a.value);
   }, [
     monthlyCosts, filterUnitIds, filteredPersonnel, filteredSalesRecords,
-    products, selectedMonth, monthlyAdjustments,
+    products, selectedMonth, monthlyAdjustments, productPersonCommissions,
   ]);
 
   // 最近销售记录（按月度）

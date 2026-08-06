@@ -37,7 +37,7 @@ const costCategories = ["人力成本", "办公租金", "营销推广", "差旅�
 const incomeCategories = ["服务费收入", "咨询费收入", "技术支持费", "培训费收入", "退款收入", "其他收入"];
 
 export default function CostManagement() {
-  const { addCostRecord, updateCostRecord, deleteCostRecord, costChangeLogs, products, monthlyAdjustments, upsertMonthlyAdjustment, addIncomeRecord, updateIncomeRecord, deleteIncomeRecord } = useData();
+  const { addCostRecord, updateCostRecord, deleteCostRecord, costChangeLogs, products, monthlyAdjustments, upsertMonthlyAdjustment, addIncomeRecord, updateIncomeRecord, deleteIncomeRecord, productPersonCommissions } = useData();
   const { user } = useAuth();
   const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleCostRecords: costRecords, visibleIncomeRecords: incomeRecords, visibleSalesRecords: salesRecords, canEditCost, isReadOnly, role } = usePermissions();
   const [search, setSearch] = useState("");
@@ -91,8 +91,16 @@ export default function CostManagement() {
     const unitIds = filterUnit === "all"
       ? salesUnits.map((u) => u.id)
       : [filterUnit];
-    return getTotalSalaryCost(unitIds, personnel, salesRecords, products, selectedMonth, monthlyAdjustments);
-  }, [salesUnits, personnel, salesRecords, filterUnit, products, selectedMonth, monthlyAdjustments]);
+    return getTotalSalaryCost(
+      unitIds,
+      personnel,
+      salesRecords,
+      products,
+      selectedMonth,
+      monthlyAdjustments,
+      productPersonCommissions
+    );
+  }, [salesUnits, personnel, salesRecords, filterUnit, products, selectedMonth, monthlyAdjustments, productPersonCommissions]);
 
   // 按月过滤手动成本记录
   const filteredRecords = useMemo(() => {

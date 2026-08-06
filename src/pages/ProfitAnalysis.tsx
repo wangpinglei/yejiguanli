@@ -35,7 +35,7 @@ import {
 const COLORS = ["#3b82f6", "#f97316", "#10b981", "#8b5cf6", "#ef4444", "#06b6d4", "#eab308"];
 
 export default function ProfitAnalysis() {
-  const { products, monthlyAdjustments, upsertRevenueSettlement } = useData();
+  const { products, monthlyAdjustments, upsertRevenueSettlement, productPersonCommissions } = useData();
   const { user } = useAuth();
   const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleSalesRecords: salesRecords, visibleCostRecords: costRecords, visibleIncomeRecords: incomeRecords, visibleRevenueSettlements: revenueSettlements, visibleUnitProductSettlements, canEditCost, isReadOnly } = usePermissions();
   const [filterUnit, setFilterUnit] = useState("all");
@@ -94,7 +94,8 @@ export default function ProfitAnalysis() {
       salesRecords,
       products,
       selectedMonth,
-      monthlyAdjustments
+      monthlyAdjustments,
+      productPersonCommissions
     );
     const salaryCost = salaryData.grandTotal;
     const totalCost = manualCost + salaryCost;
@@ -102,7 +103,7 @@ export default function ProfitAnalysis() {
     const totalProfit = totalSettlementIncome - totalCost;
     const profitMargin = totalSettlementIncome > 0 ? (totalProfit / totalSettlementIncome) * 100 : 0;
     return { totalSalesAmount, totalSettlementIncome, totalCommission, productProfit, totalCost, manualCost, salaryCost, totalProfit, profitMargin };
-  }, [filteredSales, filteredCosts, filterUnit, salesUnits, personnel, salesRecords, products, selectedMonth, monthlyAdjustments, visibleUnitProductSettlements]);
+  }, [filteredSales, filteredCosts, filterUnit, salesUnits, personnel, salesRecords, products, selectedMonth, monthlyAdjustments, visibleUnitProductSettlements, productPersonCommissions]);
 
   // 月度趋势
   const monthlyData = useMemo(() => {
@@ -142,7 +143,8 @@ export default function ProfitAnalysis() {
           salesRecords,
           products,
           month,
-          monthlyAdjustments
+          monthlyAdjustments,
+          productPersonCommissions
         ).grandTotal;
         return {
           month: month.split("-")[1] + "月",
@@ -152,7 +154,7 @@ export default function ProfitAnalysis() {
           margin: data.settlementIncome > 0 ? ((data.settlementIncome - data.cost - monthSalary) / data.settlementIncome) * 100 : 0,
         };
       });
-  }, [filterUnit, salesUnits, personnel, salesRecords, products, costRecords, monthlyAdjustments, visibleUnitProductSettlements]);
+  }, [filterUnit, salesUnits, personnel, salesRecords, products, costRecords, monthlyAdjustments, visibleUnitProductSettlements, productPersonCommissions]);
 
   // 各单位对比（按月度）
   const unitComparison = useMemo(() => {
@@ -163,13 +165,21 @@ export default function ProfitAnalysis() {
       const commission = calcCommission(unitSales); // 销售提成
       const productProfit = settlementIncome - commission; // 产品利润
       const manualCost = monthlyCosts.filter((c) => c.salesUnitId === unit.id).reduce((sum, c) => sum + c.totalCost, 0);
-      const salaryCost = getTotalSalaryCost([unit.id], personnel, salesRecords, products, selectedMonth, monthlyAdjustments).grandTotal;
+      const salaryCost = getTotalSalaryCost(
+        [unit.id],
+        personnel,
+        salesRecords,
+        products,
+        selectedMonth,
+        monthlyAdjustments,
+        productPersonCommissions
+      ).grandTotal;
       const cost = manualCost + salaryCost;
       const profit = settlementIncome - cost; // 净利润 = 结算收入 - 总成本
       const margin = settlementIncome > 0 ? (profit / settlementIncome) * 100 : 0;
       return { name: unit.name, salesAmount, settlementIncome, commission, productProfit, cost, profit, margin };
     }).sort((a, b) => b.profit - a.profit);
-  }, [salesUnits, monthlySales, monthlyCosts, personnel, salesRecords, products, selectedMonth, monthlyAdjustments, visibleUnitProductSettlements]);
+  }, [salesUnits, monthlySales, monthlyCosts, personnel, salesRecords, products, selectedMonth, monthlyAdjustments, visibleUnitProductSettlements, productPersonCommissions]);
 
   // 成本结构（按月度）
   const costStructure = useMemo(() => {
@@ -186,7 +196,8 @@ export default function ProfitAnalysis() {
       salesRecords,
       products,
       selectedMonth,
-      monthlyAdjustments
+      monthlyAdjustments,
+      productPersonCommissions
     );
     if (salaryData.grandTotal > 0) {
       catMap.set("人力成本（薪酬+社保+公积金）", salaryData.grandTotal);
@@ -198,7 +209,7 @@ export default function ProfitAnalysis() {
     return Array.from(catMap.entries())
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value);
-  }, [filteredCosts, filterUnit, salesUnits, personnel, salesRecords, products, selectedMonth, monthlyAdjustments]);
+  }, [filteredCosts, filterUnit, salesUnits, personnel, salesRecords, products, selectedMonth, monthlyAdjustments, productPersonCommissions]);
 
   // 人员业绩排行
   const personnelRanking = useMemo(() => {
