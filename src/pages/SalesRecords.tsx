@@ -303,11 +303,31 @@ function parseAmount(s: string): number {
   return isNaN(n) ? 0 : n;
 }
 
+/** Prefer match salesperson within the same unit */
+function findMatchedPerson(
+  personnel: { id: string; name: string; salesUnitId?: string }[],
+  personName: string,
+  unitId?: string,
+): { id: string; name: string; salesUnitId?: string } | undefined {
+  const name = (personName || "").trim();
+  if (!name) return undefined;
+  const pool = unitId
+    ? personnel.filter((p) => p.salesUnitId === unitId)
+    : personnel;
+  const exact = pool.find((p) => (p.name || "").trim() === name);
+  if (exact) return exact;
+  const fuzzy = pool.find((p) => {
+    const pn = (p.name || "").trim();
+    return pn.includes(name) || name.includes(pn);
+  });
+  if (fuzzy) return fuzzy;
+  return undefined;
+}
 /** 将二维表（含表头）解析为导入行 */
 function parseImportMatrix(
   matrix: string[][],
   salesUnits: { id: string; name: string }[],
-  personnel: { id: string; name: string }[],
+  personnel: { id: string; name: string; salesUnitId?: string }[],
   products: { id: string; name: string }[]
 ): ImportRow[] {
   const rows = matrix
@@ -381,7 +401,7 @@ function parseImportMatrix(
       ? salesUnits.find((u) => u.name === unitName || u.name.includes(unitName) || unitName.includes(u.name))
       : undefined;
     const matchedPerson = personName
-      ? personnel.find((p) => p.name === personName || p.name.includes(personName) || personName.includes(p.name))
+      ? findMatchedPerson(personnel, personName, matchedUnit?.id)
       : undefined;
     const matchedProduct = productName
       ? products.find((p) => p.name === productName || p.name.includes(productName) || productName.includes(p.name))
@@ -428,7 +448,7 @@ function textToMatrix(text: string): string[][] {
 
 export default function SalesRecords() {
   const {
-    products, ensureProductByName, addSalesRecord, updateSalesRecord, deleteSalesRecord,
+    products, ensureProductByName, ensurePersonnelByName, addSalesRecord, updateSalesRecord, deleteSalesRecord,
     refreshSyncedOrders, syncedLoading, productPersonCommissions: ppcList,
   } = useData();
   const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleSalesRecords: salesRecords, canEditSales, isReadOnly } = usePermissions();
@@ -793,6 +813,7 @@ export default function SalesRecords() {
     let successCount = 0;
     let failCount = 0;
     let createdProductCount = 0;
+    let createdPersonCount = 0;
     let overwriteCount = 0;
     let skippedInFileDup = 0;
 
@@ -800,6 +821,13 @@ export default function SalesRecords() {
     products.forEach((p) => {
       const key = (p.name || "").trim().toLowerCase();
       if (key) nameToProductId.set(key, p.id);
+    });
+
+    const unitPersonKeyToId = new Map<string, string>();
+    personnel.forEach((p) => {
+      const n = (p.name || "").trim().toLowerCase();
+      if (!n || !p.salesUnitId) return;
+      unitPersonKeyToId.set(`${p.salesUnitId}::${n}`, p.id);
     });
 
     const importedKeys = new Set<string>();
@@ -848,9 +876,37 @@ export default function SalesRecords() {
           }
         }
 
+        let personnelId = row.matchedPersonId || "";
+        const personName = (row.salesPersonName || "").trim();
+        const unitId = row.matchedUnitId || "";
+        if (personName && unitId) {
+          const personKey = `${unitId}::${personName.toLowerCase()}`;
+          if (unitPersonKeyToId.has(personKey)) {
+            personnelId = unitPersonKeyToId.get(personKey)!;
+          } else {
+            if (personnelId) {
+              const existed = personnel.find((p) => p.id === personnelId);
+              if (!existed || existed.salesUnitId !== unitId) personnelId = "";
+            }
+            if (!personnelId) {
+              const ensured = await ensurePersonnelByName(personName, unitId);
+              if (ensured) {
+                const alreadyKnown = [...unitPersonKeyToId.values()].includes(ensured.id);
+                personnelId = ensured.id;
+                unitPersonKeyToId.set(personKey, ensured.id);
+                unitPersonKeyToId.set(
+                  `${unitId}::${(ensured.name || "").trim().toLowerCase()}`,
+                  ensured.id,
+                );
+                if (!alreadyKnown) createdPersonCount++;
+              }
+            }
+          }
+        }
+
         const payload = {
           salesUnitId: row.matchedUnitId,
-          personnelId: row.matchedPersonId,
+          personnelId,
           productId: productId || "",
           quantity: 1,
           unitPrice: row.totalAmount,
@@ -884,9 +940,16 @@ export default function SalesRecords() {
     setImportText("");
     setImportRows([]);
     setImportStep("input");
-    const productTip = createdProductCount > 0
-      ? `\n已自动新建 ${createdProductCount} 个产品，请到「产品结算设置」配置结算规则，到「成本管理」配置销售提成。`
-      : "\n可在「产品结算设置」配置单位结算规则，在「成本管理」配置销售提成。";
+    const autoTips: string[] = [];
+    if (createdProductCount > 0) {
+      autoTips.push(`自动新建 ${createdProductCount} 个产品`);
+    }
+    if (createdPersonCount > 0) {
+      autoTips.push(`自动新建 ${createdPersonCount} 名销售人员`);
+    }
+    const productTip = autoTips.length > 0
+      ? `\n已${autoTips.join("，")}。请到「人员管理」完善岗位/薪资，到「产品结算设置」配置结算，到「成本管理」配置销售提成。`
+      : "\n可在「产品结算设置」配置单位结算规则，在「成本管理」配置人员销售提成。";
     const extraTips = [
       overwriteCount > 0 ? `覆盖 ${overwriteCount} 条` : "",
       skippedInFileDup > 0 ? `表内重复跳过 ${skippedInFileDup} 条` : "",
@@ -1346,7 +1409,7 @@ export default function SalesRecords() {
                 <p className="text-xs text-emerald-700 mt-2">
                   产品类别仅用于导入识别，列表中不展示。
                   系统会自动按名称匹配已有的销售单位、人员和产品。
-                  <strong className="text-foreground">未匹配到的产品名将在导入时自动建档</strong>，
+                  <strong className="text-foreground">未匹配到的产品会自动建档；单位已匹配且填写了销售人员时，会自动创建销售人员并归属该单位</strong>，
                   随后可在「产品结算设置」配置结算规则，在「成本管理」配置销售提成。
                 </p>
                 <Button variant="link" size="sm" onClick={handleDownloadTemplate} className="p-0 h-auto text-emerald-700">
@@ -1492,12 +1555,24 @@ export default function SalesRecords() {
                             )}
                           </TableCell>
                           <TableCell className="text-sm">
-                            {row.salesPersonName}
-                            {row.personMatched ? (
-                              <CheckCircle2 className="inline ml-1 h-3.5 w-3.5 text-green-500" />
-                            ) : (
-                              <AlertCircle className="inline ml-1 h-3.5 w-3.5 text-red-400" />
-                            )}
+                            <div className="flex flex-col gap-0.5">
+                              <span>
+                                {row.salesPersonName || "-"}
+                                {row.personMatched ? (
+                                  <CheckCircle2 className="inline ml-1 h-3.5 w-3.5 text-green-500" />
+                                ) : row.salesPersonName && row.unitMatched ? (
+                                  <CheckCircle2 className="inline ml-1 h-3.5 w-3.5 text-amber-500" />
+                                ) : row.salesPersonName ? (
+                                  <AlertCircle className="inline ml-1 h-3.5 w-3.5 text-red-400" />
+                                ) : null}
+                              </span>
+                              {!row.personMatched && row.salesPersonName && row.unitMatched && (
+                                <span className="text-[10px] text-amber-600">导入时自动创建</span>
+                              )}
+                              {!row.personMatched && row.salesPersonName && !row.unitMatched && (
+                                <span className="text-[10px] text-red-500">需先匹配销售单位</span>
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell className="text-sm">{row.saleDate}</TableCell>
                           <TableCell className="text-sm text-muted-foreground">{row.activityName || "-"}</TableCell>
@@ -1540,7 +1615,7 @@ export default function SalesRecords() {
                   <p className="font-medium">部分数据未完全匹配，说明：</p>
                   <ul className="list-disc list-inside mt-1 space-y-0.5">
                     <li>带「将自动创建」的产品会在导入时自动建档</li>
-                    <li>销售单位/人员建议名称与系统一致，否则提成归属可能不完整</li>
+                    <li>销售单位建议与系统名称一致；销售人员在单位匹配成功后会自动匹配或创建</li>
                     <li>导入后请到「产品结算设置」配置各单位结算规则，到「成本管理」配置人员销售提成</li>
                   </ul>
                 </div>

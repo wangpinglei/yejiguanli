@@ -44,6 +44,7 @@ import {
   positionGroupLabelsApi,
   teamMgmtCommissionRulesApi,
 } from "@/lib/api";
+import { EMPTY_SALARY } from "@/lib/salary";
 
 /** 旧版 localStorage key，仅用于「导入到服务器」 */
 export const LEGACY_STORAGE_KEYS = {
@@ -99,9 +100,14 @@ interface DataContextType {
   updateSalesUnit: (id: string, unit: Partial<SalesUnit>) => Promise<void>;
   deleteSalesUnit: (id: string) => Promise<void>;
 
-  addPersonnel: (p: Omit<Personnel, "id">) => Promise<void>;
+  addPersonnel: (p: Omit<Personnel, "id">) => Promise<Personnel>;
   updatePersonnel: (id: string, p: Partial<Personnel>) => Promise<void>;
   deletePersonnel: (id: string) => Promise<void>;
+  ensurePersonnelByName: (
+    name: string,
+    salesUnitId: string,
+    extras?: Partial<Omit<Personnel, "id" | "name" | "salesUnitId">>
+  ) => Promise<Personnel | null>;
 
   addProduct: (p: Omit<Product, "id">) => Promise<Product>;
   updateProduct: (id: string, p: Partial<Product>) => Promise<void>;
@@ -334,6 +340,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const addPersonnel = useCallback(async (p: Omit<Personnel, "id">) => {
     const created = await personnelApi.create(p);
     setPersonnel((prev) => [...prev, created]);
+    return created;
   }, []);
   const updatePersonnel = useCallback(async (id: string, p: Partial<Personnel>) => {
     const updated = await personnelApi.update(id, p);
@@ -343,6 +350,51 @@ export function DataProvider({ children }: { children: ReactNode }) {
     await personnelApi.delete(id);
     setPersonnel((prev) => prev.filter((x) => x.id !== id));
   }, []);
+  /** 按姓名+单位确保人员存在；不存在则自动创建（用于销售导入） */
+  const ensurePersonnelByName = useCallback(
+    async (
+      name: string,
+      salesUnitId: string,
+      extras?: Partial<Omit<Personnel, "id" | "name" | "salesUnitId">>,
+    ) => {
+      const trimmed = (name || "").trim();
+      const unitId = (salesUnitId || "").trim();
+      if (!trimmed || !unitId) return null;
+
+      const existing = personnel.find(
+        (p) =>
+          p.salesUnitId === unitId
+          && (p.name || "").trim().toLowerCase() === trimmed.toLowerCase(),
+      );
+      if (existing) return existing;
+
+      const created = await personnelApi.create({
+        name: trimmed,
+        salesUnitId: unitId,
+        position: extras?.position ?? "销售",
+        phone: extras?.phone ?? "",
+        email: extras?.email ?? "",
+        salary: extras?.salary ?? { ...EMPTY_SALARY },
+        socialInsurance: extras?.socialInsurance ?? 0,
+        housingFund: extras?.housingFund ?? 0,
+        hireDate: extras?.hireDate ?? "",
+        resignDate: extras?.resignDate,
+        status: extras?.status ?? "active",
+      });
+      setPersonnel((prev) => {
+        if (prev.some((p) => p.id === created.id)) return prev;
+        const dup = prev.find(
+          (p) =>
+            p.salesUnitId === unitId
+            && (p.name || "").trim().toLowerCase() === trimmed.toLowerCase(),
+        );
+        if (dup) return prev;
+        return [...prev, created];
+      });
+      return created;
+    },
+    [personnel],
+  );
 
   // -------- Product --------
   const addProduct = useCallback(async (p: Omit<Product, "id">) => {
@@ -643,7 +695,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     teamMgmtCommissionRules,
     costChangeLogs, notifications, monthlyAdjustments, loading,
     addSalesUnit, updateSalesUnit, deleteSalesUnit,
-    addPersonnel, updatePersonnel, deletePersonnel,
+    addPersonnel, updatePersonnel, deletePersonnel, ensurePersonnelByName,
     addProduct, updateProduct, deleteProduct, ensureProductByName,
     addSalesRecord, updateSalesRecord, deleteSalesRecord,
     addCostRecord, updateCostRecord, deleteCostRecord,
