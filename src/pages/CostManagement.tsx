@@ -43,7 +43,6 @@ export default function CostManagement() {
   const [search, setSearch] = useState("");
   const [filterUnit, setFilterUnit] = useState("all");
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // "2026-08"
-  const [salesCommissionOpen, setSalesCommissionOpen] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<CostRecord | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -494,39 +493,6 @@ export default function CostManagement() {
             </div>
           </CardContent>
         </Card>
-        <Card
-          id="sales-commission-config"
-          className={`cursor-pointer transition-shadow hover:shadow-md ${salesCommissionOpen ? "ring-2 ring-violet-300" : ""}`}
-          onClick={() => setSalesCommissionOpen((v) => !v)}
-        >
-          <CardContent className="flex items-center gap-4 p-5">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-violet-50">
-              <Percent className="h-6 w-6 text-violet-600" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm text-muted-foreground">销售提成</p>
-              <p className="text-xl font-bold text-violet-600">{formatCurrency(productCommissionTotal)}</p>
-              <p className="text-[10px] text-muted-foreground">
-                {salesCommissionOpen ? "配置面板已展开 · 再点收起" : "按单位×人员配置 · 点击展开"}
-              </p>
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              variant={salesCommissionOpen ? "secondary" : "default"}
-              className="shrink-0"
-              onClick={(e) => {
-                e.stopPropagation();
-                setSalesCommissionOpen((v) => !v);
-              }}
-            >
-              {salesCommissionOpen ? "收起配置" : "配置提成"}
-            </Button>
-            {salesCommissionOpen
-              ? <ChevronDown className="h-5 w-5 shrink-0 text-violet-500" />
-              : <ChevronRight className="h-5 w-5 shrink-0 text-violet-500" />}
-          </CardContent>
-        </Card>
         <Card>
           <CardContent className="flex items-center gap-4 p-5">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-50">
@@ -563,31 +529,43 @@ export default function CostManagement() {
             </div>
           </CardContent>
         </Card>
-      </div>
-
-      {salesCommissionOpen && (
-        <Card className="mb-6 border-violet-200 bg-violet-50/30">
-          <CardContent className="p-5">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h3 className="text-base font-semibold text-violet-800">销售提成配置</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  按产品 × 销售单位 × 人员设置管理/个人提成，保存后自动计入本页人力成本与收支利润
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setSalesCommissionOpen(false)}
-              >
-                收起
-              </Button>
+        <Card>
+          <CardContent className="flex items-center gap-4 p-5">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-violet-50">
+              <Percent className="h-6 w-6 text-violet-600" />
             </div>
-            <MSalesCommissionPanel selectedMonth={selectedMonth} />
+            <div>
+              <p className="text-sm text-muted-foreground">销售提成合计</p>
+              <p className="text-xl font-bold text-violet-600">{formatCurrency(productCommissionTotal)}</p>
+              <p className="text-[10px] text-muted-foreground">见下方配置区</p>
+            </div>
           </CardContent>
         </Card>
-      )}
+      </div>
+
+      {/* 销售提成：整宽常驻配置，避免挤在汇总卡里看不见 */}
+      <section
+        id="sales-commission-config"
+        className="mb-6 rounded-xl border-2 border-violet-300 bg-violet-50/40 p-5"
+      >
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-100">
+              <Percent className="h-5 w-5 text-violet-600" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-base font-semibold text-violet-900">销售提成配置</h3>
+              <p className="text-xs text-muted-foreground">
+                按产品 × 单位 × 人员设置；本月合计{" "}
+                <span className="font-semibold text-violet-700">
+                  {formatCurrency(productCommissionTotal)}
+                </span>
+              </p>
+            </div>
+          </div>
+        </div>
+        <MSalesCommissionPanel selectedMonth={selectedMonth} />
+      </section>
 
       {/* ===================== 自动薪酬成本明细 ===================== */}
       <Card className="mb-6">
