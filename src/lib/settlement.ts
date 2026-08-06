@@ -57,12 +57,13 @@ export function calcSaleSettlementReward(
   sale: { quantity: number; saleDate?: string },
   ups?: UnitProductSettlement,
 ): number {
-  if (!ups || !(ups.rewardAmount > 0)) return 0
+  const rewardAmount = ups?.rewardAmount ?? 0
+  if (!ups || rewardAmount <= 0) return 0
   const saleDate = sale.saleDate || ''
   const from = ups.rewardFrom || ups.effectiveFrom
   const to = ups.rewardTo || ups.effectiveTo
   if (saleDate && !isSaleDateInRange(saleDate, from, to)) return 0
-  return (ups.rewardAmount || 0) * (sale.quantity || 0)
+  return rewardAmount * (sale.quantity || 0)
 }
 
 /** 单笔销售结算收入 = 基础结算 + 特殊奖励 */
