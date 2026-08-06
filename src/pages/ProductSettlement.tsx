@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -55,6 +56,10 @@ function toggleIdInSet(prev: Set<string>, id: string): Set<string> {
   if (next.has(id)) next.delete(id);
   else next.add(id);
   return next;
+}
+
+function toggleIdInList(list: string[], id: string): string[] {
+  return list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
 }
 
 export default function ProductSettlement() {
@@ -99,6 +104,8 @@ export default function ProductSettlement() {
   // ---- 批量人员提成 ----
   const [batchPpcTarget, setBatchPpcTarget] = useState<BatchPpcTarget | null>(null);
   const [batchPpcSaving, setBatchPpcSaving] = useState(false);
+  const [batchPpcSelectedProductIds, setBatchPpcSelectedProductIds] = useState<string[]>([]);
+  const [batchPpcSelectedUnitIds, setBatchPpcSelectedUnitIds] = useState<string[]>([]);
 
   // ---- 人员提成编辑弹窗状态 ----
   const [ppcEditKey, setPpcEditKey] = useState<{ productId: string; unitId: string; personnelId: string } | null>(null);
@@ -322,45 +329,65 @@ export default function ProductSettlement() {
     setPpcEditKey(null);
   };
 
-  function buildBatchPpcItems(productIds: string[], unitIdFilter?: string) {
+  function buildBatchPpcItems(productIds: string[], unitIds: string[]) {
+    const selectedUnits = units.filter((unit) => unitIds.includes(unit.id));
     return productIds.flatMap((productId) =>
-      units
-        .filter((unit) => !unitIdFilter || unit.id === unitIdFilter)
-        .flatMap((unit) =>
-          getPeopleForProductUnit(productId, unit.id).map((person) => ({
-            salesUnitId: unit.id,
-            productId,
-            personnelId: person.id,
-            managementCommissionRate: ppcForm.managementCommissionRate || 0,
-            managementCommissionThreshold: ppcForm.managementCommissionThreshold || 0,
-            managementCommissionCondition: ppcForm.managementCommissionCondition,
-            personalCommissionRate: ppcForm.personalCommissionRate || 0,
-            personalCommissionThreshold: ppcForm.personalCommissionThreshold || 0,
-            personalCommissionCondition: ppcForm.personalCommissionCondition,
-          }))
-        )
+      selectedUnits.flatMap((unit) =>
+        getPeopleForProductUnit(productId, unit.id).map((person) => ({
+          salesUnitId: unit.id,
+          productId,
+          personnelId: person.id,
+          managementCommissionRate: ppcForm.managementCommissionRate || 0,
+          managementCommissionThreshold: ppcForm.managementCommissionThreshold || 0,
+          managementCommissionCondition: ppcForm.managementCommissionCondition,
+          personalCommissionRate: ppcForm.personalCommissionRate || 0,
+          personalCommissionThreshold: ppcForm.personalCommissionThreshold || 0,
+          personalCommissionCondition: ppcForm.personalCommissionCondition,
+        }))
+      )
     );
   }
 
   const openBatchPpc = (target: BatchPpcTarget) => {
     setPpcForm({ ...EMPTY_PERSON_COMMISSION });
+    if (target.mode === "all") {
+      setBatchPpcSelectedProductIds(filteredProducts.map((p) => p.id));
+      setBatchPpcSelectedUnitIds(units.map((u) => u.id));
+    } else if (target.mode === "product") {
+      setBatchPpcSelectedProductIds([target.productId]);
+      setBatchPpcSelectedUnitIds(units.map((u) => u.id));
+    } else {
+      setBatchPpcSelectedProductIds([target.productId]);
+      setBatchPpcSelectedUnitIds([target.unitId]);
+    }
     setBatchPpcTarget(target);
   };
 
+  const batchPpcPreviewCount = useMemo(
+    () => buildBatchPpcItems(batchPpcSelectedProductIds, batchPpcSelectedUnitIds).length,
+    // ppcForm 变化不影响条数；人员/单位/勾选变化才需要重算
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [batchPpcSelectedProductIds, batchPpcSelectedUnitIds, units, personnel, filteredProducts]
+  );
+
   const handleBatchPpcSave = async () => {
     if (!batchPpcTarget) return;
-    const productIds =
-      batchPpcTarget.mode === "all"
-        ? filteredProducts.map((p) => p.id)
-        : [batchPpcTarget.productId];
-    const unitIdFilter = batchPpcTarget.mode === "unit" ? batchPpcTarget.unitId : undefined;
-    const items = buildBatchPpcItems(productIds, unitIdFilter);
+    if (batchPpcSelectedProductIds.length === 0) {
+      alert("请至少勾选一个产品");
+      return;
+    }
+    if (batchPpcSelectedUnitIds.length === 0) {
+      alert("请至少勾选一个销售单位");
+      return;
+    }
+    const items = buildBatchPpcItems(batchPpcSelectedProductIds, batchPpcSelectedUnitIds);
     if (items.length === 0) {
       alert("没有可配置的在职人员，请先在「人员管理」中录入");
       return;
     }
     if (!confirm(
-      `将把相同提成规则应用到共 ${items.length} 条「产品×单位×人员」配置（覆盖已有），是否继续？`
+      `将把相同提成规则应用到已勾选的 ${batchPpcSelectedProductIds.length} 个产品 × ` +
+      `${batchPpcSelectedUnitIds.length} 个单位，共 ${items.length} 条配置（覆盖已有），是否继续？`
     )) {
       return;
     }
@@ -1088,59 +1115,125 @@ export default function ProductSettlement() {
         open={!!batchPpcTarget}
         onOpenChange={(open) => !open && !batchPpcSaving && setBatchPpcTarget(null)}
       >
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>一键批量设置人员提成</DialogTitle>
           </DialogHeader>
           <div className="mb-2 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-sm space-y-1">
-            {batchPpcTarget?.mode === "all" && (
-              <>
-                <p>将应用到当前列表 <strong>{filteredProducts.length}</strong> 个产品</p>
-                <p>× 各单位全部在职人员（覆盖已有提成配置）</p>
-                <p className="text-xs text-muted-foreground">
-                  预计约 {buildBatchPpcItems(filteredProducts.map((p) => p.id)).length} 条
-                </p>
-              </>
-            )}
-            {batchPpcTarget?.mode === "product" && (
-              <>
-                <p>
-                  产品：
-                  <strong>
-                    {products.find((p) => p.id === batchPpcTarget.productId)?.name || "-"}
-                  </strong>
-                </p>
-                <p>
-                  × 全部单位在职人员共{" "}
-                  <strong>{buildBatchPpcItems([batchPpcTarget.productId]).length}</strong>
-                  {" "}人（覆盖已有）
-                </p>
-              </>
-            )}
-            {batchPpcTarget?.mode === "unit" && (
-              <>
-                <p>
-                  产品：
-                  <strong>
-                    {products.find((p) => p.id === batchPpcTarget.productId)?.name || "-"}
-                  </strong>
-                </p>
-                <p>
-                  单位：
-                  <strong>
-                    {units.find((u) => u.id === batchPpcTarget.unitId)?.name || "-"}
-                  </strong>
-                </p>
-                <p>
-                  × 该单位在职人员共{" "}
-                  <strong>
-                    {buildBatchPpcItems([batchPpcTarget.productId], batchPpcTarget.unitId).length}
-                  </strong>
-                  {" "}人（覆盖已有）
-                </p>
-              </>
-            )}
+            <p>
+              已勾选 <strong>{batchPpcSelectedProductIds.length}</strong> 个产品 ×{" "}
+              <strong>{batchPpcSelectedUnitIds.length}</strong> 个单位的在职人员
+              （覆盖已有提成配置）
+            </p>
+            <p className="text-xs text-muted-foreground">
+              预计约 {batchPpcPreviewCount} 条
+            </p>
           </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            {/* 产品多选 */}
+            <div className="rounded-lg border p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-sm font-medium">选择产品</Label>
+                <div className="flex gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() =>
+                      setBatchPpcSelectedProductIds(filteredProducts.map((p) => p.id))
+                    }
+                  >
+                    全选
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => setBatchPpcSelectedProductIds([])}
+                  >
+                    清空
+                  </Button>
+                </div>
+              </div>
+              <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
+                {filteredProducts.map((p) => {
+                  const checked = batchPpcSelectedProductIds.includes(p.id);
+                  return (
+                    <label
+                      key={p.id}
+                      className="flex items-start gap-2 rounded px-1 py-0.5 hover:bg-muted/50 cursor-pointer"
+                    >
+                      <Checkbox
+                        checked={checked}
+                        onCheckedChange={() =>
+                          setBatchPpcSelectedProductIds((prev) => toggleIdInList(prev, p.id))
+                        }
+                        className="mt-0.5"
+                      />
+                      <span className="text-sm leading-snug">{p.name}</span>
+                    </label>
+                  );
+                })}
+                {filteredProducts.length === 0 && (
+                  <p className="text-xs text-muted-foreground py-2">暂无产品</p>
+                )}
+              </div>
+            </div>
+
+            {/* 单位多选 */}
+            <div className="rounded-lg border p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-sm font-medium">选择销售单位</Label>
+                <div className="flex gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => setBatchPpcSelectedUnitIds(units.map((u) => u.id))}
+                  >
+                    全选
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => setBatchPpcSelectedUnitIds([])}
+                  >
+                    清空
+                  </Button>
+                </div>
+              </div>
+              <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
+                {units.map((u) => {
+                  const checked = batchPpcSelectedUnitIds.includes(u.id);
+                  return (
+                    <label
+                      key={u.id}
+                      className="flex items-start gap-2 rounded px-1 py-0.5 hover:bg-muted/50 cursor-pointer"
+                    >
+                      <Checkbox
+                        checked={checked}
+                        onCheckedChange={() =>
+                          setBatchPpcSelectedUnitIds((prev) => toggleIdInList(prev, u.id))
+                        }
+                        className="mt-0.5"
+                      />
+                      <span className="text-sm leading-snug">{u.name}</span>
+                    </label>
+                  );
+                })}
+                {units.length === 0 && (
+                  <p className="text-xs text-muted-foreground py-2">暂无销售单位</p>
+                )}
+              </div>
+            </div>
+          </div>
+
           <div className="space-y-4 py-2">
             <div className="rounded-lg border-2 border-emerald-200 p-4 space-y-3">
               <div className="flex items-center gap-2">
@@ -1239,7 +1332,14 @@ export default function ProductSettlement() {
             >
               取消
             </Button>
-            <Button disabled={batchPpcSaving} onClick={handleBatchPpcSave}>
+            <Button
+              disabled={
+                batchPpcSaving ||
+                batchPpcSelectedProductIds.length === 0 ||
+                batchPpcSelectedUnitIds.length === 0
+              }
+              onClick={handleBatchPpcSave}
+            >
               {batchPpcSaving ? "保存中…" : "一键应用"}
             </Button>
           </DialogFooter>
