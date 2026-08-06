@@ -4,7 +4,7 @@ import { useData } from "@/context/DataContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency } from "@/lib/format";
-import { filterByMonth } from "@/lib/salary";
+import { filterByMonth, calcProductCommission } from "@/lib/salary";
 import type { Product, SalesUnit, UnitProductSettlement, ProductPersonCommission, Personnel } from "@/types";
 import {
   Building2, Package, Pencil, Trash2, Search, Calculator, Users, UserCog, Layers,
@@ -46,6 +46,22 @@ const EMPTY_PERSON_COMMISSION = {
   personalCommissionCondition: "",
 };
 
+const EMPTY_PRODUCT_COMMISSION = {
+  commissionType: "percentage" as "percentage" | "fixed",
+  commissionRate: 0,
+  commissionAmount: 0,
+  commissionNote: "",
+};
+
+function getProductCommissionLabel(product: Product): string {
+  if (product.commissionType === "fixed") {
+    return product.commissionAmount > 0
+      ? `${formatCurrency(product.commissionAmount)}/件`
+      : "未配置";
+  }
+  return product.commissionRate > 0 ? `${product.commissionRate}%` : "未配置";
+}
+
 type BatchPpcTarget =
   | { mode: "all" }
   | { mode: "product"; productId: string }
@@ -68,6 +84,7 @@ export default function ProductSettlement() {
     unitProductSettlements: upsList,
     productPersonCommissions: ppcList,
     personnel,
+    updateProduct,
     upsertUnitProductSettlement, deleteUnitProductSettlement,
     upsertProductPersonCommission, deleteProductPersonCommission,
     batchUpsertUnitProductSettlements,
@@ -106,6 +123,12 @@ export default function ProductSettlement() {
   const [batchPpcSaving, setBatchPpcSaving] = useState(false);
   const [batchPpcSelectedProductIds, setBatchPpcSelectedProductIds] = useState<string[]>([]);
   const [batchPpcSelectedUnitIds, setBatchPpcSelectedUnitIds] = useState<string[]>([]);
+
+  // ---- 产品销售提成（按比例 / 按件固定，供收支利润「销售提成」使用）----
+  const [productCommissionEditId, setProductCommissionEditId] = useState<string | null>(null);
+  const [productCommissionForm, setProductCommissionForm] = useState(EMPTY_PRODUCT_COMMISSION);
+  const [batchProductCommissionOpen, setBatchProductCommissionOpen] = useState(false);
+  const [productCommissionSaving, setProductCommissionSaving] = useState(false);
 
   // ---- 人员提成编辑弹窗状态 ----
   const [ppcEditKey, setPpcEditKey] = useState<{ productId: string; unitId: string; personnelId: string } | null>(null);
@@ -179,6 +202,78 @@ export default function ProductSettlement() {
     });
     return total;
   }, [filteredProducts, units, monthlySales, upsList, salesRecords]);
+
+  // 全产品本月销售提成合计（产品级比例/固定金额）
+  const totalMonthCommission = useMemo(() => {
+    return monthlySales.reduce((sum, s) => {
+      if (!filteredProducts.some((p) => p.id === s.productId)) return sum;
+      const product = products.find((p) => p.id === s.productId);
+      return sum + calcProductCommission(product, s.quantity, s.totalAmount);
+    }, 0);
+  }, [monthlySales, filteredProducts, products]);
+
+  // ---- 产品销售提成编辑 ----
+  const openProductCommissionEdit = (productId: string) => {
+    const product = products.find((p) => p.id === productId);
+    setProductCommissionForm({
+      commissionType: product?.commissionType || "percentage",
+      commissionRate: product?.commissionRate || 0,
+      commissionAmount: product?.commissionAmount || 0,
+      commissionNote: product?.commissionNote || "",
+    });
+    setProductCommissionEditId(productId);
+  };
+
+  const handleProductCommissionSave = async () => {
+    if (!productCommissionEditId) return;
+    setProductCommissionSaving(true);
+    try {
+      await updateProduct(productCommissionEditId, {
+        commissionType: productCommissionForm.commissionType,
+        commissionRate: productCommissionForm.commissionRate || 0,
+        commissionAmount: productCommissionForm.commissionAmount || 0,
+        commissionNote: productCommissionForm.commissionNote,
+      });
+      setProductCommissionEditId(null);
+    } catch (error: any) {
+      alert("保存失败: " + (error.message || "未知错误"));
+    } finally {
+      setProductCommissionSaving(false);
+    }
+  };
+
+  const openBatchProductCommission = () => {
+    setProductCommissionForm({ ...EMPTY_PRODUCT_COMMISSION });
+    setBatchProductCommissionOpen(true);
+  };
+
+  const handleBatchProductCommissionSave = async () => {
+    if (filteredProducts.length === 0) {
+      alert("当前没有可配置的产品");
+      return;
+    }
+    if (!confirm(
+      `将把相同销售提成规则应用到当前列表 ${filteredProducts.length} 个产品（覆盖已有），是否继续？`
+    )) {
+      return;
+    }
+    setProductCommissionSaving(true);
+    try {
+      for (const p of filteredProducts) {
+        await updateProduct(p.id, {
+          commissionType: productCommissionForm.commissionType,
+          commissionRate: productCommissionForm.commissionRate || 0,
+          commissionAmount: productCommissionForm.commissionAmount || 0,
+          commissionNote: productCommissionForm.commissionNote,
+        });
+      }
+      setBatchProductCommissionOpen(false);
+    } catch (error: any) {
+      alert("批量保存失败: " + (error.message || "未知错误"));
+    } finally {
+      setProductCommissionSaving(false);
+    }
+  };
 
   // 按产品分组的人员提成配置（用于展示）
   const productPersonGroups = useMemo(() =>
@@ -431,7 +526,7 @@ export default function ProductSettlement() {
     <div>
       <PageHeader
         title="结算与提成"
-        description="产品来自销售记录。结算比例与人员提成都支持按产品或全局一键批量设置；人员提成可提前按单位内在职人员配置。"
+        description="产品来自销售记录。可配置产品销售提成（比例/固定金额，用于收支利润）、单位结算比例，以及人员管理/个人提成。"
         action={
           <Select value={selectedMonth} onValueChange={setSelectedMonth}>
             <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
@@ -451,7 +546,7 @@ export default function ProductSettlement() {
       )}
 
       {/* 汇总卡片 */}
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <Card>
           <CardContent className="flex items-center gap-4 p-5">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-cyan-50">
@@ -460,6 +555,17 @@ export default function ProductSettlement() {
             <div>
               <p className="text-sm text-muted-foreground">{selectedMonth} 结算收入合计</p>
               <p className="text-xl font-bold text-cyan-600">{formatCurrency(totalMonthIncome)}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="flex items-center gap-4 p-5">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-violet-50">
+              <Calculator className="h-6 w-6 text-violet-600" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">{selectedMonth} 销售提成合计</p>
+              <p className="text-xl font-bold text-violet-600">{formatCurrency(totalMonthCommission)}</p>
             </div>
           </CardContent>
         </Card>
@@ -476,12 +582,12 @@ export default function ProductSettlement() {
         </Card>
         <Card>
           <CardContent className="flex items-center gap-4 p-5">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-violet-50">
-              <Building2 className="h-6 w-6 text-violet-600" />
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50">
+              <Building2 className="h-6 w-6 text-indigo-600" />
             </div>
             <div>
               <p className="text-sm text-muted-foreground">销售单位</p>
-              <p className="text-xl font-bold text-violet-600">{units.length}</p>
+              <p className="text-xl font-bold text-indigo-600">{units.length}</p>
             </div>
           </CardContent>
         </Card>
@@ -505,21 +611,37 @@ export default function ProductSettlement() {
           <Input placeholder="搜索产品名称或分类..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
         </div>
         <Badge variant="secondary">共 {filteredProducts.length} 个产品</Badge>
+        {canEdit && filteredProducts.length > 0 && (
+          <Button variant="outline" size="sm" onClick={openBatchProductCommission}>
+            <Layers className="mr-2 h-4 w-4" />
+            批量设置销售提成
+          </Button>
+        )}
         {canEdit && filteredProducts.length > 0 && units.length > 0 && (
           <Button variant="outline" size="sm" onClick={() => openBatchSettle("all")}>
             <Layers className="mr-2 h-4 w-4" />
-            批量设置全部产品×单位
+            批量设置全部产品×单位结算
           </Button>
         )}
       </div>
 
-      {/* ==================== 第一部分：产品 × 单位 结算配置 ==================== */}
+      {/* ==================== 第一部分：产品销售提成 + 产品 × 单位 结算配置 ==================== */}
       <div className="mb-8 space-y-4">
-        <p className="text-xs text-muted-foreground">产品默认折叠，点击产品行展开单位列表后再编辑。</p>
+        <div>
+          <h3 className="text-base font-semibold">产品销售提成与单位结算</h3>
+          <p className="text-xs text-muted-foreground mt-1">
+            销售提成按产品配置（比例或固定金额），影响收支利润中的「销售提成」；
+            结算按产品×单位配置。产品默认折叠，点击展开后再编辑单位结算。
+          </p>
+        </div>
         {filteredProducts.map((product: Product) => {
           const productUnits = getUnitsForProduct(product.id);
           const isExpanded = expandedSettleProductIds.has(product.id);
           const configuredCount = productUnits.filter((u) => findUps(product.id, u.id)).length;
+          const commissionLabel = getProductCommissionLabel(product);
+          const hasCommission = product.commissionType === "fixed"
+            ? product.commissionAmount > 0
+            : product.commissionRate > 0;
           return (
             <Card key={product.id}>
               <CardContent className="p-0">
@@ -541,11 +663,31 @@ export default function ProductSettlement() {
                         {product.category || "未分类"}
                         <span className="ml-2">
                           · {productUnits.length} 个单位
-                          · 已配置 {configuredCount}
+                          · 结算已配 {configuredCount}
+                        </span>
+                        <span className="ml-2">
+                          · 销售提成{" "}
+                          <span className={hasCommission ? "text-violet-600 font-medium" : ""}>
+                            {commissionLabel}
+                          </span>
                         </span>
                       </p>
                     </div>
                   </button>
+                  {canEdit && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openProductCommissionEdit(product.id);
+                      }}
+                    >
+                      <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                      销售提成
+                    </Button>
+                  )}
                   {canEdit && productUnits.length > 0 && (
                     <Button
                       variant="outline"
@@ -557,7 +699,7 @@ export default function ProductSettlement() {
                       }}
                     >
                       <Layers className="mr-1.5 h-3.5 w-3.5" />
-                      批量设置全部单位
+                      批量结算
                     </Button>
                   )}
                 </div>
@@ -883,12 +1025,191 @@ export default function ProductSettlement() {
           <span className="font-semibold text-emerald-700">提成计算公式</span>
         </div>
         <div className="grid grid-cols-1 gap-1 text-xs text-muted-foreground md:grid-cols-2">
+          <div><strong>产品销售提成（比例）</strong> = 销售额 × 提成比例%</div>
+          <div><strong>产品销售提成（固定）</strong> = 销售数量 × 每件提成金额</div>
           <div><strong>管理提成</strong> = max(0, 团队销售额 - 起算门槛) × 管理提成比例%</div>
           <div><strong>个人提成</strong> = max(0, 个人该产品销售额 - 起算门槛) × 个人提成比例%</div>
-          <div>未在此处配置提成的人员，将沿用「人员管理」中设置的默认提成参数（如有）</div>
-          <div>此处配置的优先级高于人员默认设置，可实现"同一人不同产品不同提成率"</div>
+          <div>收支利润页「销售提成」取产品销售提成；人员管理/个人提成计入薪资成本</div>
+          <div>未配置人员提成时，沿用「人员管理」中的默认提成参数（如有）</div>
         </div>
       </div>
+
+      {/* ===== 编辑产品销售提成弹窗 ===== */}
+      <Dialog
+        open={!!productCommissionEditId}
+        onOpenChange={(open) => !open && !productCommissionSaving && setProductCommissionEditId(null)}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>配置产品销售提成</DialogTitle>
+          </DialogHeader>
+          <div className="mb-2 rounded-lg bg-violet-50 border border-violet-200 px-3 py-2 text-sm space-y-1">
+            <p>
+              产品：
+              <strong>
+                {products.find((p) => p.id === productCommissionEditId)?.name || "-"}
+              </strong>
+            </p>
+            <p className="text-xs text-muted-foreground">
+              支持按销售额比例或按件固定金额；结果进入收支利润的「销售提成」
+            </p>
+          </div>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>提成方式</Label>
+              <Select
+                value={productCommissionForm.commissionType}
+                onValueChange={(v) => setProductCommissionForm({
+                  ...productCommissionForm,
+                  commissionType: v as "percentage" | "fixed",
+                })}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="percentage">按销售额百分比</SelectItem>
+                  <SelectItem value="fixed">按件固定金额</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {productCommissionForm.commissionType === "percentage" ? (
+              <div className="space-y-2">
+                <Label>提成比例 (%)</Label>
+                <Input
+                  type="number"
+                  step="0.1"
+                  value={productCommissionForm.commissionRate}
+                  onChange={(e) => setProductCommissionForm({
+                    ...productCommissionForm,
+                    commissionRate: Number(e.target.value),
+                  })}
+                  placeholder="如：3 表示销售额的 3%"
+                />
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label>每件提成金额 (¥)</Label>
+                <Input
+                  type="number"
+                  value={productCommissionForm.commissionAmount}
+                  onChange={(e) => setProductCommissionForm({
+                    ...productCommissionForm,
+                    commissionAmount: Number(e.target.value),
+                  })}
+                  placeholder="如：50"
+                />
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label>提成说明</Label>
+              <Input
+                value={productCommissionForm.commissionNote}
+                onChange={(e) => setProductCommissionForm({
+                  ...productCommissionForm,
+                  commissionNote: e.target.value,
+                })}
+                placeholder="如：标准销售提成政策"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={productCommissionSaving}
+              onClick={() => setProductCommissionEditId(null)}
+            >
+              取消
+            </Button>
+            <Button disabled={productCommissionSaving} onClick={handleProductCommissionSave}>
+              {productCommissionSaving ? "保存中…" : "保存"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ===== 批量产品销售提成弹窗 ===== */}
+      <Dialog
+        open={batchProductCommissionOpen}
+        onOpenChange={(open) => !open && !productCommissionSaving && setBatchProductCommissionOpen(false)}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>批量设置销售提成</DialogTitle>
+          </DialogHeader>
+          <div className="mb-2 rounded-lg bg-violet-50 border border-violet-200 px-3 py-2 text-sm space-y-1">
+            <p>将应用到当前列表 <strong>{filteredProducts.length}</strong> 个产品</p>
+            <p className="text-xs text-muted-foreground">覆盖各产品已有销售提成配置</p>
+          </div>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>提成方式</Label>
+              <Select
+                value={productCommissionForm.commissionType}
+                onValueChange={(v) => setProductCommissionForm({
+                  ...productCommissionForm,
+                  commissionType: v as "percentage" | "fixed",
+                })}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="percentage">按销售额百分比</SelectItem>
+                  <SelectItem value="fixed">按件固定金额</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {productCommissionForm.commissionType === "percentage" ? (
+              <div className="space-y-2">
+                <Label>提成比例 (%)</Label>
+                <Input
+                  type="number"
+                  step="0.1"
+                  value={productCommissionForm.commissionRate}
+                  onChange={(e) => setProductCommissionForm({
+                    ...productCommissionForm,
+                    commissionRate: Number(e.target.value),
+                  })}
+                  placeholder="如：3"
+                />
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label>每件提成金额 (¥)</Label>
+                <Input
+                  type="number"
+                  value={productCommissionForm.commissionAmount}
+                  onChange={(e) => setProductCommissionForm({
+                    ...productCommissionForm,
+                    commissionAmount: Number(e.target.value),
+                  })}
+                  placeholder="如：50"
+                />
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label>提成说明</Label>
+              <Input
+                value={productCommissionForm.commissionNote}
+                onChange={(e) => setProductCommissionForm({
+                  ...productCommissionForm,
+                  commissionNote: e.target.value,
+                })}
+                placeholder="如：统一销售提成"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={productCommissionSaving}
+              onClick={() => setBatchProductCommissionOpen(false)}
+            >
+              取消
+            </Button>
+            <Button disabled={productCommissionSaving} onClick={handleBatchProductCommissionSave}>
+              {productCommissionSaving ? "保存中…" : "一键应用"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ===== 编辑结算弹窗 ===== */}
       <Dialog open={!!editKey} onOpenChange={(open) => !open && setEditKey(null)}>
