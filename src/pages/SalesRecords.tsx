@@ -1,12 +1,12 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { useData } from "@/context/DataContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, formatDate } from "@/lib/format";
-import { calcProductCommission } from "@/lib/salary";
+import { calcSalePersonCommissionPreview } from "@/lib/commissionReward";
 import type { SalesRecord } from "@/types";
-import { Plus, Search, Pencil, Trash2, RefreshCw, CloudDownload, Upload, FileSpreadsheet, CheckCircle2, AlertCircle } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, RefreshCw, CloudDownload, Upload, FileSpreadsheet, CheckCircle2, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -427,7 +427,10 @@ function textToMatrix(text: string): string[][] {
 }
 
 export default function SalesRecords() {
-  const { products, ensureProductByName, addSalesRecord, updateSalesRecord, deleteSalesRecord, refreshSyncedOrders, syncedLoading } = useData();
+  const {
+    products, ensureProductByName, addSalesRecord, updateSalesRecord, deleteSalesRecord,
+    refreshSyncedOrders, syncedLoading, productPersonCommissions: ppcList,
+  } = useData();
   const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleSalesRecords: salesRecords, canEditSales, isReadOnly } = usePermissions();
   const [search, setSearch] = useState("");
   const [filterUnit, setFilterUnit] = useState("all");
@@ -435,6 +438,8 @@ export default function SalesRecords() {
   const [filterSync, setFilterSync] = useState("all"); // all | manual | synced
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<SalesRecord | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -487,12 +492,27 @@ export default function SalesRecords() {
       .sort((a, b) => (b.saleDate || "").localeCompare(a.saleDate || ""));
   }, [salesRecords, personnel, products, search, filterUnit, filterPerson, filterSync, dateFrom, dateTo]);
 
+  // 筛选条件变化时回到第 1 页
+  useEffect(() => {
+    setPage(1);
+  }, [search, filterUnit, filterPerson, filterSync, dateFrom, dateTo, pageSize]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRecords.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pagedRecords = useMemo(() => {
+    const start = (safePage - 1) * pageSize;
+    return filteredRecords.slice(start, start + pageSize);
+  }, [filteredRecords, safePage, pageSize]);
+
   // 统计
   const syncedCount = useMemo(() => salesRecords.filter((s) => s.synced).length, [salesRecords]);
   const manualCount = useMemo(() => salesRecords.filter((s) => !s.synced).length, [salesRecords]);
 
-  // 可批量删除的记录（同步记录只读，不可删）
-  const selectableRecords = useMemo(() => filteredRecords.filter((s) => !s.synced), [filteredRecords]);
+  // 可批量删除的记录（当前页 + 非同步）
+  const selectableRecords = useMemo(
+    () => pagedRecords.filter((s) => !s.synced),
+    [pagedRecords],
+  );
   const allSelected = selectableRecords.length > 0 && selectableRecords.every((s) => selectedIds.has(s.id));
   const someSelected = selectableRecords.some((s) => selectedIds.has(s.id));
 
@@ -630,10 +650,10 @@ export default function SalesRecords() {
   };
 
   const totalRevenue = filteredRecords.reduce((sum, s) => sum + s.totalAmount, 0);
-  const totalCommission = filteredRecords.reduce((sum, s) => {
-    const product = products.find((p) => p.id === s.productId);
-    return sum + calcProductCommission(product, s.quantity, s.totalAmount);
-  }, 0);
+  const totalCommission = filteredRecords.reduce(
+    (sum, s) => sum + calcSalePersonCommissionPreview(s, ppcList),
+    0,
+  );
 
   // ===================== 批量导入逻辑 =====================
 
@@ -1003,7 +1023,9 @@ export default function SalesRecords() {
         </div>
         <Badge variant="secondary">{filteredRecords.length} 笔</Badge>
         <Badge className="bg-blue-50 text-blue-700">合计 {formatCurrency(totalRevenue)}</Badge>
-        <Badge className="bg-violet-50 text-violet-700">提成合计 {formatCurrency(totalCommission)}</Badge>
+        <Badge className="bg-violet-50 text-violet-700" title="按成本管理「单位×人员」个人提成+特殊奖励预估（比例不含月门槛）">
+          提成预估 {formatCurrency(totalCommission)}
+        </Badge>
       </div>
 
       <Card>
@@ -1019,7 +1041,7 @@ export default function SalesRecords() {
                       ref={(el) => { if (el) el.indeterminate = someSelected && !allSelected; }}
                       onChange={(e) => toggleSelectAll(e.target.checked)}
                       className="h-4 w-4 cursor-pointer"
-                      aria-label="全选"
+                      aria-label="全选本页"
                     />
                   </TableHead>
                   <TableHead className="w-[9.5rem]">客户姓名</TableHead>
@@ -1031,13 +1053,13 @@ export default function SalesRecords() {
                   <TableHead>销售人员</TableHead>
                   <TableHead>成交日期</TableHead>
                   <TableHead>参加活动</TableHead>
-                  <TableHead className="text-right">销售提成</TableHead>
+                  <TableHead className="text-right">提成预估</TableHead>
                   <TableHead>来源</TableHead>
                   <TableHead className="text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredRecords.map((record) => (
+                {pagedRecords.map((record) => (
                   <TableRow key={record.id} className={record.synced ? "bg-blue-50/30" : ""}>
                     <TableCell className="text-center">
                       {record.synced ? (
@@ -1087,8 +1109,7 @@ export default function SalesRecords() {
                     </TableCell>
                     <TableCell className="text-right text-violet-600 font-medium whitespace-nowrap">
                       {(() => {
-                        const product = products.find((p) => p.id === record.productId);
-                        const commission = calcProductCommission(product, record.quantity, record.totalAmount);
+                        const commission = calcSalePersonCommissionPreview(record, ppcList);
                         return commission > 0 ? formatCurrency(commission) : "-";
                       })()}
                     </TableCell>
@@ -1125,6 +1146,56 @@ export default function SalesRecords() {
               </TableBody>
             </Table>
           </div>
+          {filteredRecords.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
+              <p className="text-xs text-muted-foreground">
+                第 {(safePage - 1) * pageSize + 1}
+                –
+                {Math.min(safePage * pageSize, filteredRecords.length)}
+                {" "}条 / 共 {filteredRecords.length} 条（按当前筛选）
+              </p>
+              <div className="flex items-center gap-2">
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(v) => setPageSize(Number(v))}
+                >
+                  <SelectTrigger className="h-8 w-[100px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="20">20 条/页</SelectItem>
+                    <SelectItem value="50">50 条/页</SelectItem>
+                    <SelectItem value="100">100 条/页</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  disabled={safePage <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  上一页
+                </Button>
+                <span className="text-sm tabular-nums min-w-[4.5rem] text-center">
+                  {safePage} / {totalPages}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  disabled={safePage >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  下一页
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -1167,11 +1238,6 @@ export default function SalesRecords() {
                   {products.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
                       {p.name} - {formatCurrency(p.unitPrice)}
-                      {p.commissionType === "fixed" && p.commissionAmount > 0
-                        ? `（提成 ${formatCurrency(p.commissionAmount)}/件）`
-                        : p.commissionType === "percentage" && p.commissionRate > 0
-                        ? `（提成 ${p.commissionRate}%）`
-                        : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1221,12 +1287,22 @@ export default function SalesRecords() {
                 <span className="text-lg font-bold text-primary">{formatCurrency(totalAmount)}</span>
               </div>
               {(() => {
-                const product = products.find((p) => p.id === form.productId);
-                const commission = calcProductCommission(product, form.quantity, totalAmount);
+                const commission = calcSalePersonCommissionPreview(
+                  {
+                    productId: form.productId,
+                    salesUnitId: form.salesUnitId,
+                    personnelId: form.personnelId,
+                    quantity: form.quantity,
+                    totalAmount,
+                    saleDate: form.saleDate,
+                  },
+                  ppcList,
+                );
                 return (
                   <div className="rounded-lg bg-violet-50 p-3 flex flex-col justify-center">
-                    <span className="text-sm text-violet-700">预估提成</span>
+                    <span className="text-sm text-violet-700">提成预估</span>
                     <span className="text-lg font-bold text-violet-700">{formatCurrency(commission)}</span>
+                    <span className="text-[10px] text-muted-foreground mt-0.5">按成本管理配置</span>
                   </div>
                 );
               })()}

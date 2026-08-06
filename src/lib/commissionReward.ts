@@ -1,6 +1,21 @@
 import { isSaleDateInRange, toDateOnly } from '@/lib/settlement'
 import type { ProductPersonCommission, SalesRecord, SalesUnit } from '@/types'
 
+/** 查找单位×产品×人员提成配置 */
+export function findProductPersonCommission(
+  list: ProductPersonCommission[],
+  productId: string,
+  unitId: string,
+  personnelId: string,
+): ProductPersonCommission | undefined {
+  return list.find(
+    (x) =>
+      x.productId === productId
+      && x.salesUnitId === unitId
+      && x.personnelId === personnelId,
+  )
+}
+
 /** 单笔销售命中的特殊提成奖励金额 */
 export function calcSaleCommissionReward(
   sale: { quantity?: number; saleDate?: string },
@@ -11,6 +26,40 @@ export function calcSaleCommissionReward(
     return 0
   }
   return (ppc.rewardAmount || 0) * (sale.quantity || 0)
+}
+
+/**
+ * 单笔销售的个人提成预估（行级展示用）
+ * - fixed: 数量 × 每件提成
+ * - percentage: 本单实收 × 比例%（门槛按月汇总，行级不含门槛扣减，仅作预览）
+ * - 另加特殊时段按件奖励
+ */
+export function calcSalePersonCommissionPreview(
+  sale: {
+    productId: string
+    salesUnitId: string
+    personnelId: string
+    quantity?: number
+    totalAmount?: number
+    saleDate?: string
+  },
+  ppcList: ProductPersonCommission[],
+): number {
+  const ppc = findProductPersonCommission(
+    ppcList,
+    sale.productId,
+    sale.salesUnitId,
+    sale.personnelId,
+  )
+  if (!ppc) return 0
+
+  let base = 0
+  if (ppc.personalCommissionType === 'fixed') {
+    base = (sale.quantity || 0) * (ppc.personalCommissionAmount || 0)
+  } else if ((ppc.personalCommissionRate || 0) > 0) {
+    base = (sale.totalAmount || 0) * (ppc.personalCommissionRate / 100)
+  }
+  return base + calcSaleCommissionReward(sale, ppc)
 }
 
 export function formatCommissionRewardPeriod(ppc?: ProductPersonCommission): string {
@@ -56,11 +105,11 @@ export function groupCommissionRewardHits(options: {
     if (unitId && sale.salesUnitId !== unitId) continue
     if (personnelId && sale.personnelId !== personnelId) continue
 
-    const ppc = ppcList.find(
-      (x) =>
-        x.productId === sale.productId
-        && x.salesUnitId === sale.salesUnitId
-        && x.personnelId === sale.personnelId,
+    const ppc = findProductPersonCommission(
+      ppcList,
+      sale.productId,
+      sale.salesUnitId,
+      sale.personnelId,
     )
     const reward = calcSaleCommissionReward(sale, ppc)
     if (reward <= 0) continue
