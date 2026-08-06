@@ -1116,20 +1116,21 @@ export default function SalesRecords() {
         </div>
         <Badge variant="secondary">{filteredRecords.length} 笔</Badge>
         {duplicateCountInFilters > 0 && (
-          <button
+          <Button
             type="button"
-            onClick={handleToggleDuplicateFilter}
+            variant={filterDuplicate === "duplicate" ? "default" : "outline"}
+            size="sm"
             className={
-              "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors " +
-              (filterDuplicate === "duplicate"
-                ? "border-orange-500 bg-orange-500 text-white"
-                : "border-transparent bg-orange-100 text-orange-700 hover:bg-orange-200")
+              filterDuplicate === "duplicate"
+                ? "h-8 rounded-full bg-orange-500 hover:bg-orange-600 text-white border-orange-500"
+                : "h-8 rounded-full border-orange-300 bg-orange-100 text-orange-800 hover:bg-orange-200 cursor-pointer"
             }
-            title={filterDuplicate === "duplicate" ? "点击取消重复筛选" : "点击查看并操作重复记录"}
+            onClick={handleToggleDuplicateFilter}
+            title={filterDuplicate === "duplicate" ? "点击取消重复筛选" : "点击筛选重复记录并批量操作"}
           >
             重复 {duplicateCountInFilters} 笔
-            {filterDuplicate === "duplicate" ? " · 已筛选" : " · 点击查看"}
-          </button>
+            {filterDuplicate === "duplicate" ? " · 已筛选" : " · 点击筛选"}
+          </Button>
         )}
         <Badge className="bg-blue-50 text-blue-700">合计 {formatCurrency(totalRevenue)}</Badge>
         <Badge className="bg-violet-50 text-violet-700" title="按成本管理「单位×人员」个人提成+特殊奖励预估（比例不含月门槛）">

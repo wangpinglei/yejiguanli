@@ -5,7 +5,7 @@
 # 注意：本脚本通过 pm2 restart yejiguanli 使用现有 ecosystem.config.cjs（PORT=8100），
 #       不会触碰 / 、/crm/ 、/gg-task-collaboration 以及 pm2 中其它进程。
 # ==============================================================================
-set -uo pipefail
+set -euo pipefail
 
 REPO_DIR="/root/yejiguanli"
 LOG_FILE="/var/log/yejiguanli-deploy.log"
@@ -40,7 +40,10 @@ fi
 echo "Node 版本: $(node -v)  npm 版本: $(npm -v)"
 
 # ---- 3. 安装依赖 + 构建（前端 app/dist + 后端 server/dist）----
-npm run build:all
+if ! npm run build:all; then
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] 构建失败，中止部署（不重启服务）"
+  exit 1
+fi
 
 # ---- 4. 确保 SQLite 数据目录存在（数据库在此持久化，已被 .gitignore 忽略）----
 mkdir -p server/data
