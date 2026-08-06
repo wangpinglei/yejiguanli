@@ -174,7 +174,7 @@ export default function Layout() {
                     )}
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-96 max-h-[500px] overflow-y-auto">
+                <DropdownMenuContent align="end" className="w-[28rem] max-h-[560px] overflow-y-auto">
                   <DropdownMenuLabel className="flex items-center justify-between">
                     <span className="flex items-center gap-2">
                       <Bell className="h-4 w-4" />
@@ -209,10 +209,12 @@ export default function Layout() {
                           {!notif.read && (
                             <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-red-500" />
                           )}
-                          <div className={cn("flex-1", notif.read && "ml-4 opacity-60")}>
+                          <div className={cn("flex-1 min-w-0", notif.read && "ml-4 opacity-60")}>
                             <p className="text-sm font-medium">{notif.title}</p>
-                            <p className="text-xs text-muted-foreground mt-0.5">{notif.message}</p>
-                            <p className="text-[10px] text-muted-foreground mt-1">
+                            <p className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap break-words leading-relaxed">
+                              {notif.message}
+                            </p>
+                            <p className="text-[10px] text-muted-foreground mt-1.5">
                               {formatDateTime(notif.timestamp)}
                             </p>
                           </div>

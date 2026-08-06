@@ -45,6 +45,12 @@ import {
   teamMgmtCommissionRulesApi,
 } from "@/lib/api";
 import { EMPTY_SALARY } from "@/lib/salary";
+import {
+  buildCostCreateDetail,
+  buildCostDeleteDetail,
+  buildCostNotificationMessage,
+  buildCostUpdateDetail,
+} from "@/lib/costChangeDetail";
 
 /** 旧版 localStorage key，仅用于「导入到服务器」 */
 export const LEGACY_STORAGE_KEYS = {
@@ -452,24 +458,31 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const created = await costRecordsApi.create({ ...c, changeReason });
     setCostRecords((prev) => [created, ...prev]);
     if (changeReason) {
+      const unitName = salesUnits.find((u) => u.id === created.salesUnitId)?.name;
+      const detail = buildCostCreateDetail(created, unitName);
       const log = await costChangeLogsApi.create({
         costRecordId: created.id,
         action: "create",
         reason: changeReason,
         operator: operator?.name || "",
         operatorId: operator?.id || "",
-        summary: `新增成本 ${created.totalCost}`,
+        summary: detail,
         costRecordRemark: created.remark,
       });
       setCostChangeLogs((prev) => [log, ...prev]);
       const notif = await notificationsApi.create({
         type: "cost_change",
-        title: "成本变更",
-        message: `${operator?.name || "用户"} 新增了成本记录`,
+        title: "成本变更 · 新增",
+        message: buildCostNotificationMessage({
+          operatorName: operator?.name || "用户",
+          action: "create",
+          detail,
+          reason: changeReason,
+        }),
       });
       setNotifications((prev) => [notif, ...prev]);
     }
-  }, []);
+  }, [salesUnits]);
 
   const updateCostRecord = useCallback(async (
     id: string,
@@ -477,21 +490,40 @@ export function DataProvider({ children }: { children: ReactNode }) {
     changeReason: string,
     operator?: { name: string; id: string }
   ) => {
+    const before = costRecords.find((x) => x.id === id);
     const updated = await costRecordsApi.update(id, { ...c, changeReason });
     setCostRecords((prev) => prev.map((x) => (x.id === id ? updated : x)));
     if (changeReason) {
+      const unitNameBefore = before
+        ? salesUnits.find((u) => u.id === before.salesUnitId)?.name
+        : undefined;
+      const unitNameAfter = salesUnits.find((u) => u.id === updated.salesUnitId)?.name;
+      const detail = before
+        ? buildCostUpdateDetail(before, updated, unitNameBefore, unitNameAfter)
+        : buildCostCreateDetail(updated, unitNameAfter);
       const log = await costChangeLogsApi.create({
         costRecordId: id,
         action: "update",
         reason: changeReason,
         operator: operator?.name || "",
         operatorId: operator?.id || "",
-        summary: `更新成本`,
+        summary: detail,
         costRecordRemark: updated.remark,
       });
       setCostChangeLogs((prev) => [log, ...prev]);
+      const notif = await notificationsApi.create({
+        type: "cost_change",
+        title: "成本变更 · 修改",
+        message: buildCostNotificationMessage({
+          operatorName: operator?.name || "用户",
+          action: "update",
+          detail,
+          reason: changeReason,
+        }),
+      });
+      setNotifications((prev) => [notif, ...prev]);
     }
-  }, []);
+  }, [costRecords, salesUnits]);
 
   const deleteCostRecord = useCallback(async (
     id: string,
@@ -502,18 +534,35 @@ export function DataProvider({ children }: { children: ReactNode }) {
     await costRecordsApi.delete(id);
     setCostRecords((prev) => prev.filter((x) => x.id !== id));
     if (changeReason) {
+      const unitName = target
+        ? salesUnits.find((u) => u.id === target.salesUnitId)?.name
+        : undefined;
+      const detail = target
+        ? buildCostDeleteDetail(target, unitName)
+        : "原记录已删除";
       const log = await costChangeLogsApi.create({
         costRecordId: id,
         action: "delete",
         reason: changeReason,
         operator: operator?.name || "",
         operatorId: operator?.id || "",
-        summary: `删除成本`,
+        summary: detail,
         costRecordRemark: target?.remark,
       });
       setCostChangeLogs((prev) => [log, ...prev]);
+      const notif = await notificationsApi.create({
+        type: "cost_change",
+        title: "成本变更 · 删除",
+        message: buildCostNotificationMessage({
+          operatorName: operator?.name || "用户",
+          action: "delete",
+          detail,
+          reason: changeReason,
+        }),
+      });
+      setNotifications((prev) => [notif, ...prev]);
     }
-  }, [costRecords]);
+  }, [costRecords, salesUnits]);
 
   // -------- Income --------
   const addIncomeRecord = useCallback(async (r: Omit<IncomeRecord, "id" | "totalAmount" | "createdAt">) => {

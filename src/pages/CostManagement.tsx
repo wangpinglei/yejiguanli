@@ -1449,7 +1449,9 @@ export default function CostManagement() {
                   <div key={log.id} className="rounded-lg border p-3 space-y-2">
                     <div className="flex items-center gap-2 flex-wrap">
                       <Badge className={cfg.color}>{cfg.label}</Badge>
-                      <span className="font-medium text-sm">{log.summary}</span>
+                      <span className="font-medium text-sm whitespace-pre-wrap break-words leading-relaxed flex-1 min-w-0">
+                        {log.summary}
+                      </span>
                       <span className="ml-auto text-xs text-muted-foreground flex items-center gap-1">
                         <Clock className="h-3 w-3" />
                         {formatDateTime(log.timestamp)}
