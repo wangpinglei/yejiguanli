@@ -30,7 +30,9 @@ export default function App() {
   return (
     <AuthProvider>
       <DataProvider>
-        <BrowserRouter basename="/yeji">
+        <BrowserRouter
+          basename={(import.meta.env.BASE_URL || "/").replace(/\/$/, "") || undefined}
+        >
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route
