@@ -587,7 +587,6 @@ export default function CostManagement() {
                   <TableHead className="text-right">岗位补贴</TableHead>
                   <TableHead className="text-right">管理提成</TableHead>
                   <TableHead className="text-right">个人提成</TableHead>
-                  <TableHead className="text-right">产品提成</TableHead>
                   <TableHead className="text-right">请假扣款</TableHead>
                   <TableHead className="text-right">其他调整</TableHead>
                   <TableHead className="text-right">社保</TableHead>
@@ -604,10 +603,9 @@ export default function CostManagement() {
                     pos: acc.pos + d.positionAllowance,
                     mgmt: acc.mgmt + d.managementCommission,
                     personal: acc.personal + d.personalCommission,
-                    product: acc.product + d.productCommission,
                     leave: acc.leave + d.leaveDeduction,
                     other: acc.other + d.otherBonus - d.otherDeduction,
-                  }), { base: 0, perf: 0, pos: 0, mgmt: 0, personal: 0, product: 0, leave: 0, other: 0 });
+                  }), { base: 0, perf: 0, pos: 0, mgmt: 0, personal: 0, leave: 0, other: 0 });
                   return (
                     <>
                       <TableRow
@@ -629,7 +627,6 @@ export default function CostManagement() {
                         <TableCell className="text-right text-violet-600">{formatCurrency(sums.pos)}</TableCell>
                         <TableCell className="text-right text-emerald-600">{formatCurrency(sums.mgmt)}</TableCell>
                         <TableCell className="text-right text-amber-600">{formatCurrency(sums.personal)}</TableCell>
-                        <TableCell className="text-right text-violet-600">{formatCurrency(sums.product)}</TableCell>
                         <TableCell className="text-right text-red-600">-{formatCurrency(sums.leave)}</TableCell>
                         <TableCell className="text-right text-amber-600">{sums.other >= 0 ? "+" : ""}{formatCurrency(sums.other)}</TableCell>
                         <TableCell className="text-right text-red-600">{formatCurrency(unit.totalSocialInsurance)}</TableCell>
@@ -638,16 +635,15 @@ export default function CostManagement() {
                       </TableRow>
                       {isExpanded && (
                         <TableRow key={unit.unitId + "-detail"} className="bg-blue-50/30">
-                          <TableCell colSpan={14} className="py-3">
+                          <TableCell colSpan={13} className="py-3">
                             <div className="ml-8 space-y-2">
                               {unit.details.map((d) => (
-                                <div key={d.personId} className="grid grid-cols-12 gap-2 rounded-lg border bg-card px-4 py-2 text-sm">
+                                <div key={d.personId} className="grid grid-cols-11 gap-2 rounded-lg border bg-card px-4 py-2 text-sm">
                                   <span className="font-medium">{d.name}</span>
                                   <span className="text-muted-foreground">{d.position}</span>
                                   <span className="text-right text-gray-600">底薪 {formatCurrency(d.baseSalary)}</span>
                                   <span className="text-right text-blue-600">绩效 {formatCurrency(d.performance)}</span>
                                   <span className="text-right text-emerald-600">提成 {formatCurrency(d.managementCommission + d.personalCommission)}</span>
-                                  <span className="text-right text-violet-600">产品提成 {formatCurrency(d.productCommission)}</span>
                                   <span className="text-right text-red-600">请假扣 {formatCurrency(d.leaveDeduction)}</span>
                                   <span className="text-right text-amber-600">其他 {formatCurrency(d.otherBonus - d.otherDeduction)}</span>
                                   <span className="text-right text-red-600">社保 {formatCurrency(d.socialInsurance)}</span>
@@ -668,7 +664,7 @@ export default function CostManagement() {
                 })}
                 {salaryCosts.units.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={14} className="text-center py-12 text-muted-foreground">暂无在职人员数据</TableCell>
+                    <TableCell colSpan={13} className="text-center py-12 text-muted-foreground">暂无在职人员数据</TableCell>
                   </TableRow>
                 )}
               </TableBody>

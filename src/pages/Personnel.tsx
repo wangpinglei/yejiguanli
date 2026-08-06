@@ -656,10 +656,6 @@ export default function PersonnelPage() {
                   <span className="text-muted-foreground">个人提成</span>
                   <span className="font-medium text-orange-600">{formatCurrency(salaryDetail.personalCommission)}</span>
                 </div>
-                <div className="flex justify-between rounded-md border border-violet-200 bg-violet-50/30 px-3 py-2">
-                  <span className="text-muted-foreground">产品销售提成</span>
-                  <span className="font-medium text-violet-600">{formatCurrency(salaryDetail.productCommission)}</span>
-                </div>
                 {salaryDetail.leaveDeduction > 0 && (
                   <div className="flex justify-between rounded-md border border-red-200 bg-red-50/30 px-3 py-2">
                     <span className="text-muted-foreground">请假扣款</span>

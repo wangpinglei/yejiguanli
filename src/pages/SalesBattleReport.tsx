@@ -892,7 +892,8 @@ export default function SalesBattleReport() {
                   {currentUnit?.name} · {yearMonth.split("-")[0]}年{yearMonth.split("-")[1]}月 · 单位总人力成本
                 </p>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  含薪资 + 社保（企业）+ 公积金（企业）+ 产品提成 - 请假扣款 + 其他调整
+                  含薪资 + 社保（企业）+ 公积金（企业）- 请假扣款 + 其他调整
+                  （销售提成已计入管理/个人提成）
                 </p>
               </div>
             </div>
@@ -980,10 +981,6 @@ export default function SalesBattleReport() {
                   <div className="flex justify-between rounded-md border border-orange-200 bg-orange-50/30 px-3 py-2">
                     <span className="text-muted-foreground">个人提成</span>
                     <span className="font-medium text-orange-600">{formatCurrency(salary.personalCommission)}</span>
-                  </div>
-                  <div className="flex justify-between rounded-md border border-violet-200 bg-violet-50/30 px-3 py-2">
-                    <span className="text-muted-foreground">产品销售提成</span>
-                    <span className="font-medium text-violet-600">{formatCurrency(salary.productCommission)}</span>
                   </div>
                   <div className="flex justify-between rounded-md border border-red-200 bg-red-50/30 px-3 py-2">
                     <span className="text-muted-foreground">请假扣款</span>

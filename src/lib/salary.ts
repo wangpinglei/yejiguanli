@@ -272,7 +272,8 @@ export function calcLeaveDeduction(baseSalary: number, leaveDays: number): numbe
 
 /**
  * 计算实际月薪（含动态提成、请假扣款、月度调整）
- * 月薪 = 底薪 + 绩效 + 岗位补贴 + 管理提成 + 个人提成 + 产品提成 - 请假扣款 + 其他加项 - 其他减项
+ * 月薪 = 底薪 + 绩效 + 岗位补贴 + 管理提成 + 个人提成 - 请假扣款 + 其他加项 - 其他减项
+ * （已不再计入旧「产品级销售提成」）
  *
  * @param yearMonth 可选，按月过滤销售记录
  * @param adjustment 可选，月度调整（请假天数、其他加减项）
@@ -311,7 +312,8 @@ export function calculateMonthlySalary(
   const personalCommission = usePpc
     ? calcPersonalCommissionByProduct(person, monthlyRecords, products, productPersonCommissions)
     : calcPersonalCommission(s, personalSales);
-  const productCommission = getPersonProductCommission(person.id, monthlyRecords, products);
+  // 旧产品级提成已废弃，统一为 0（改由单位×人员个人/管理提成计入）
+  const productCommission = 0;
 
   const leaveDeduction = adjustment
     ? calcLeaveDeduction(s.baseSalary, adjustment.leaveDays || 0)
@@ -324,8 +326,7 @@ export function calculateMonthlySalary(
     s.performance +
     s.positionAllowance +
     managementCommission +
-    personalCommission +
-    productCommission -
+    personalCommission -
     leaveDeduction +
     otherBonus -
     otherDeduction;
