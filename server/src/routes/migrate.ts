@@ -227,20 +227,26 @@ router.post("/", (req, res) => {
         sql: `INSERT INTO product_person_commissions (
           id, sales_unit_id, product_id, personnel_id,
           management_commission_rate, management_commission_threshold, management_commission_condition,
-          personal_commission_rate, personal_commission_threshold, personal_commission_condition, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          personal_commission_type, personal_commission_rate, personal_commission_amount,
+          personal_commission_threshold, personal_commission_condition, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [r.id, r.salesUnitId, r.productId, r.personnelId,
           r.managementCommissionRate || 0, r.managementCommissionThreshold || 0, r.managementCommissionCondition || "",
-          r.personalCommissionRate || 0, r.personalCommissionThreshold || 0, r.personalCommissionCondition || "",
+          r.personalCommissionType === "fixed" ? "fixed" : "percentage",
+          r.personalCommissionRate || 0, r.personalCommissionAmount || 0,
+          r.personalCommissionThreshold || 0, r.personalCommissionCondition || "",
           r.createdAt || new Date().toISOString(), r.updatedAt || null],
       }),
       (r) => ({
         sql: `UPDATE product_person_commissions SET sales_unit_id=?, product_id=?, personnel_id=?,
           management_commission_rate=?, management_commission_threshold=?, management_commission_condition=?,
-          personal_commission_rate=?, personal_commission_threshold=?, personal_commission_condition=?, updated_at=? WHERE id=?`,
+          personal_commission_type=?, personal_commission_rate=?, personal_commission_amount=?,
+          personal_commission_threshold=?, personal_commission_condition=?, updated_at=? WHERE id=?`,
         args: [r.salesUnitId, r.productId, r.personnelId,
           r.managementCommissionRate || 0, r.managementCommissionThreshold || 0, r.managementCommissionCondition || "",
-          r.personalCommissionRate || 0, r.personalCommissionThreshold || 0, r.personalCommissionCondition || "",
+          r.personalCommissionType === "fixed" ? "fixed" : "percentage",
+          r.personalCommissionRate || 0, r.personalCommissionAmount || 0,
+          r.personalCommissionThreshold || 0, r.personalCommissionCondition || "",
           new Date().toISOString(), r.id],
       })
     );

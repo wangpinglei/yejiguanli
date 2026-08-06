@@ -3,7 +3,7 @@ import { useData } from '@/context/DataContext'
 import { usePermissions } from '@/hooks/usePermissions'
 import { formatCurrency } from '@/lib/format'
 import { filterByMonth } from '@/lib/salary'
-import type { SalesUnit, ProductPersonCommission, Personnel } from '@/types'
+import type { SalesUnit, ProductPersonCommission, Personnel, Product, UnitProductSettlement } from '@/types'
 import {
   Building2, Package, Pencil, Users, Layers, Calculator,
   ChevronDown, ChevronRight,
@@ -20,12 +20,19 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
+
+type PersonalCommissionType = 'percentage' | 'fixed'
 
 const EMPTY_PERSON_COMMISSION = {
   managementCommissionRate: 0,
   managementCommissionThreshold: 0,
   managementCommissionCondition: '',
+  personalCommissionType: 'percentage' as PersonalCommissionType,
   personalCommissionRate: 0,
+  personalCommissionAmount: 0,
   personalCommissionThreshold: 0,
   personalCommissionCondition: '',
 }
@@ -46,6 +53,23 @@ function toggleIdInList(list: string[], id: string): string[] {
   return list.includes(id) ? list.filter((x) => x !== id) : [...list, id]
 }
 
+/** 产品结算为固定金额时，个人提成默认固定金额 */
+function getDefaultPersonalCommissionType(
+  productId: string,
+  unitId: string | undefined,
+  upsList: UnitProductSettlement[],
+  productList: Product[],
+): PersonalCommissionType {
+  if (unitId) {
+    const ups = upsList.find((x) => x.productId === productId && x.salesUnitId === unitId)
+    if (ups?.settlementType === 'fixed') return 'fixed'
+    if (ups?.settlementType === 'percentage') return 'percentage'
+  }
+  const product = productList.find((p) => p.id === productId)
+  if (product?.settlementType === 'fixed') return 'fixed'
+  return 'percentage'
+}
+
 type Props = {
   selectedMonth: string
 }
@@ -55,6 +79,7 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
     products,
     allSalesRecords: salesRecords,
     productPersonCommissions: ppcList,
+    unitProductSettlements: upsList,
     personnel,
     upsertProductPersonCommission,
     deleteProductPersonCommission,
@@ -161,7 +186,20 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
 
   function openPpcEdit(productId: string, unitId: string, personnelId: string) {
     const ppc = findPpc(productId, unitId, personnelId)
-    setPpcForm(ppc ? { ...EMPTY_PERSON_COMMISSION, ...ppc } : { ...EMPTY_PERSON_COMMISSION })
+    const defaultType = getDefaultPersonalCommissionType(productId, unitId, upsList, products)
+    if (ppc) {
+      setPpcForm({
+        ...EMPTY_PERSON_COMMISSION,
+        ...ppc,
+        personalCommissionType: ppc.personalCommissionType || defaultType,
+        personalCommissionAmount: ppc.personalCommissionAmount || 0,
+      })
+    } else {
+      setPpcForm({
+        ...EMPTY_PERSON_COMMISSION,
+        personalCommissionType: defaultType,
+      })
+    }
     setPpcEditKey({ productId, unitId, personnelId })
     setExpandedPpcProductIds((prev) => new Set(prev).add(productId))
     setExpandedPpcUnitKeys((prev) => new Set(prev).add(`${productId}|${unitId}`))
@@ -177,7 +215,9 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
         managementCommissionRate: ppcForm.managementCommissionRate || 0,
         managementCommissionThreshold: ppcForm.managementCommissionThreshold || 0,
         managementCommissionCondition: ppcForm.managementCommissionCondition,
+        personalCommissionType: ppcForm.personalCommissionType || 'percentage',
         personalCommissionRate: ppcForm.personalCommissionRate || 0,
+        personalCommissionAmount: ppcForm.personalCommissionAmount || 0,
         personalCommissionThreshold: ppcForm.personalCommissionThreshold || 0,
         personalCommissionCondition: ppcForm.personalCommissionCondition,
       })
@@ -213,7 +253,9 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
           managementCommissionRate: ppcForm.managementCommissionRate || 0,
           managementCommissionThreshold: ppcForm.managementCommissionThreshold || 0,
           managementCommissionCondition: ppcForm.managementCommissionCondition,
+          personalCommissionType: ppcForm.personalCommissionType || 'percentage',
           personalCommissionRate: ppcForm.personalCommissionRate || 0,
+          personalCommissionAmount: ppcForm.personalCommissionAmount || 0,
           personalCommissionThreshold: ppcForm.personalCommissionThreshold || 0,
           personalCommissionCondition: ppcForm.personalCommissionCondition,
         })),
@@ -222,7 +264,29 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
   }
 
   function openBatchPpc(target: BatchPpcTarget) {
-    setPpcForm({ ...EMPTY_PERSON_COMMISSION })
+    let defaultType: PersonalCommissionType = 'percentage'
+    if (target.mode === 'unit') {
+      defaultType = getDefaultPersonalCommissionType(
+        target.productId, target.unitId, upsList, products,
+      )
+    } else if (target.mode === 'product') {
+      defaultType = getDefaultPersonalCommissionType(
+        target.productId, undefined, upsList, products,
+      )
+      // 若该产品在任一单位为固定结算，优先固定
+      const anyFixed = upsList.some(
+        (u) => u.productId === target.productId && u.settlementType === 'fixed',
+      )
+      if (anyFixed) defaultType = 'fixed'
+    } else {
+      const productIds = filteredProducts.map((p) => p.id)
+      const anyFixed = productIds.some((pid) =>
+        upsList.some((u) => u.productId === pid && u.settlementType === 'fixed')
+        || products.find((p) => p.id === pid)?.settlementType === 'fixed',
+      )
+      if (anyFixed) defaultType = 'fixed'
+    }
+    setPpcForm({ ...EMPTY_PERSON_COMMISSION, personalCommissionType: defaultType })
     if (target.mode === 'all') {
       setBatchPpcSelectedProductIds(filteredProducts.map((p) => p.id))
       setBatchPpcSelectedUnitIds(units.map((u) => u.id))
@@ -336,9 +400,12 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
           })
           const configuredPeople = rows.filter((r) => {
             const ppc = r.ppc
+            const hasPersonalFixed =
+              ppc?.personalCommissionType === 'fixed' && (ppc.personalCommissionAmount || 0) > 0
             return (
               (ppc?.managementCommissionRate || 0) > 0 ||
-              (ppc?.personalCommissionRate || 0) > 0
+              (ppc?.personalCommissionRate || 0) > 0 ||
+              hasPersonalFixed
             )
           }).length
 
@@ -394,11 +461,16 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                       {unitGroups.map(({ unit, people }) => {
                         const unitKey = `${product.id}|${unit.id}`
                         const isUnitOpen = expandedPpcUnitKeys.has(unitKey)
-                        const unitConfigured = people.filter(
-                          (r) =>
+                        const unitConfigured = people.filter((r) => {
+                          const hasPersonalFixed =
+                            r.ppc?.personalCommissionType === 'fixed'
+                            && (r.ppc.personalCommissionAmount || 0) > 0
+                          return (
                             (r.ppc?.managementCommissionRate || 0) > 0 ||
-                            (r.ppc?.personalCommissionRate || 0) > 0,
-                        ).length
+                            (r.ppc?.personalCommissionRate || 0) > 0 ||
+                            hasPersonalFixed
+                          )
+                        }).length
                         return (
                           <div key={unitKey}>
                             <div className="flex items-center gap-2 bg-violet-50/40 px-4 py-2.5">
@@ -450,7 +522,7 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                                       <TableHead>销售人员</TableHead>
                                       <TableHead className="text-right">管理提成比例</TableHead>
                                       <TableHead className="text-right">管理起算门槛</TableHead>
-                                      <TableHead className="text-right">个人提成比例</TableHead>
+                                      <TableHead className="text-right">个人提成</TableHead>
                                       <TableHead className="text-right">个人起算门槛</TableHead>
                                       <TableHead className="text-right">
                                         本月该产品销售额
@@ -462,8 +534,10 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                                     {people.map(({ person, ppc, personSales }) => {
                                       const hasMgmt =
                                         (ppc?.managementCommissionRate || 0) > 0
-                                      const hasPersonal =
-                                        (ppc?.personalCommissionRate || 0) > 0
+                                      const isPersonalFixed = ppc?.personalCommissionType === 'fixed'
+                                      const hasPersonal = isPersonalFixed
+                                        ? (ppc?.personalCommissionAmount || 0) > 0
+                                        : (ppc?.personalCommissionRate || 0) > 0
                                       return (
                                         <TableRow key={person.id}>
                                           <TableCell>
@@ -500,7 +574,9 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                                           <TableCell className="text-right">
                                             {hasPersonal ? (
                                               <Badge className="bg-orange-100 text-orange-700">
-                                                {ppc!.personalCommissionRate}%
+                                                {isPersonalFixed
+                                                  ? `${formatCurrency(ppc!.personalCommissionAmount || 0)}/件`
+                                                  : `${ppc!.personalCommissionRate}%`}
                                               </Badge>
                                             ) : (
                                               <span className="text-xs text-muted-foreground">
@@ -509,7 +585,9 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                                             )}
                                           </TableCell>
                                           <TableCell className="text-right text-sm">
-                                            {ppc?.personalCommissionThreshold ? (
+                                            {isPersonalFixed ? (
+                                              <span className="text-xs text-muted-foreground">按件</span>
+                                            ) : ppc?.personalCommissionThreshold ? (
                                               formatCurrency(ppc.personalCommissionThreshold)
                                             ) : (
                                               <span className="text-xs text-muted-foreground">
@@ -578,7 +656,8 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
             <strong>管理提成</strong> = max(0, 团队销售额 - 起算门槛) × 管理提成比例%
           </div>
           <div>
-            <strong>个人提成</strong> = max(0, 个人该产品销售额 - 起算门槛) × 个人提成比例%
+            <strong>个人提成</strong>（比例）= max(0, 销售额 - 门槛) × 比例%；
+            （固定）= 销售数量 × 每件提成金额
           </div>
           <div>销售提成 = 管理提成 + 个人提成，按单位×人员配置，自动进入人力成本与收支利润</div>
           <div>未配置人员提成时，沿用「人员管理」中的默认提成参数（如有）</div>
@@ -664,39 +743,87 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
             <div className="rounded-lg border-2 border-orange-200 p-4 space-y-3">
               <div className="flex items-center gap-2">
                 <Badge className="bg-orange-100 text-orange-700">个人提成</Badge>
-                <span className="text-xs text-muted-foreground">按个人该产品销售额计算</span>
+                <span className="text-xs text-muted-foreground">
+                  {ppcForm.personalCommissionType === 'fixed'
+                    ? '按件固定金额'
+                    : '按个人该产品销售额计算'}
+                </span>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label className="text-xs">提成方式</Label>
+                <Select
+                  value={ppcForm.personalCommissionType}
+                  onValueChange={(v) =>
+                    setPpcForm({
+                      ...ppcForm,
+                      personalCommissionType: v as PersonalCommissionType,
+                    })
+                  }
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="percentage">按销售额比例</SelectItem>
+                    <SelectItem value="fixed">按件固定金额</SelectItem>
+                  </SelectContent>
+                </Select>
+                {ppcForm.personalCommissionType === 'fixed' && (
+                  <p className="text-[11px] text-violet-700">
+                    该产品结算为固定金额时，默认使用按件固定提成（可改回比例）
+                  </p>
+                )}
+              </div>
+              {ppcForm.personalCommissionType === 'fixed' ? (
                 <div className="space-y-1">
-                  <Label className="text-xs">提成比例 (%)</Label>
+                  <Label className="text-xs">每件提成金额 (¥)</Label>
                   <Input
                     type="number"
-                    step="0.1"
-                    value={ppcForm.personalCommissionRate}
+                    step="0.01"
+                    value={ppcForm.personalCommissionAmount}
                     onChange={(e) =>
                       setPpcForm({
                         ...ppcForm,
-                        personalCommissionRate: Number(e.target.value),
+                        personalCommissionAmount: Number(e.target.value),
                       })
                     }
-                    placeholder="如：3"
+                    placeholder="如：50"
                   />
+                  <p className="text-xs text-muted-foreground">
+                    计算公式：销售数量 × 每件提成金额
+                  </p>
                 </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">起算门槛 (¥)</Label>
-                  <Input
-                    type="number"
-                    value={ppcForm.personalCommissionThreshold}
-                    onChange={(e) =>
-                      setPpcForm({
-                        ...ppcForm,
-                        personalCommissionThreshold: Number(e.target.value),
-                      })
-                    }
-                    placeholder="如：50000"
-                  />
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <Label className="text-xs">提成比例 (%)</Label>
+                    <Input
+                      type="number"
+                      step="0.1"
+                      value={ppcForm.personalCommissionRate}
+                      onChange={(e) =>
+                        setPpcForm({
+                          ...ppcForm,
+                          personalCommissionRate: Number(e.target.value),
+                        })
+                      }
+                      placeholder="如：3"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">起算门槛 (¥)</Label>
+                    <Input
+                      type="number"
+                      value={ppcForm.personalCommissionThreshold}
+                      onChange={(e) =>
+                        setPpcForm({
+                          ...ppcForm,
+                          personalCommissionThreshold: Number(e.target.value),
+                        })
+                      }
+                      placeholder="如：50000"
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
               <div className="space-y-1">
                 <Label className="text-xs">发放条件</Label>
                 <Input
@@ -710,9 +837,11 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                   placeholder="如：个人达标后发放"
                 />
               </div>
-              <p className="text-xs text-muted-foreground">
-                计算公式：(个人该产品销售额 - 起算门槛) × 提成比例%
-              </p>
+              {ppcForm.personalCommissionType !== 'fixed' && (
+                <p className="text-xs text-muted-foreground">
+                  计算公式：(个人该产品销售额 - 起算门槛) × 提成比例%
+                </p>
+              )}
             </div>
           </div>
           <DialogFooter className="gap-2">
@@ -903,39 +1032,84 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
             <div className="rounded-lg border-2 border-orange-200 p-4 space-y-3">
               <div className="flex items-center gap-2">
                 <Badge className="bg-orange-100 text-orange-700">个人提成</Badge>
-                <span className="text-xs text-muted-foreground">按个人该产品销售额计算</span>
+                <span className="text-xs text-muted-foreground">
+                  {ppcForm.personalCommissionType === 'fixed'
+                    ? '按件固定金额'
+                    : '按个人该产品销售额计算'}
+                </span>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label className="text-xs">提成方式</Label>
+                <Select
+                  value={ppcForm.personalCommissionType}
+                  onValueChange={(v) =>
+                    setPpcForm({
+                      ...ppcForm,
+                      personalCommissionType: v as PersonalCommissionType,
+                    })
+                  }
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="percentage">按销售额比例</SelectItem>
+                    <SelectItem value="fixed">按件固定金额</SelectItem>
+                  </SelectContent>
+                </Select>
+                {ppcForm.personalCommissionType === 'fixed' && (
+                  <p className="text-[11px] text-violet-700">
+                    勾选产品若结算为固定金额，已默认按件固定提成
+                  </p>
+                )}
+              </div>
+              {ppcForm.personalCommissionType === 'fixed' ? (
                 <div className="space-y-1">
-                  <Label className="text-xs">提成比例 (%)</Label>
+                  <Label className="text-xs">每件提成金额 (¥)</Label>
                   <Input
                     type="number"
-                    step="0.1"
-                    value={ppcForm.personalCommissionRate}
+                    step="0.01"
+                    value={ppcForm.personalCommissionAmount}
                     onChange={(e) =>
                       setPpcForm({
                         ...ppcForm,
-                        personalCommissionRate: Number(e.target.value),
+                        personalCommissionAmount: Number(e.target.value),
                       })
                     }
-                    placeholder="如：3"
+                    placeholder="如：50"
                   />
                 </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">起算门槛 (¥)</Label>
-                  <Input
-                    type="number"
-                    value={ppcForm.personalCommissionThreshold}
-                    onChange={(e) =>
-                      setPpcForm({
-                        ...ppcForm,
-                        personalCommissionThreshold: Number(e.target.value),
-                      })
-                    }
-                    placeholder="如：50000"
-                  />
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <Label className="text-xs">提成比例 (%)</Label>
+                    <Input
+                      type="number"
+                      step="0.1"
+                      value={ppcForm.personalCommissionRate}
+                      onChange={(e) =>
+                        setPpcForm({
+                          ...ppcForm,
+                          personalCommissionRate: Number(e.target.value),
+                        })
+                      }
+                      placeholder="如：3"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">起算门槛 (¥)</Label>
+                    <Input
+                      type="number"
+                      value={ppcForm.personalCommissionThreshold}
+                      onChange={(e) =>
+                        setPpcForm({
+                          ...ppcForm,
+                          personalCommissionThreshold: Number(e.target.value),
+                        })
+                      }
+                      placeholder="如：50000"
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
               <div className="space-y-1">
                 <Label className="text-xs">发放条件</Label>
                 <Input

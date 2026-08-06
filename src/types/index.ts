@@ -213,7 +213,7 @@ export interface UnitProductSettlement {
   updatedAt?: string;
 }
 
-// 单位×产品×人员提成设置（每个销售人员在不同产品上的管理/个人提成比例）
+// 单位×产品×人员提成设置（每个销售人员在不同产品上的管理/个人提成）
 export interface ProductPersonCommission {
   id: string;
   salesUnitId: string;
@@ -223,9 +223,11 @@ export interface ProductPersonCommission {
   managementCommissionRate: number; // %
   managementCommissionThreshold: number; // 起算门槛 ¥
   managementCommissionCondition: string; // 条件描述
-  // 个人提成（按个人销售额计算）
-  personalCommissionRate: number; // %
-  personalCommissionThreshold: number; // 起算门槛 ¥
+  // 个人提成（按个人该产品：比例 或 按件固定金额）
+  personalCommissionType?: "percentage" | "fixed"; // 默认 percentage；结算为固定金额时默认 fixed
+  personalCommissionRate: number; // %，percentage 时生效
+  personalCommissionAmount?: number; // 每件提成 ¥，fixed 时生效
+  personalCommissionThreshold: number; // 起算门槛 ¥（仅 percentage）
   personalCommissionCondition: string; // 条件描述
   createdAt: string;
   updatedAt?: string;

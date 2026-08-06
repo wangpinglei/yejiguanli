@@ -206,6 +206,8 @@ function initSchema() {
       personal_commission_rate REAL DEFAULT 0,
       personal_commission_threshold REAL DEFAULT 0,
       personal_commission_condition TEXT DEFAULT '',
+      personal_commission_type TEXT DEFAULT 'percentage',
+      personal_commission_amount REAL DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT,
       UNIQUE(sales_unit_id, product_id, personnel_id)
@@ -296,6 +298,11 @@ function initSchema() {
     { name: "settlement_rate", ddl: "settlement_rate REAL DEFAULT 100" },
     { name: "settlement_amount", ddl: "settlement_amount REAL DEFAULT 0" },
     { name: "settlement_note", ddl: "settlement_note TEXT DEFAULT ''" },
+  ]);
+
+  ensureColumns("product_person_commissions", [
+    { name: "personal_commission_type", ddl: "personal_commission_type TEXT DEFAULT 'percentage'" },
+    { name: "personal_commission_amount", ddl: "personal_commission_amount REAL DEFAULT 0" },
   ]);
 
   ensureColumns("sales_records", [
@@ -506,7 +513,11 @@ export function rowToProductPersonCommission(row: any) {
     managementCommissionRate: row.management_commission_rate || 0,
     managementCommissionThreshold: row.management_commission_threshold || 0,
     managementCommissionCondition: row.management_commission_condition || "",
+    personalCommissionType: (row.personal_commission_type === "fixed" ? "fixed" : "percentage") as
+      | "percentage"
+      | "fixed",
     personalCommissionRate: row.personal_commission_rate || 0,
+    personalCommissionAmount: row.personal_commission_amount || 0,
     personalCommissionThreshold: row.personal_commission_threshold || 0,
     personalCommissionCondition: row.personal_commission_condition || "",
     createdAt: row.created_at,
