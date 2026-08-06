@@ -275,7 +275,7 @@ export default function ProductSettlement() {
           </CardContent>
         </Card>
         <Card className="hover:shadow-md transition-shadow">
-          <Link to="/cost-management" className="block">
+          <Link to="/cost-management#sales-commission-config" className="block">
             <CardContent className="flex items-center gap-4 p-5">
               <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-violet-50">
                 <Percent className="h-6 w-6 text-violet-600" />
