@@ -1133,7 +1133,7 @@ export default function SalesRecords() {
           </Button>
         )}
         <Badge className="bg-blue-50 text-blue-700">合计 {formatCurrency(totalRevenue)}</Badge>
-        <Badge className="bg-violet-50 text-violet-700" title="按成本管理「单位×人员」个人提成+特殊奖励预估（比例不含月门槛）">
+        <Badge className="bg-violet-50 text-violet-700" title="按人员管理「人×产品」个人提成+特殊奖励预估（比例不含月门槛）">
           提成预估 {formatCurrency(totalCommission)}
         </Badge>
       </div>

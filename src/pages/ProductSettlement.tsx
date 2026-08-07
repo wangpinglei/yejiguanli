@@ -363,7 +363,7 @@ export default function ProductSettlement() {
           </CardContent>
         </Card>
         <Card className="hover:shadow-md transition-shadow">
-          <Link to="/cost-management#sales-commission-config" className="block">
+          <Link to="/personnel" className="block">
             <CardContent className="flex items-center gap-4 p-5">
               <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-violet-50">
                 <Percent className="h-6 w-6 text-violet-600" />
@@ -371,7 +371,7 @@ export default function ProductSettlement() {
               <div>
                 <p className="text-sm text-muted-foreground">{selectedMonth} 销售提成合计</p>
                 <p className="text-xl font-bold text-violet-600">{formatCurrency(totalMonthSalesCommission)}</p>
-                <p className="text-[10px] text-muted-foreground">只读 · 前往成本管理配置</p>
+                <p className="text-[10px] text-muted-foreground">个人提成请到人员管理配置</p>
               </div>
             </CardContent>
           </Link>

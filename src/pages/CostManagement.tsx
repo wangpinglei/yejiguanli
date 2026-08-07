@@ -33,7 +33,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import MSalesCommissionPanel from "./CostManagement/components/m-sales-commission-panel";
+import { Link } from "react-router-dom";
 import MTeamMgmtCommissionPanel from "./CostManagement/components/m-team-mgmt-commission-panel";
 
 const costCategories = ["人力成本", "办公租金", "营销推广", "差旅交通", "运营杂费", "设备采购", "其他"];
@@ -443,7 +443,7 @@ export default function CostManagement() {
     <div>
       <PageHeader
         title="成本管理"
-        description="按月度管理人员成本；个人提成与团队管理提成在本页上方配置，自动计入成本"
+        description="按月度管理人员成本；团队管理提成在本页配置，个人提成请到人员管理按人×产品设置"
         action={
           <div className="flex gap-2">
             {isSuperadmin && (
@@ -587,28 +587,32 @@ export default function CostManagement() {
         <MTeamMgmtCommissionPanel selectedMonth={selectedMonth} />
       </section>
 
-      {/* 销售个人提成：整宽常驻配置 */}
+      {/* 个人提成入口提示：配置已迁至人员管理 */}
       <section
         id="sales-commission-config"
-        className="mb-6 rounded-xl border-2 border-violet-300 bg-violet-50/40 p-5"
+        className="mb-6 rounded-xl border border-violet-200 bg-violet-50/40 px-5 py-4"
       >
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-100">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-100">
               <Percent className="h-5 w-5 text-violet-600" />
             </div>
             <div className="min-w-0">
-              <h3 className="text-base font-semibold text-violet-900">销售个人提成配置</h3>
+              <h3 className="text-sm font-semibold text-violet-900">销售个人提成</h3>
               <p className="text-xs text-muted-foreground">
-                按产品 × 单位 × 人员设置个人提成与特殊奖励；本月提成合计{" "}
+                已改到「人员管理」按每个人配置不同产品提成；本月提成合计{" "}
                 <span className="font-semibold text-violet-700">
                   {formatCurrency(productCommissionTotal)}
                 </span>
               </p>
             </div>
           </div>
+            <Link to="/personnel">
+              <Button variant="outline" size="sm" className="shrink-0">
+                去人员管理配置
+              </Button>
+            </Link>
         </div>
-        <MSalesCommissionPanel selectedMonth={selectedMonth} />
       </section>
 
       {/* ===================== 自动薪酬成本明细 ===================== */}

@@ -12,6 +12,7 @@ import {
   Trash2,
   Eye,
   CalendarRange,
+  Percent,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,6 +52,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import MPersonProductCommission from "./Personnel/components/m-person-product-commission";
 
 // 默认表单
 const DEFAULT_FORM = {
@@ -119,7 +121,7 @@ export default function PersonnelPage() {
     targets: performanceTargets,
     upsList: unitProductSettlements,
   }), [teamMgmtCommissionRules, performanceTargets, unitProductSettlements]);
-  const { visiblePersonnel: personnel, visibleSalesUnits: salesUnits, visibleSalesRecords: salesRecords, canEditPersonnel, isReadOnly, role } = usePermissions();
+  const { visiblePersonnel: personnel, visibleSalesUnits: salesUnits, visibleSalesRecords: salesRecords, canEditPersonnel, isReadOnly, role, canEditCost } = usePermissions();
   const [search, setSearch] = useState("");
   const [filterUnit, setFilterUnit] = useState("all");
   const [salesRange, setSalesRange] = useState<SalesRange>("year");
@@ -128,6 +130,7 @@ export default function PersonnelPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingPerson, setEditingPerson] = useState<Personnel | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [commissionPerson, setCommissionPerson] = useState<Personnel | null>(null);
   const [salaryDetailPerson, setSalaryDetailPerson] = useState<Personnel | null>(null);
   const [salaryDetailMonth, setSalaryDetailMonth] = useState(new Date().toISOString().slice(0, 7));
 
@@ -404,6 +407,9 @@ export default function PersonnelPage() {
                       <TableCell className="text-muted-foreground">{person.resignDate ? formatDate(person.resignDate) : "-"}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
+                          <Button variant="ghost" size="icon" title="个人提成配置" onClick={() => setCommissionPerson(person)}>
+                            <Percent className="h-4 w-4 text-violet-600" />
+                          </Button>
                           <Button variant="ghost" size="icon" title="薪资明细" onClick={() => setSalaryDetailPerson(person)}>
                             <Eye className="h-4 w-4" />
                           </Button>
@@ -436,6 +442,15 @@ export default function PersonnelPage() {
           </div>
         </CardContent>
       </Card>
+
+      <MPersonProductCommission
+        person={commissionPerson}
+        open={!!commissionPerson}
+        onOpenChange={(open) => {
+          if (!open) setCommissionPerson(null);
+        }}
+        canEdit={showActions && !isReadOnly && (canEditPersonnel || canEditCost)}
+      />
 
       {/* Add/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
