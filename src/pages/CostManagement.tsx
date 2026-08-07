@@ -10,6 +10,7 @@ import type { CostRecord, CostItem, IncomeRecord, IncomeItem } from "@/types";
 import {
   Plus, Search, Pencil, Trash2, Wallet, X, ChevronDown, ChevronRight, Clock,
   Users, Calculator, History, Percent, CalendarDays, Save, TrendingUp, Repeat, AlertTriangle,
+  Maximize2, Minimize2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -52,6 +53,7 @@ export default function CostManagement() {
   const [expandedSalaryRows, setExpandedSalaryRows] = useState<Set<string>>(new Set());
   const [historyOpen, setHistoryOpen] = useState(false);
   const [adjustmentDialogOpen, setAdjustmentDialogOpen] = useState(false);
+  const [adjustmentDialogMaximized, setAdjustmentDialogMaximized] = useState(false);
 
   // Form state
   const [form, setForm] = useState({
@@ -1418,20 +1420,51 @@ export default function CostManagement() {
       </AlertDialog>
 
       {/* ===================== 月度人员调整弹窗 ===================== */}
-      <Dialog open={adjustmentDialogOpen} onOpenChange={setAdjustmentDialogOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <Dialog
+        open={adjustmentDialogOpen}
+        onOpenChange={(open) => {
+          setAdjustmentDialogOpen(open)
+          if (!open) setAdjustmentDialogMaximized(false)
+        }}
+      >
+        <DialogContent
+          className={
+            adjustmentDialogMaximized
+              ? "max-w-[min(1400px,98vw)] w-[98vw] h-[95vh] max-h-[95vh] flex flex-col overflow-hidden"
+              : "max-w-4xl max-h-[90vh] overflow-y-auto"
+          }
+        >
+          <button
+            type="button"
+            className="absolute top-4 right-12 rounded-xs p-1 opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden"
+            title={adjustmentDialogMaximized ? "还原" : "放大"}
+            onClick={() => setAdjustmentDialogMaximized((v) => !v)}
+          >
+            {adjustmentDialogMaximized ? (
+              <Minimize2 className="h-4 w-4" />
+            ) : (
+              <Maximize2 className="h-4 w-4" />
+            )}
+            <span className="sr-only">{adjustmentDialogMaximized ? "还原" : "放大"}</span>
+          </button>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <CalendarDays className="h-5 w-5" />
               月度人员调整 - {selectedMonth}
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-3 py-2">
-            <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
+          <div className={`space-y-3 py-2 ${adjustmentDialogMaximized ? "flex-1 min-h-0 flex flex-col" : ""}`}>
+            <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700 shrink-0">
               <CalendarDays className="mr-1 inline h-4 w-4" />
               请假扣款 = 日薪 × 请假天数（日薪 = 底薪 / {MONTHLY_WORK_DAYS}）。其他加项/减项为额外薪资调整。
             </div>
-            <div className="overflow-x-auto max-h-[55vh] overflow-y-auto">
+            <div
+              className={
+                adjustmentDialogMaximized
+                  ? "overflow-auto flex-1 min-h-0"
+                  : "overflow-x-auto max-h-[55vh] overflow-y-auto"
+              }
+            >
               <Table>
                 <TableHeader>
                   <TableRow>
