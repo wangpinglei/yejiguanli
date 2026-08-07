@@ -43,6 +43,8 @@ type Props = {
   selectedMonth: string
   canEdit: boolean
   domainOptions: string[]
+  selectedDomainKeys?: string[]
+  onSelectedDomainKeysChange?: (keys: string[]) => void
   onAddDomain?: (name: string) => void
   onRemoveDomain?: (name: string) => Promise<void> | void
   onClearAllDomains?: () => Promise<void> | void
@@ -79,6 +81,8 @@ export default function MBusinessDomainSection({
   selectedMonth,
   canEdit,
   domainOptions,
+  selectedDomainKeys: selectedDomainKeysProp,
+  onSelectedDomainKeysChange,
   onAddDomain,
   onRemoveDomain,
   onClearAllDomains,
@@ -91,9 +95,22 @@ export default function MBusinessDomainSection({
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([])
   const [batchOnlyUncategorized, setBatchOnlyUncategorized] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [selectedDomainKeys, setSelectedDomainKeys] = useState<string[]>([])
+  const [selectedDomainKeysInner, setSelectedDomainKeysInner] = useState<string[]>([])
   const [productPickOpen, setProductPickOpen] = useState(false)
   const [pickedProductIds, setPickedProductIds] = useState<string[]>([])
+
+  const isDomainSelectionControlled = selectedDomainKeysProp !== undefined
+  const selectedDomainKeys = isDomainSelectionControlled
+    ? selectedDomainKeysProp
+    : selectedDomainKeysInner
+
+  function setSelectedDomainKeys(keys: string[] | ((prev: string[]) => string[])) {
+    const next = typeof keys === 'function' ? keys(selectedDomainKeys) : keys
+    if (!isDomainSelectionControlled) {
+      setSelectedDomainKeysInner(next)
+    }
+    onSelectedDomainKeysChange?.(next)
+  }
 
   const uncategorizedProducts = useMemo(
     () => products.filter((p) => getProductDomainKey(p) === UNCATEGORIZED),
@@ -770,7 +787,7 @@ export default function MBusinessDomainSection({
   )
 }
 
-export { UNCATEGORIZED, UNCATEGORIZED_LABEL }
+export { UNCATEGORIZED, UNCATEGORIZED_LABEL, getProductDomainKey }
 
 /** 产品行上的业务域选择器 */
 export function MProductDomainSelect({

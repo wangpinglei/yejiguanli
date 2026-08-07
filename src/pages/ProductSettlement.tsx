@@ -31,6 +31,8 @@ import {
 } from "@/components/ui/select";
 import MBusinessDomainSection, {
   MProductDomainSelect,
+  UNCATEGORIZED,
+  getProductDomainKey,
 } from "./ProductSettlement/components/m-business-domain-section";
 
 function toggleIdInSet(prev: Set<string>, id: string): Set<string> {
@@ -89,12 +91,14 @@ export default function ProductSettlement() {
   const [editKey, setEditKey] = useState<{ productId: string; unitId: string } | null>(null);
   const [settleForm, setSettleForm] = useState({ ...EMPTY_SETTLE_FORM });
 
-  // ---- 批量结算：null=关闭；'all'=当前列表全部产品；string=单个产品 id ----
+  // ---- 批量结算：null=关闭；'all'=所选业务域产品；string=单个产品 id ----
   const [batchSettleTarget, setBatchSettleTarget] = useState<string | "all" | null>(null);
   const [batchSaving, setBatchSaving] = useState(false);
 
   // ---- 折叠：默认全部收起，点击再展开 ----
   const [expandedSettleProductIds, setExpandedSettleProductIds] = useState<Set<string>>(new Set());
+  const [selectedDomainKeys, setSelectedDomainKeys] = useState<string[]>([]);
+  const [settleConfigExpanded, setSettleConfigExpanded] = useState(true);
 
   // 按月过滤销售记录
   const monthlySales = useMemo(() => filterByMonth(salesRecords, selectedMonth), [salesRecords, selectedMonth]);
@@ -112,6 +116,21 @@ export default function ProductSettlement() {
       (p) => !kw || p.name.toLowerCase().includes(kw) || (p.category || "").toLowerCase().includes(kw)
     );
   }, [productsFromSales, search]);
+
+  // 按上方勾选的业务域过滤结算配置产品
+  const settleConfigProducts = useMemo(() => {
+    if (selectedDomainKeys.length === 0) return [];
+    return filteredProducts.filter((p) =>
+      selectedDomainKeys.includes(getProductDomainKey(p)),
+    );
+  }, [filteredProducts, selectedDomainKeys]);
+
+  const selectedDomainLabel = useMemo(() => {
+    if (selectedDomainKeys.length === 0) return "";
+    return selectedDomainKeys
+      .map((k) => (k === UNCATEGORIZED ? "未分类" : k))
+      .join("、");
+  }, [selectedDomainKeys]);
 
   // 某产品×某单位的已配置结算
   const findUps = (productId: string, unitId: string) =>
@@ -214,7 +233,7 @@ export default function ProductSettlement() {
     if (!batchSettleTarget) return;
     const productIds =
       batchSettleTarget === "all"
-        ? filteredProducts.map((p) => p.id)
+        ? settleConfigProducts.map((p) => p.id)
         : [batchSettleTarget];
     if (productIds.length === 0 || units.length === 0) {
       alert("没有可配置的产品或销售单位");
@@ -388,12 +407,6 @@ export default function ProductSettlement() {
           <Input placeholder="搜索产品名称或分类..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
         </div>
         <Badge variant="secondary">共 {filteredProducts.length} 个产品</Badge>
-        {canEdit && filteredProducts.length > 0 && units.length > 0 && (
-          <Button variant="outline" size="sm" onClick={() => openBatchSettle("all")}>
-            <Layers className="mr-2 h-4 w-4" />
-            批量设置全部产品×单位结算
-          </Button>
-        )}
       </div>
 
       <MBusinessDomainSection
@@ -403,24 +416,60 @@ export default function ProductSettlement() {
         selectedMonth={selectedMonth}
         canEdit={canEdit}
         domainOptions={domainOptions}
+        selectedDomainKeys={selectedDomainKeys}
+        onSelectedDomainKeysChange={setSelectedDomainKeys}
         onAddDomain={handleAddDomain}
         onRemoveDomain={handleRemoveDomain}
         onClearAllDomains={handleClearAllDomains}
         onUpdateCategory={handleUpdateProductCategory}
       />
 
-      {/* ==================== 第一部分：产品 × 单位 结算配置 ==================== */}
+      {/* ==================== 第一部分：产品 × 单位 结算配置（按业务域） ==================== */}
+      {selectedDomainKeys.length === 0 ? (
+        <Card className="mb-8 border-dashed">
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
+            请先在上方勾选业务域，再显示对应产品的结算配置
+          </CardContent>
+        </Card>
+      ) : (
       <div className="mb-8 space-y-4">
-        <div>
-          <h3 className="text-base font-semibold">产品结算配置</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            可设置结算比例/金额、生效时间、特殊时段按件结算奖励，以及是否不参与团队管理提成基数
-          </p>
-          <p className="text-xs text-muted-foreground mt-1">
-            产品来自销售记录；业务域请在上方分类区或本行下拉中设置。个人/团队管理提成在「成本管理」。
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <button
+            type="button"
+            className="flex items-start gap-2 text-left min-w-0"
+            onClick={() => setSettleConfigExpanded((v) => !v)}
+          >
+            {settleConfigExpanded
+              ? <ChevronDown className="h-4 w-4 mt-1 shrink-0 text-muted-foreground" />
+              : <ChevronRight className="h-4 w-4 mt-1 shrink-0 text-muted-foreground" />}
+            <div className="min-w-0">
+              <h3 className="text-base font-semibold">产品结算配置</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                当前业务域：{selectedDomainLabel}
+                （{settleConfigProducts.length} 个产品）
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                可设置结算比例/金额、生效时间、特殊时段按件结算奖励，以及是否不参与团队管理提成基数
+              </p>
+            </div>
+          </button>
+          <div className="flex flex-wrap gap-2 shrink-0">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSettleConfigExpanded((v) => !v)}
+            >
+              {settleConfigExpanded ? "折叠" : "展开"}
+            </Button>
+            {canEdit && settleConfigExpanded && settleConfigProducts.length > 0 && units.length > 0 && (
+              <Button variant="outline" size="sm" onClick={() => openBatchSettle("all")}>
+                <Layers className="mr-2 h-4 w-4" />
+                批量设置所选业务域产品
+              </Button>
+            )}
+          </div>
         </div>
-        {filteredProducts.map((product: Product) => {
+        {settleConfigExpanded && settleConfigProducts.map((product: Product) => {
           const productUnits = getUnitsForProduct(product.id);
           const isExpanded = expandedSettleProductIds.has(product.id);
           const configuredCount = productUnits.filter((u) => findUps(product.id, u.id)).length;
@@ -578,14 +627,15 @@ export default function ProductSettlement() {
             </Card>
           );
         })}
-        {filteredProducts.length === 0 && productsFromSales.length > 0 && (
+        {settleConfigExpanded && settleConfigProducts.length === 0 && (
           <Card>
             <CardContent className="py-12 text-center text-muted-foreground text-sm">
-              没有匹配的产品，请调整搜索条件。
+              所选业务域下暂无匹配产品（可调整搜索，或先为产品设置业务域）
             </CardContent>
           </Card>
         )}
       </div>
+      )}
 
       {/* ===== 编辑结算弹窗 ===== */}
       <Dialog open={!!editKey} onOpenChange={(open) => !open && setEditKey(null)}>
@@ -693,10 +743,10 @@ export default function ProductSettlement() {
           <div className="mb-2 rounded-lg bg-cyan-50 border border-cyan-200 px-3 py-2 text-sm space-y-1">
             {batchSettleTarget === "all" ? (
               <>
-                <p>将应用到当前列表 <strong>{filteredProducts.length}</strong> 个产品</p>
+                <p>将应用到所选业务域 <strong>{settleConfigProducts.length}</strong> 个产品</p>
                 <p>× 全部 <strong>{units.length}</strong> 个销售单位</p>
                 <p className="text-xs text-muted-foreground">
-                  共 {filteredProducts.length * units.length} 条配置（覆盖已有规则）
+                  共 {settleConfigProducts.length * units.length} 条配置（覆盖已有规则）
                 </p>
               </>
             ) : (

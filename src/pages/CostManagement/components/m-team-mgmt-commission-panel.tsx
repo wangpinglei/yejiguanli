@@ -11,7 +11,7 @@ import type {
   TeamMgmtCommissionTier,
 } from '@/types'
 import {
-  Building2, Plus, Trash2, Save, Users, Percent, Calculator,
+  Building2, Plus, Trash2, Save, Users, Percent, Calculator, Pencil, X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -57,6 +57,8 @@ export default function MTeamMgmtCommissionPanel({ selectedMonth }: Props) {
   const [draft, setDraft] = useState<DraftRule>(cloneDefaultDraft())
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
+  /** 仅编辑态展开管理人员/档位配置；默认折叠只看预览 */
+  const [isEditing, setIsEditing] = useState(false)
 
   const unitPeople = useMemo(
     () => personnel.filter((p) => p.salesUnitId === activeUnitId && p.status === 'active'),
@@ -81,6 +83,25 @@ export default function MTeamMgmtCommissionPanel({ selectedMonth }: Props) {
       setDraft(cloneDefaultDraft())
     }
     setDirty(false)
+    setIsEditing(false)
+  }
+
+  function handleCancelEdit() {
+    if (dirty && !confirm('有未保存修改，取消编辑将丢弃，是否继续？')) return
+    if (existingRule) {
+      setDraft({
+        managers: existingRule.managers.map((m) => ({ ...m })),
+        tiers: (existingRule.tiers?.length
+          ? existingRule.tiers
+          : DEFAULT_TEAM_MGMT_TIERS
+        ).map((t) => ({ ...t })),
+        note: existingRule.note || '',
+      })
+    } else {
+      setDraft(cloneDefaultDraft())
+    }
+    setDirty(false)
+    setIsEditing(false)
   }
 
   useEffect(() => {
@@ -167,6 +188,7 @@ export default function MTeamMgmtCommissionPanel({ selectedMonth }: Props) {
     })
       .then(() => {
         setDirty(false)
+        setIsEditing(false)
       })
       .catch((error: unknown) => {
         const msg = error instanceof Error ? error.message : '未知错误'
@@ -179,6 +201,7 @@ export default function MTeamMgmtCommissionPanel({ selectedMonth }: Props) {
     if (!existingRule?.id) {
       setDraft(cloneDefaultDraft())
       setDirty(false)
+      setIsEditing(false)
       return
     }
     if (!confirm('确定清除该单位的团队管理提成规则？')) return
@@ -186,6 +209,7 @@ export default function MTeamMgmtCommissionPanel({ selectedMonth }: Props) {
       await deleteTeamMgmtCommissionRule(existingRule.id)
       setDraft(cloneDefaultDraft())
       setDirty(false)
+      setIsEditing(false)
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : '未知错误'
       alert('清除失败: ' + msg)
@@ -193,6 +217,19 @@ export default function MTeamMgmtCommissionPanel({ selectedMonth }: Props) {
   }
 
   const totalWeight = draft.managers.reduce((s, m) => s + (m.weight || 0), 0)
+
+  const managerSummary = draft.managers.length === 0
+    ? '尚未配置管理人员'
+    : draft.managers
+      .map((m) => {
+        const name = personnel.find((p) => p.id === m.personnelId)?.name || '未知'
+        return `${name}(权重${m.weight})`
+      })
+      .join('、')
+
+  const tierSummary = draft.tiers
+    .map((t) => `≥${t.minCompletionPercent}%→${t.commissionRatePercent}%`)
+    .join('；')
 
   return (
     <div className="space-y-4">
@@ -297,6 +334,41 @@ export default function MTeamMgmtCommissionPanel({ selectedMonth }: Props) {
               </div>
             )}
 
+            {!isEditing ? (
+              <Card>
+                <CardContent className="p-4 flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-1.5 text-sm">
+                    <p>
+                      <span className="text-muted-foreground">管理人员：</span>
+                      {managerSummary}
+                    </p>
+                    <p>
+                      <span className="text-muted-foreground">完成率档位：</span>
+                      {tierSummary || '未配置'}
+                    </p>
+                    {draft.note ? (
+                      <p>
+                        <span className="text-muted-foreground">备注：</span>
+                        {draft.note}
+                      </p>
+                    ) : null}
+                  </div>
+                  {canEdit && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0"
+                      onClick={() => setIsEditing(true)}
+                    >
+                      <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                      编辑规则
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            ) : (
+              <>
             <Card>
               <CardContent className="p-4 space-y-3">
                 <div className="flex items-center justify-between gap-2">
@@ -499,6 +571,10 @@ export default function MTeamMgmtCommissionPanel({ selectedMonth }: Props) {
                   <Save className="mr-1.5 h-4 w-4" />
                   {saving ? '保存中…' : '保存本单位规则'}
                 </Button>
+                <Button variant="outline" disabled={saving} onClick={handleCancelEdit}>
+                  <X className="mr-1.5 h-4 w-4" />
+                  取消编辑
+                </Button>
                 <Button variant="outline" disabled={saving} onClick={handleClear}>
                   清除规则
                 </Button>
@@ -506,6 +582,8 @@ export default function MTeamMgmtCommissionPanel({ selectedMonth }: Props) {
                   <span className="text-xs text-amber-700 self-center">有未保存修改</span>
                 )}
               </div>
+            )}
+              </>
             )}
           </div>
         </div>
