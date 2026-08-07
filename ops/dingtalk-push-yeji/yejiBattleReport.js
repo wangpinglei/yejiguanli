@@ -1,5 +1,6 @@
 /**
  * 业绩系统单位战报：拉 API → SVG → sharp PNG → 钉钉 markdown（对齐现有战报出图方式）
+ * 支持多单位分别推到不同 webhook（YEJI_BATTLE_TARGETS）
  */
 const fs = require('fs')
 const path = require('path')
@@ -11,6 +12,23 @@ const PUBLIC_DIR = path.join(__dirname, '..', 'public', 'war-reports')
 const SENT_FILE = path.join(__dirname, '..', 'data', 'sent_yeji_battle_reports.json')
 /** 与现有钉钉战报同一 URL 前缀，走同一域名反代 */
 const PUBLIC_PATH_PREFIX = '/war-reports'
+
+const HAINAN_WEBHOOK =
+  'https://oapi.dingtalk.com/robot/send?access_token=d64d7d63b39a6c65988de2deec51885d6680aa0df0afbf8f13e463528148587c'
+const SHENZHEN_WEBHOOK =
+  'https://oapi.dingtalk.com/robot/send?access_token=9a3807029645a88017d8c367b5813a816fbc475ecd5a5fb9db2c6924d87fcf27'
+const FUZHOU_WEBHOOK =
+  'https://oapi.dingtalk.com/robot/send?access_token=44060aaa07294373e9fcc93333c43c2d6e9c86a3e20a1482a11284b851289dc4'
+const FOSHAN_WEBHOOK =
+  'https://oapi.dingtalk.com/robot/send?access_token=d32c7adc8fcf5e7eb9aa58195c6d8c2e4dc757c18643d4f75975bc8e54d15d9e'
+
+/** 默认：海南 / 深圳 / 抚州 / 佛山 → 各自群机器人 */
+const DEFAULT_TARGETS = [
+  { unitName: '海南运营中心', webhook: HAINAN_WEBHOOK },
+  { unitName: '深圳运营中心', webhook: SHENZHEN_WEBHOOK },
+  { unitName: '抚州运营中心', webhook: FUZHOU_WEBHOOK },
+  { unitName: '佛山运营中心', webhook: FOSHAN_WEBHOOK },
+]
 
 function addLog(msg) {
   console.log(`[单位战报] ${msg}`)
@@ -44,47 +62,45 @@ function getPublicBase() {
     process.env.YEJI_BATTLE_PUBLIC_BASE ||
     process.env.WAR_REPORT_PUBLIC_BASE_URL ||
     process.env.PUBLIC_BASE_URL ||
-    'http://101.132.42.171'
+    'https://isales.santi.ren'
   ).replace(/\/$/, '')
 }
 
-function getWebhookUrl() {
-  return (
-    process.env.YEJI_BATTLE_WEBHOOK_URL ||
-    process.env.DINGTALK_WEBHOOK_URL ||
-    ''
-  )
+/**
+ * 解析推送目标
+ * YEJI_BATTLE_TARGETS 格式：单位名|webhook,单位名|webhook
+ * 未配置时用 DEFAULT_TARGETS（海南/深圳/抚州/佛山）
+ */
+function getPushTargets() {
+  const raw = (process.env.YEJI_BATTLE_TARGETS || '').trim()
+  if (!raw) return DEFAULT_TARGETS
+
+  const list = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const idx = item.indexOf('|')
+      if (idx < 0) return null
+      const unitName = item.slice(0, idx).trim()
+      const webhook = item.slice(idx + 1).trim()
+      if (!unitName || !webhook) return null
+      return { unitName, webhook }
+    })
+    .filter(Boolean)
+
+  return list.length ? list : DEFAULT_TARGETS
 }
 
-/** 只推指定单位，默认：海南运营中心 */
-function getTargetUnitName() {
-  return (process.env.YEJI_BATTLE_UNIT_NAME || '海南运营中心').trim()
+function matchUnit(units, unitName) {
+  const name = String(unitName || '').trim()
+  return (units || []).find((u) => String(u.salesUnitName || '').trim() === name)
 }
 
-function filterTargetUnits(units) {
-  const name = getTargetUnitName()
-  const id = (process.env.YEJI_BATTLE_UNIT_ID || '').trim()
-  const list = Array.isArray(units) ? units : []
-  const matched = list.filter((u) => {
-    if (id && String(u.salesUnitId) === id) return true
-    if (name && String(u.salesUnitName || '').trim() === name) return true
-    return false
-  })
-  if (!matched.length) {
-    addLog(
-      `未找到目标单位「${name || id}」，当前单位: ${
-        list.map((u) => u.salesUnitName).join('、') || '(空)'
-      }`,
-    )
-  }
-  return matched
-}
-
-async function sendMarkdown(title, text) {
-  const url = getWebhookUrl()
-  if (!url) throw new Error('未配置 YEJI_BATTLE_WEBHOOK_URL')
+async function sendMarkdown(webhook, title, text) {
+  if (!webhook) throw new Error('未配置 webhook')
   const res = await axios.post(
-    url,
+    webhook,
     {
       msgtype: 'markdown',
       markdown: { title, text },
@@ -121,13 +137,11 @@ async function fetchBattleData(month) {
 async function renderPng(report) {
   ensureDirs()
   const svg = buildYejiBattleSvg(report)
-  const dateKey = (report.yearMonth || getDateKey()).replace(/-/g, '')
   const safeUnit = String(report.salesUnitId || 'unit').replace(/[^\w-]/g, '_')
   const fileName = `yeji-battle-${safeUnit}-${report.yearMonth || getDateKey()}.png`
   const filePath = path.join(PUBLIC_DIR, fileName)
   const latestPath = path.join(PUBLIC_DIR, `yeji-battle-${safeUnit}-latest.png`)
   const pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer()
-  // 落盘到 public/war-reports，与钉钉战报同一反代路径
   fs.writeFileSync(filePath, pngBuffer)
   fs.writeFileSync(latestPath, pngBuffer)
   const publicBase = getPublicBase()
@@ -142,9 +156,14 @@ async function renderPng(report) {
  */
 async function generatePreview(month) {
   const data = await fetchBattleData(month || getDateKey())
-  const units = filterTargetUnits(data.units || [])
+  const targets = getPushTargets()
   const images = []
-  for (const unit of units) {
+  for (const t of targets) {
+    const unit = matchUnit(data.units, t.unitName)
+    if (!unit) {
+      addLog(`预览跳过：未找到单位「${t.unitName}」`)
+      continue
+    }
     const { imageUrl, fileName } = await renderPng(unit)
     images.push({
       salesUnitId: unit.salesUnitId,
@@ -153,12 +172,16 @@ async function generatePreview(month) {
       fileName,
     })
   }
-  addLog(`已生成 ${images.length} 张预览图（仅 ${getTargetUnitName()}）`)
-  return { month: data.month, images, targetUnit: getTargetUnitName() }
+  addLog(`已生成 ${images.length} 张预览图`)
+  return {
+    month: data.month,
+    images,
+    targets: targets.map((t) => t.unitName),
+  }
 }
 
 /**
- * 推送全部单位战报图
+ * 按目标列表逐个单位出图并推到对应 webhook
  * @param {{ month?: string, force?: boolean, slot?: string }} options
  */
 async function pushAll(options = {}) {
@@ -173,49 +196,68 @@ async function pushAll(options = {}) {
     return { skipped: true, reason: 'already_sent', key: dedupeKey }
   }
 
+  const targets = getPushTargets()
   addLog(
-    `正在拉取单位战报... month=${month} slot=${slot} 目标=${getTargetUnitName()}`,
+    `正在拉取单位战报... month=${month} slot=${slot} 目标=${targets
+      .map((t) => t.unitName)
+      .join('、')}`,
   )
   const data = await fetchBattleData(month)
-  const units = filterTargetUnits(data.units || [])
-  if (!units.length) {
-    addLog('无匹配的目标单位，跳过推送')
-    return {
-      skipped: true,
-      reason: 'unit_not_found',
-      targetUnit: getTargetUnitName(),
+  const allUnits = data.units || []
+
+  const results = []
+  const errors = []
+  for (const t of targets) {
+    const unit = matchUnit(allUnits, t.unitName)
+    if (!unit) {
+      const msg = `未找到单位「${t.unitName}」`
+      addLog(msg)
+      errors.push({ unitName: t.unitName, error: msg })
+      continue
+    }
+    try {
+      addLog(`生成图片: ${unit.salesUnitName}`)
+      const { imageUrl } = await renderPng(unit)
+      const title = `${unit.salesUnitName} ${month} 单位战报`
+      let markdown = `### ${title}\n\n`
+      markdown += `团队总业绩 **${fmtShort(unit.teamTotal)}**`
+      markdown += `　团队目标 **${fmtShort(unit.effectiveTeamTarget)}**\n\n`
+      markdown += `![战报](${imageUrl})`
+      await sendMarkdown(t.webhook, title, markdown)
+      results.push({
+        salesUnitId: unit.salesUnitId,
+        salesUnitName: unit.salesUnitName,
+        imageUrl,
+      })
+    } catch (err) {
+      const msg = err && err.message ? err.message : String(err)
+      addLog(`推送失败「${t.unitName}」: ${msg}`)
+      errors.push({ unitName: t.unitName, error: msg })
     }
   }
 
-  const results = []
-  for (const unit of units) {
-    addLog(`生成图片: ${unit.salesUnitName}`)
-    const { imageUrl } = await renderPng(unit)
-    const title = `${unit.salesUnitName} ${month} 单位战报`
-    let markdown = `### ${title}\n\n`
-    markdown += `团队总业绩 **${fmtShort(unit.teamTotal)}**`
-    markdown += `　团队目标 **${fmtShort(unit.effectiveTeamTarget)}**\n\n`
-    markdown += `![战报](${imageUrl})`
-    await sendMarkdown(title, markdown)
-    results.push({
-      salesUnitId: unit.salesUnitId,
-      salesUnitName: unit.salesUnitName,
-      imageUrl,
-    })
+  if (!results.length) {
+    return {
+      skipped: true,
+      reason: 'all_failed_or_empty',
+      errors,
+      targets: targets.map((t) => t.unitName),
+    }
   }
 
   sent[dedupeKey] = {
     at: new Date().toISOString(),
     count: results.length,
-    targetUnit: getTargetUnitName(),
+    units: results.map((r) => r.salesUnitName),
   }
   saveSent(sent)
-  addLog(`✅ 已推送 ${results.length} 张（${getTargetUnitName()}）(${dedupeKey})`)
+  addLog(`✅ 已推送 ${results.length} 张 (${dedupeKey})`)
   return {
     skipped: false,
     results,
+    errors,
     key: dedupeKey,
-    targetUnit: getTargetUnitName(),
+    targets: targets.map((t) => t.unitName),
   }
 }
 
@@ -229,4 +271,5 @@ module.exports = {
   generatePreview,
   pushAll,
   fetchBattleData,
+  getPushTargets,
 }
