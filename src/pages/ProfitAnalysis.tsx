@@ -165,31 +165,51 @@ unitIds,
       });
   }, [filterUnit, salesUnits, personnel, salesRecords, products, costRecords, monthlyAdjustments, visibleUnitProductSettlements, productPersonCommissions, teamMgmtContext, selectedMonth]);
 
-  // 各单位对比（按月度）
+  // 各单位对比（按月度；跟随顶部单位筛选）
   const unitComparison = useMemo(() => {
-    return salesUnits.map((unit) => {
+    const unitsToShow =
+      filterUnit === "all"
+        ? salesUnits
+        : salesUnits.filter((u) => u.id === filterUnit);
+    return unitsToShow.map((unit) => {
       const unitSales = monthlySales.filter((s) => s.salesUnitId === unit.id);
       const salesAmount = unitSales.reduce((sum, s) => sum + s.totalAmount, 0);
       const settlementIncome = calcSettlementIncome(unitSales);
       const unitSalary = getTotalSalaryCost(
-[unit.id],
+        [unit.id],
         personnel,
         salesRecords,
         products,
         selectedMonth,
-        monthlyAdjustments,productPersonCommissions,
-      teamMgmtContext,
-    );
+        monthlyAdjustments,
+        productPersonCommissions,
+        teamMgmtContext,
+      );
       const commission = unitSalary.grandSalesCommission;
       const productProfit = settlementIncome - commission;
-      const manualCost = monthlyCosts.filter((c) => c.salesUnitId === unit.id).reduce((sum, c) => sum + c.totalCost, 0);
+      const manualCost = monthlyCosts
+        .filter((c) => c.salesUnitId === unit.id)
+        .reduce((sum, c) => sum + c.totalCost, 0);
       const salaryCost = unitSalary.grandTotal;
       const cost = manualCost + salaryCost;
       const profit = settlementIncome - cost;
       const margin = settlementIncome > 0 ? (profit / settlementIncome) * 100 : 0;
-      return { name: unit.name, salesAmount, settlementIncome, commission, productProfit, cost, profit, margin };
+      return {
+        name: unit.name,
+        salesAmount,
+        settlementIncome,
+        commission,
+        productProfit,
+        cost,
+        profit,
+        margin,
+      };
     }).sort((a, b) => b.profit - a.profit);
-  }, [salesUnits, monthlySales, monthlyCosts, personnel, salesRecords, products, selectedMonth, monthlyAdjustments, visibleUnitProductSettlements, productPersonCommissions, teamMgmtContext]);
+  }, [
+    salesUnits, filterUnit, monthlySales, monthlyCosts, personnel, salesRecords,
+    products, selectedMonth, monthlyAdjustments, visibleUnitProductSettlements,
+    productPersonCommissions, teamMgmtContext,
+  ]);
 
   // 成本结构（按月度）
   const costStructure = useMemo(() => {
@@ -494,7 +514,11 @@ unitIds,
       <Card className="mb-6">
         <CardHeader>
           <CardTitle className="text-base">各单位收支利润明细</CardTitle>
-          <CardDescription>按销售单位对比营收、成本与利润</CardDescription>
+          <CardDescription>
+            {filterUnit === "all"
+              ? "按销售单位对比营收、成本与利润（当前：全部单位）"
+              : `仅显示所选单位：${salesUnits.find((u) => u.id === filterUnit)?.name || "-"}`}
+          </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
