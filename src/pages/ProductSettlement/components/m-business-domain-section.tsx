@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import type { Product, SalesRecord, UnitProductSettlement } from '@/types'
 import { formatCurrency } from '@/lib/format'
 import { calcSaleSettlementIncome } from '@/lib/settlement'
-import { Tags, Plus, CheckSquare, X, Eraser } from 'lucide-react'
+import { Tags, Plus, CheckSquare, X, Eraser, Pencil, Filter } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -85,13 +85,25 @@ export default function MBusinessDomainSection({
   onUpdateCategory,
 }: Props) {
   const [newDomain, setNewDomain] = useState('')
+  const [isDomainEditMode, setIsDomainEditMode] = useState(false)
   const [batchOpen, setBatchOpen] = useState(false)
   const [batchDomain, setBatchDomain] = useState('')
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([])
+  const [batchOnlyUncategorized, setBatchOnlyUncategorized] = useState(false)
   const [saving, setSaving] = useState(false)
   const [selectedDomainKeys, setSelectedDomainKeys] = useState<string[]>([])
   const [productPickOpen, setProductPickOpen] = useState(false)
   const [pickedProductIds, setPickedProductIds] = useState<string[]>([])
+
+  const uncategorizedProducts = useMemo(
+    () => products.filter((p) => getProductDomainKey(p) === UNCATEGORIZED),
+    [products],
+  )
+
+  const batchProductList = useMemo(
+    () => (batchOnlyUncategorized ? uncategorizedProducts : products),
+    [batchOnlyUncategorized, uncategorizedProducts, products],
+  )
 
   const productMetricMap = useMemo(() => {
     const map = new Map<string, ProductMetric>()
@@ -229,9 +241,13 @@ export default function MBusinessDomainSection({
     setNewDomain('')
   }
 
-  function openBatchAssign() {
+  function openBatchAssign(onlyUncategorized = false) {
     setBatchDomain(domainOptions[0] || '')
-    setSelectedProductIds([])
+    setBatchOnlyUncategorized(onlyUncategorized)
+    const list = onlyUncategorized
+      ? products.filter((p) => getProductDomainKey(p) === UNCATEGORIZED)
+      : []
+    setSelectedProductIds(list.map((p) => p.id))
     setBatchOpen(true)
   }
 
@@ -239,6 +255,12 @@ export default function MBusinessDomainSection({
     setSelectedProductIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     )
+  }
+
+  function toggleBatchSelectAll() {
+    const ids = batchProductList.map((p) => p.id)
+    const allSelected = ids.length > 0 && ids.every((id) => selectedProductIds.includes(id))
+    setSelectedProductIds(allSelected ? [] : ids)
   }
 
   function toggleDomain(key: string) {
@@ -321,8 +343,19 @@ export default function MBusinessDomainSection({
               组合多选产品
             </Button>
           )}
+          {canEdit && uncategorizedProducts.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-amber-300 text-amber-800 hover:bg-amber-50"
+              onClick={() => openBatchAssign(true)}
+            >
+              <Filter className="mr-1.5 h-3.5 w-3.5" />
+              查阅未分类（{uncategorizedProducts.length}）
+            </Button>
+          )}
           {canEdit && products.length > 0 && (
-            <Button variant="outline" size="sm" onClick={openBatchAssign}>
+            <Button variant="outline" size="sm" onClick={() => openBatchAssign(false)}>
               <CheckSquare className="mr-1.5 h-3.5 w-3.5" />
               勾选产品归入业务域
             </Button>
@@ -347,7 +380,16 @@ export default function MBusinessDomainSection({
             <Plus className="mr-1 h-3.5 w-3.5" />
             添加
           </Button>
-          {domainOptions.length > 0 && onClearAllDomains && (
+          <Button
+            type="button"
+            variant={isDomainEditMode ? 'default' : 'outline'}
+            onClick={() => setIsDomainEditMode((v) => !v)}
+            disabled={saving}
+          >
+            <Pencil className="mr-1 h-3.5 w-3.5" />
+            {isDomainEditMode ? '完成编辑' : '编辑业务域'}
+          </Button>
+          {isDomainEditMode && domainOptions.length > 0 && onClearAllDomains && (
             <Button
               type="button"
               variant="outline"
@@ -365,10 +407,10 @@ export default function MBusinessDomainSection({
                 <Badge
                   key={d}
                   variant="secondary"
-                  className="bg-teal-50 text-teal-800 gap-1 pr-1"
+                  className={`bg-teal-50 text-teal-800 gap-1 ${isDomainEditMode ? 'pr-1' : ''}`}
                 >
                   {d}
-                  {onRemoveDomain && (
+                  {isDomainEditMode && onRemoveDomain && (
                     <button
                       type="button"
                       className="ml-0.5 rounded-sm p-0.5 hover:bg-teal-200/80 disabled:opacity-50"
@@ -382,6 +424,11 @@ export default function MBusinessDomainSection({
                 </Badge>
               ))}
             </div>
+          )}
+          {isDomainEditMode && (
+            <p className="w-full text-xs text-muted-foreground pt-0.5">
+              编辑模式下可删除单个业务域或清空全部；完成后请点「完成编辑」
+            </p>
           )}
         </div>
       )}
@@ -622,26 +669,48 @@ export default function MBusinessDomainSection({
               />
             </div>
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <Label>勾选产品</Label>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={() =>
-                    setSelectedProductIds(
-                      selectedProductIds.length === products.length
-                        ? []
-                        : products.map((p) => p.id),
-                    )
-                  }
-                >
-                  {selectedProductIds.length === products.length ? '取消全选' : '全选'}
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant={batchOnlyUncategorized ? 'default' : 'ghost'}
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => {
+                      const next = !batchOnlyUncategorized
+                      setBatchOnlyUncategorized(next)
+                      if (next) {
+                        setSelectedProductIds(
+                          products
+                            .filter((p) => getProductDomainKey(p) === UNCATEGORIZED)
+                            .map((p) => p.id),
+                        )
+                      }
+                    }}
+                  >
+                    <Filter className="mr-1 h-3 w-3" />
+                    仅未分类
+                    {uncategorizedProducts.length > 0
+                      ? `（${uncategorizedProducts.length}）`
+                      : ''}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={toggleBatchSelectAll}
+                  >
+                    {batchProductList.length > 0
+                    && batchProductList.every((p) => selectedProductIds.includes(p.id))
+                      ? '取消全选'
+                      : '全选'}
+                  </Button>
+                </div>
               </div>
               <div className="max-h-64 overflow-y-auto space-y-1 rounded-lg border p-2">
-                {products.map((p) => {
+                {batchProductList.map((p) => {
                   const checked = selectedProductIds.includes(p.id)
                   return (
                     <label
@@ -662,6 +731,11 @@ export default function MBusinessDomainSection({
                     </label>
                   )
                 })}
+                {batchProductList.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-6">
+                    {batchOnlyUncategorized ? '暂无未分类产品' : '暂无产品'}
+                  </p>
+                )}
               </div>
               {selectedProductIds.length > 0 && (
                 <div className="rounded-lg border bg-muted/20 p-2 text-xs space-y-1">

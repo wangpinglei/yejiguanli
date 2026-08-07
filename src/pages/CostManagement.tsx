@@ -588,7 +588,7 @@ export default function CostManagement() {
         <CardContent className="p-0">
           <div className="flex items-center gap-2 border-b px-4 py-3">
             <Calculator className="h-5 w-5 text-blue-600" />
-            <h3 className="text-base font-semibold">自动计入人力成本（{selectedMonth} 月度）</h3>
+            <h3 className="text-base font-semibold">自动计入人力成本 / 实时薪资（{selectedMonth} 月度）</h3>
             <Badge variant="secondary" className="ml-auto">系统自动计算</Badge>
           </div>
           <div className="overflow-x-auto">

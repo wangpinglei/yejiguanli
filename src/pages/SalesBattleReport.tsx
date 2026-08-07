@@ -5,7 +5,6 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, formatPercent, getYearMonth, getCurrentYearMonth } from "@/lib/format";
 import {
-  calculateMonthlySalary,
   filterByMonth,
   getPersonalSales,
   isSalesBattlePosition,
@@ -20,12 +19,10 @@ import {
   Edit3,
   Save,
   X,
-  Wallet,
   TrendingUp,
   Users as UsersIcon,
   CheckCircle2,
   XCircle,
-  Eye,
   Settings,
   Trash2,
   Tag,
@@ -62,25 +59,15 @@ import {
 export default function SalesBattleReport() {
   const { user } = useAuth();
   const {
-    products,
     performanceTargets,
     upsertPerformanceTarget,
     batchUpsertPerformanceTargets,
-    monthlyAdjustments,
     positionGroupLabels,
     addPositionGroupLabel,
     updatePositionGroupLabel,
     deletePositionGroupLabel,
     matchPositionLabel,
-    productPersonCommissions,
-    teamMgmtCommissionRules,
-    unitProductSettlements,
   } = useData();
-  const teamMgmtContext = useMemo(() => ({
-    rules: teamMgmtCommissionRules,
-    targets: performanceTargets,
-    upsList: unitProductSettlements,
-  }), [teamMgmtCommissionRules, performanceTargets, unitProductSettlements]);
   const {
     visibleSalesUnits: salesUnits,
     visiblePersonnel: personnel,
@@ -165,14 +152,6 @@ export default function SalesBattleReport() {
         ? (personalSales / targetAmount) * 100
         : 0;
 
-      // 实时计算该人员薪资
-      const adj = monthlyAdjustments.find(
-        (a) => a.personnelId === p.id && a.yearMonth === yearMonth
-      );
-      const salary = calculateMonthlySalary(p, salesRecords, products, yearMonth, adj, productPersonCommissions, teamMgmtContext);
-      const totalCost =
-        salary.total + (p.socialInsurance || 0) + (p.housingFund || 0);
-
       // 按岗位匹配特殊分组（如外援团）
       const positionMatch = matchPositionLabel(p.position || "");
 
@@ -182,8 +161,6 @@ export default function SalesBattleReport() {
         personalSales,
         diff,
         completionRate,
-        salary,
-        totalCost,
         positionMatch,
         isExternalPerson: false,
       };
@@ -227,19 +204,6 @@ export default function SalesBattleReport() {
         personalSales: sales,
         diff: 0,
         completionRate: 0,
-        salary: {
-          baseSalary: 0,
-          performance: 0,
-          positionAllowance: 0,
-          managementCommission: 0,
-          personalCommission: 0,
-          productCommission: 0,
-          leaveDeduction: 0,
-          otherBonus: 0,
-          otherDeduction: 0,
-          total: 0,
-        },
-        totalCost: 0,
         positionMatch,
         isExternalPerson: true,
       });
@@ -248,9 +212,7 @@ export default function SalesBattleReport() {
     return rows;
   }, [
     battlePersonnel, unitPersonnel, unitMonthlyRecords, personnelTargets,
-    monthlyAdjustments, yearMonth, salesRecords, products, matchPositionLabel,
-    unitId, productPersonCommissions,
-  , teamMgmtContext]);
+    yearMonth, matchPositionLabel, unitId]);
 
   // 团队合计（仅战报表内人员目标）
   const totalTarget = useMemo(() => {
@@ -278,15 +240,20 @@ export default function SalesBattleReport() {
 
   const saveUnitTarget = async () => {
     if (!unitId) return;
-    await upsertPerformanceTarget({
-      salesUnitId: unitId,
-      yearMonth,
-      personnelId: undefined,
-      targetAmount: unitTargetDraft,
-      note: unitTargetNote,
-      createdBy: user?.name,
-    });
-    setEditingUnitTarget(false);
+    try {
+      await upsertPerformanceTarget({
+        salesUnitId: unitId,
+        yearMonth,
+        personnelId: undefined,
+        targetAmount: Number(unitTargetDraft) || 0,
+        note: unitTargetNote,
+        createdBy: user?.name,
+      });
+      setEditingUnitTarget(false);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '保存失败';
+      alert('保存单位目标失败：' + msg);
+    }
   };
 
   // 人员目标行内编辑
@@ -304,15 +271,20 @@ export default function SalesBattleReport() {
 
   const savePersonTarget = async () => {
     if (!editingPersonId || !unitId) return;
-    await upsertPerformanceTarget({
-      salesUnitId: unitId,
-      yearMonth,
-      personnelId: editingPersonId,
-      targetAmount: personTargetDraft,
-      note: "",
-      createdBy: user?.name,
-    });
-    setEditingPersonId(null);
+    try {
+      await upsertPerformanceTarget({
+        salesUnitId: unitId,
+        yearMonth,
+        personnelId: editingPersonId,
+        targetAmount: Number(personTargetDraft) || 0,
+        note: '',
+        createdBy: user?.name,
+      });
+      setEditingPersonId(null);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '保存失败';
+      alert('保存业绩目标失败：' + msg);
+    }
   };
 
   const cancelPersonTarget = () => {
@@ -339,16 +311,21 @@ export default function SalesBattleReport() {
 
   const saveBatchTargets = async () => {
     if (!unitId) return;
-    const targets = battlePersonnel.map((p) => ({
-      salesUnitId: unitId,
-      yearMonth,
-      personnelId: p.id,
-      targetAmount: batchDraft[p.id] || 0,
-      note: "",
-      createdBy: user?.name,
-    }));
-    await batchUpsertPerformanceTargets(targets);
-    setBatchOpen(false);
+    try {
+      const targets = battlePersonnel.map((p) => ({
+        salesUnitId: unitId,
+        yearMonth,
+        personnelId: p.id,
+        targetAmount: Number(batchDraft[p.id]) || 0,
+        note: '',
+        createdBy: user?.name,
+      }));
+      await batchUpsertPerformanceTargets(targets);
+      setBatchOpen(false);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '保存失败';
+      alert('批量保存业绩目标失败：' + msg);
+    }
   };
 
   // 岗位分组配置弹窗
@@ -409,14 +386,6 @@ export default function SalesBattleReport() {
     return Array.from(set);
   }, [unitPersonnel]);
 
-  // 薪资明细弹窗
-  const [salaryDetailPerson, setSalaryDetailPerson] = useState<Personnel | null>(null);
-
-  // 人力成本合计
-  const totalSalaryCost = useMemo(() => {
-    return battleRows.reduce((sum, r) => sum + r.totalCost, 0);
-  }, [battleRows]);
-
   // 团队目标（人员目标合计 + 单位整体目标）取最大
   const effectiveTeamTarget = totalTarget > 0 ? totalTarget : (unitTarget?.targetAmount || 0);
 
@@ -470,7 +439,7 @@ export default function SalesBattleReport() {
     <div className="space-y-4">
       <PageHeader
         title="销售单位战报"
-        description="按月份和单位实时跟踪业绩目标完成情况，关联后台绩效条件显示实时薪资和单位成本"
+        description="按月份和单位实时跟踪业绩目标完成情况；人员实时薪资请在「成本管理」中查看"
       />
 
       {/* 筛选区 */}
@@ -720,13 +689,12 @@ export default function SalesBattleReport() {
                 <TableHead className="text-center font-bold text-pink-900 border-r border-pink-200">业绩目标</TableHead>
                 <TableHead className="text-center font-bold text-pink-900 border-r border-pink-200">个人业绩合计</TableHead>
                 <TableHead className="text-center font-bold text-pink-900 border-r border-pink-200">业绩差额</TableHead>
-                <TableHead className="text-center font-bold text-pink-900 border-r border-pink-200">个人完成率</TableHead>
-                <TableHead className="text-center font-bold text-pink-900">实时薪资</TableHead>
+                <TableHead className="text-center font-bold text-pink-900">个人完成率</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {battleRows.map((row) => {
-                const { person, targetAmount, personalSales, diff, completionRate, totalCost, positionMatch, isExternalPerson } = row;
+                const { person, targetAmount, personalSales, diff, completionRate, positionMatch, isExternalPerson } = row;
                 const isSpecialGroup = !!positionMatch; // 命中岗位分组规则
                 // 标签颜色映射
                 const colorClass = positionMatch
@@ -814,21 +782,6 @@ export default function SalesBattleReport() {
                         <span className="text-muted-foreground">—</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-center">
-                      {isExternalPerson ? (
-                        <span className="text-muted-foreground text-sm">—</span>
-                      ) : (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setSalaryDetailPerson(person)}
-                          className="h-7 px-2"
-                        >
-                          <Eye className="mr-1 h-3 w-3" />
-                          {formatCurrency(totalCost)}
-                        </Button>
-                      )}
-                    </TableCell>
                   </TableRow>
                 );
               })}
@@ -852,14 +805,11 @@ export default function SalesBattleReport() {
                     totalTarget > 0 ? (teamTotal / totalTarget) * 100 : 0
                   )}
                 </TableCell>
-                <TableCell className="text-center text-pink-900">
-                  {formatCurrency(totalSalaryCost)}
-                </TableCell>
               </TableRow>
 
               {/* 团队汇总行 */}
               <TableRow className="bg-yellow-50 border-t border-yellow-200">
-                <TableCell colSpan={6} className="py-3">
+                <TableCell colSpan={5} className="py-3">
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center justify-center gap-8 flex-wrap">
                       <div className="flex items-center gap-2">
@@ -903,7 +853,7 @@ export default function SalesBattleReport() {
 
               {battleRows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-12 text-center text-muted-foreground">
+                  <TableCell colSpan={5} className="py-12 text-center text-muted-foreground">
                     该单位该月暂无在职销售人员
                   </TableCell>
                 </TableRow>
@@ -911,29 +861,6 @@ export default function SalesBattleReport() {
             </TableBody>
           </Table>
         </div>
-      </Card>
-
-      {/* 单位总成本卡片 */}
-      <Card className="border-primary/20 bg-primary/5">
-        <CardContent className="pt-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                <Wallet className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">
-                  {currentUnit?.name} · {yearMonth.split("-")[0]}年{yearMonth.split("-")[1]}月 · 单位总人力成本
-                </p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  含薪资 + 社保（企业）+ 公积金（企业）- 请假扣款 + 其他调整
-                  （销售提成已计入管理/个人提成）
-                </p>
-              </div>
-            </div>
-            <p className="text-3xl font-bold text-primary">{formatCurrency(totalSalaryCost)}</p>
-          </div>
-        </CardContent>
       </Card>
 
       {/* 人员目标批量录入弹窗 */}
@@ -976,98 +903,6 @@ export default function SalesBattleReport() {
               <Save className="mr-2 h-4 w-4" />
               批量保存
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* 实时薪资明细弹窗 */}
-      <Dialog open={!!salaryDetailPerson} onOpenChange={(open) => !open && setSalaryDetailPerson(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>实时薪资明细 - {salaryDetailPerson?.name}</DialogTitle>
-            <DialogDescription>
-              {yearMonth.split("-")[0]}年{yearMonth.split("-")[1]}月 · 基于后台设置的绩效条件实时计算
-            </DialogDescription>
-          </DialogHeader>
-          {salaryDetailPerson && (() => {
-            const row = battleRows.find((r) => r.person.id === salaryDetailPerson.id);
-            if (!row) return null;
-            const { salary, person, totalCost } = row;
-            return (
-              <div className="space-y-3 py-2">
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div className="flex justify-between rounded-md border px-3 py-2">
-                    <span className="text-muted-foreground">底薪</span>
-                    <span className="font-medium">{formatCurrency(salary.baseSalary)}</span>
-                  </div>
-                  <div className="flex justify-between rounded-md border px-3 py-2">
-                    <span className="text-muted-foreground">绩效</span>
-                    <span className="font-medium">{formatCurrency(salary.performance)}</span>
-                  </div>
-                  <div className="flex justify-between rounded-md border px-3 py-2">
-                    <span className="text-muted-foreground">岗位补贴</span>
-                    <span className="font-medium">{formatCurrency(salary.positionAllowance)}</span>
-                  </div>
-                  <div className="flex justify-between rounded-md border border-emerald-200 bg-emerald-50/30 px-3 py-2">
-                    <span className="text-muted-foreground">管理提成</span>
-                    <span className="font-medium text-emerald-600">{formatCurrency(salary.managementCommission)}</span>
-                  </div>
-                  <div className="flex justify-between rounded-md border border-orange-200 bg-orange-50/30 px-3 py-2">
-                    <span className="text-muted-foreground">个人提成</span>
-                    <span className="font-medium text-orange-600">{formatCurrency(salary.personalCommission)}</span>
-                  </div>
-                  <div className="flex justify-between rounded-md border border-red-200 bg-red-50/30 px-3 py-2">
-                    <span className="text-muted-foreground">请假扣款</span>
-                    <span className="font-medium text-red-600">-{formatCurrency(salary.leaveDeduction)}</span>
-                  </div>
-                  <div className="flex justify-between rounded-md border px-3 py-2">
-                    <span className="text-muted-foreground">其他加项/减项</span>
-                    <span className="font-medium">{formatCurrency(salary.otherBonus - salary.otherDeduction)}</span>
-                  </div>
-                </div>
-
-                <div className="flex justify-between rounded-lg bg-blue-50 px-4 py-3">
-                  <span className="font-semibold">实际月薪</span>
-                  <span className="text-lg font-bold text-blue-600">{formatCurrency(salary.total)}</span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div className="flex justify-between rounded-md border border-red-200 bg-red-50/30 px-3 py-2">
-                    <span className="text-muted-foreground">社保（企业）</span>
-                    <span className="font-medium text-red-600">{formatCurrency(person.socialInsurance || 0)}</span>
-                  </div>
-                  <div className="flex justify-between rounded-md border border-cyan-200 bg-cyan-50/30 px-3 py-2">
-                    <span className="text-muted-foreground">公积金（企业）</span>
-                    <span className="font-medium text-cyan-600">{formatCurrency(person.housingFund || 0)}</span>
-                  </div>
-                </div>
-
-                <div className="flex justify-between rounded-lg bg-primary/5 px-4 py-3">
-                  <span className="font-semibold">单位人力成本</span>
-                  <span className="text-lg font-bold text-primary">{formatCurrency(totalCost)}</span>
-                </div>
-
-                {/* 绩效条件 */}
-                <div className="space-y-1.5 rounded-md border p-3">
-                  <p className="text-xs font-medium text-muted-foreground">后台绩效条件：</p>
-                  {person.salary.managementCommissionCondition && (
-                    <p className="text-xs">· 管理提成：{person.salary.managementCommissionCondition}（团队超 ¥{person.salary.managementCommissionThreshold.toLocaleString()} 部分按 {person.salary.managementCommissionRate}%）</p>
-                  )}
-                  {person.salary.personalCommissionCondition && (
-                    <p className="text-xs">· 个人提成：{person.salary.personalCommissionCondition}（个人超 ¥{person.salary.personalCommissionThreshold.toLocaleString()} 部分按 {person.salary.personalCommissionRate}%）</p>
-                  )}
-                  {person.salary.performanceCondition && (
-                    <p className="text-xs">· 绩效：{person.salary.performanceCondition}</p>
-                  )}
-                  {person.salary.positionAllowanceCondition && (
-                    <p className="text-xs">· 岗位补贴：{person.salary.positionAllowanceCondition}</p>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setSalaryDetailPerson(null)}>关闭</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
