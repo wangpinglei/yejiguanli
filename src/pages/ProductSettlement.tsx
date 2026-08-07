@@ -12,7 +12,7 @@ import {
 import type { Product, SalesUnit } from "@/types";
 import {
   Building2, Package, Pencil, Trash2, Search, Calculator, Layers,
-  ChevronDown, ChevronRight, Percent,
+  ChevronDown, ChevronRight, Percent, AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -99,6 +99,8 @@ export default function ProductSettlement() {
   const [expandedSettleProductIds, setExpandedSettleProductIds] = useState<Set<string>>(new Set());
   const [selectedDomainKeys, setSelectedDomainKeys] = useState<string[]>([]);
   const [settleConfigExpanded, setSettleConfigExpanded] = useState(true);
+  /** 配置缺口速查：未设结算 / 未设个人提成 */
+  const [configGapFilter, setConfigGapFilter] = useState<'all' | 'noSettle' | 'noCommission'>('all');
 
   // 按月过滤销售记录
   const monthlySales = useMemo(() => filterByMonth(salesRecords, selectedMonth), [salesRecords, selectedMonth]);
@@ -117,13 +119,55 @@ export default function ProductSettlement() {
     );
   }, [productsFromSales, search]);
 
-  // 按上方勾选的业务域过滤结算配置产品
+  const productsMissingSettle = useMemo(() => {
+    const configuredIds = new Set(upsList.map((x) => x.productId));
+    return filteredProducts.filter((p) => !configuredIds.has(p.id));
+  }, [filteredProducts, upsList]);
+
+  const productsMissingCommission = useMemo(() => {
+    const configuredIds = new Set(ppcList.map((x) => x.productId));
+    return filteredProducts.filter((p) => !configuredIds.has(p.id));
+  }, [filteredProducts, ppcList]);
+
+  // 按上方勾选的业务域过滤结算配置产品；缺口速查可绕过业务域勾选
   const settleConfigProducts = useMemo(() => {
-    if (selectedDomainKeys.length === 0) return [];
-    return filteredProducts.filter((p) =>
-      selectedDomainKeys.includes(getProductDomainKey(p)),
-    );
-  }, [filteredProducts, selectedDomainKeys]);
+    let list = filteredProducts;
+    if (configGapFilter === 'noSettle') {
+      const ids = new Set(productsMissingSettle.map((p) => p.id));
+      list = list.filter((p) => ids.has(p.id));
+    } else if (configGapFilter === 'noCommission') {
+      const ids = new Set(productsMissingCommission.map((p) => p.id));
+      list = list.filter((p) => ids.has(p.id));
+    } else if (selectedDomainKeys.length === 0) {
+      return [];
+    } else {
+      list = list.filter((p) =>
+        selectedDomainKeys.includes(getProductDomainKey(p)),
+      );
+    }
+    return list;
+  }, [
+    filteredProducts, selectedDomainKeys, configGapFilter,
+    productsMissingSettle, productsMissingCommission,
+  ]);
+
+  const showSettleConfig =
+    configGapFilter !== 'all' || selectedDomainKeys.length > 0;
+
+  function handleToggleGapFilter(next: 'noSettle' | 'noCommission') {
+    setConfigGapFilter((prev) => {
+      const value = prev === next ? 'all' : next;
+      if (value !== 'all') {
+        setSettleConfigExpanded(true);
+        const gapList = value === 'noSettle' ? productsMissingSettle : productsMissingCommission;
+        const keys = Array.from(
+          new Set(gapList.map((p) => getProductDomainKey(p))),
+        );
+        if (keys.length > 0) setSelectedDomainKeys(keys);
+      }
+      return value;
+    });
+  }
 
   const selectedDomainLabel = useMemo(() => {
     if (selectedDomainKeys.length === 0) return "";
@@ -400,13 +444,47 @@ export default function ProductSettlement() {
         </Card>
       </div>
 
-      {/* 搜索 */}
+      {/* 搜索 + 配置缺口速查 */}
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="relative flex-1 max-w-sm min-w-[200px]">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input placeholder="搜索产品名称或分类..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
         </div>
         <Badge variant="secondary">共 {filteredProducts.length} 个产品</Badge>
+        <Button
+          type="button"
+          size="sm"
+          variant={configGapFilter === 'noSettle' ? 'default' : 'outline'}
+          className={configGapFilter === 'noSettle'
+            ? ''
+            : 'border-amber-300 text-amber-800 hover:bg-amber-50'}
+          onClick={() => handleToggleGapFilter('noSettle')}
+        >
+          <AlertTriangle className="mr-1.5 h-3.5 w-3.5" />
+          未设结算（{productsMissingSettle.length}）
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={configGapFilter === 'noCommission' ? 'default' : 'outline'}
+          className={configGapFilter === 'noCommission'
+            ? ''
+            : 'border-violet-300 text-violet-800 hover:bg-violet-50'}
+          onClick={() => handleToggleGapFilter('noCommission')}
+        >
+          <Percent className="mr-1.5 h-3.5 w-3.5" />
+          未设提成（{productsMissingCommission.length}）
+        </Button>
+        {configGapFilter !== 'all' && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => setConfigGapFilter('all')}
+          >
+            清除缺口筛选
+          </Button>
+        )}
       </div>
 
       <MBusinessDomainSection
@@ -424,11 +502,11 @@ export default function ProductSettlement() {
         onUpdateCategory={handleUpdateProductCategory}
       />
 
-      {/* ==================== 第一部分：产品 × 单位 结算配置（按业务域） ==================== */}
-      {selectedDomainKeys.length === 0 ? (
+      {/* ==================== 第一部分：产品 × 单位 结算配置（按业务域 / 缺口速查） ==================== */}
+      {!showSettleConfig ? (
         <Card className="mb-8 border-dashed">
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            请先在上方勾选业务域，再显示对应产品的结算配置
+            请先在上方勾选业务域，或点击「未设结算 / 未设提成」速查配置缺口
           </CardContent>
         </Card>
       ) : (
@@ -443,14 +521,39 @@ export default function ProductSettlement() {
               ? <ChevronDown className="h-4 w-4 mt-1 shrink-0 text-muted-foreground" />
               : <ChevronRight className="h-4 w-4 mt-1 shrink-0 text-muted-foreground" />}
             <div className="min-w-0">
-              <h3 className="text-base font-semibold">产品结算配置</h3>
+              <h3 className="text-base font-semibold">
+                {configGapFilter === 'noSettle'
+                  ? '未设置结算比例的产品'
+                  : configGapFilter === 'noCommission'
+                    ? '未设置销售提成的产品'
+                    : '产品结算配置'}
+              </h3>
               <p className="text-xs text-muted-foreground mt-0.5">
-                当前业务域：{selectedDomainLabel}
-                （{settleConfigProducts.length} 个产品）
+                {configGapFilter === 'noSettle' && (
+                  <>共 {settleConfigProducts.length} 个产品尚无任意单位结算配置</>
+                )}
+                {configGapFilter === 'noCommission' && (
+                  <>
+                    共 {settleConfigProducts.length} 个产品尚无「人员×产品」个人提成；
+                    请到
+                    <Link to="/personnel" className="mx-1 text-violet-700 underline">
+                      人员管理
+                    </Link>
+                    按人配置。下方仍可查看/补全结算。
+                  </>
+                )}
+                {configGapFilter === 'all' && (
+                  <>
+                    当前业务域：{selectedDomainLabel}
+                    （{settleConfigProducts.length} 个产品）
+                  </>
+                )}
               </p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                可设置结算比例/金额、生效时间、特殊时段按件结算奖励，以及是否不参与团队管理提成基数
-              </p>
+              {configGapFilter === 'all' && (
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  可设置结算比例/金额、生效时间、特殊时段按件结算奖励，以及是否不参与团队管理提成基数
+                </p>
+              )}
             </div>
           </button>
           <div className="flex flex-wrap gap-2 shrink-0">
@@ -473,6 +576,7 @@ export default function ProductSettlement() {
           const productUnits = getUnitsForProduct(product.id);
           const isExpanded = expandedSettleProductIds.has(product.id);
           const configuredCount = productUnits.filter((u) => findUps(product.id, u.id)).length;
+          const hasCommission = ppcList.some((x) => x.productId === product.id);
           return (
             <Card key={product.id}>
               <CardContent className="p-0">
@@ -490,11 +594,21 @@ export default function ProductSettlement() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="font-medium truncate">{product.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        <span className="ml-0">
+                      <p className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                        <span>
                           {productUnits.length} 个单位
                           · 结算已配 {configuredCount}
                         </span>
+                        {configuredCount === 0 && (
+                          <Badge variant="outline" className="border-amber-300 text-amber-800 text-[10px] px-1.5 py-0">
+                            未设结算
+                          </Badge>
+                        )}
+                        {!hasCommission && (
+                          <Badge variant="outline" className="border-violet-300 text-violet-800 text-[10px] px-1.5 py-0">
+                            未设提成
+                          </Badge>
+                        )}
                       </p>
                     </div>
                   </button>
@@ -630,7 +744,11 @@ export default function ProductSettlement() {
         {settleConfigExpanded && settleConfigProducts.length === 0 && (
           <Card>
             <CardContent className="py-12 text-center text-muted-foreground text-sm">
-              所选业务域下暂无匹配产品（可调整搜索，或先为产品设置业务域）
+              {configGapFilter === 'noSettle'
+                ? '当前筛选下没有未设置结算的产品'
+                : configGapFilter === 'noCommission'
+                  ? '当前筛选下没有未设置销售提成的产品'
+                  : '所选业务域下暂无匹配产品（可调整搜索，或先为产品设置业务域）'}
             </CardContent>
           </Card>
         )}
