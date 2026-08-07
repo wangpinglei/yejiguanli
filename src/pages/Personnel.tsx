@@ -206,10 +206,31 @@ export default function PersonnelPage() {
     }));
   };
 
+
+  function isOnDutyPerson(person: { resignDate?: string; status?: string }) {
+    const resign = (person.resignDate || '').slice(0, 10)
+    if (resign) {
+      const today = new Date().toISOString().slice(0, 10)
+      return resign >= today
+    }
+    return person.status !== 'inactive'
+  }
+
+  function getFormDutyStatus(resignDate: string): Personnel['status'] {
+    const resign = resignDate.trim()
+    if (!resign) return 'active'
+    const today = new Date().toISOString().slice(0, 10)
+    return resign < today ? 'inactive' : 'active'
+  }
+
   const handleSubmit = async () => {
     if (!form.name.trim() || !form.salesUnitId) return;
-    const status = form.resignDate ? "inactive" as Personnel["status"] : form.status;
-    const data = { ...form, resignDate: form.resignDate || undefined, status };
+    const resignDate = form.resignDate.trim();
+    const status = getFormDutyStatus(resignDate);
+    // 显式传 null，服务端才能清空离职日（undefined 会被 JSON 省略并保留旧值）
+    const data = { ...form, resignDate: resignDate ? resignDate : null, status } as typeof form & {
+      resignDate: string | null;
+    };
     try {
       if (editingPerson) {
         await updatePersonnel(editingPerson.id, data);
@@ -375,8 +396,8 @@ export default function PersonnelPage() {
                       <TableCell className="text-right font-medium">{formatCurrency(fixed)}</TableCell>
                       <TableCell className="text-right font-medium text-blue-600">{formatCurrency(sales.total)}</TableCell>
                       <TableCell>
-                        <Badge variant={person.status === "active" ? "default" : "secondary"}>
-                          {person.status === "active" ? "在岗" : "离职"}
+                        <Badge variant={isOnDutyPerson(person) ? "default" : "secondary"}>
+                          {isOnDutyPerson(person) ? "在岗" : "离职"}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-muted-foreground">{formatDate(person.hireDate)}</TableCell>
@@ -442,12 +463,24 @@ export default function PersonnelPage() {
                   </div>
                   <div className="space-y-2">
                     <Label>离职日期</Label>
-                    <Input type="date" value={form.resignDate} onChange={(e) => setForm({ ...form, resignDate: e.target.value })} />
+                    <div className="flex items-center gap-2">
+                      <Input type="date" value={form.resignDate} onChange={(e) => setForm({ ...form, resignDate: e.target.value })} />
+                      {form.resignDate ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setForm({ ...form, resignDate: '', status: 'active' })}
+                        >
+                          清除
+                        </Button>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
                 <div className="space-y-2">
                   <Label>状态</Label>
-                  <Select value={form.resignDate ? "inactive" : form.status} onValueChange={(v) => setForm({ ...form, status: v as Personnel["status"] })}>
+                  <Select value={getFormDutyStatus(form.resignDate)} onValueChange={(v) => setForm({ ...form, status: v as Personnel["status"] })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="active">在岗</SelectItem>
@@ -482,7 +515,7 @@ export default function PersonnelPage() {
                   </div>
                   <div className="space-y-2">
                     <Label>状态</Label>
-                    <Select value={form.resignDate ? "inactive" : form.status} onValueChange={(v) => setForm({ ...form, status: v as Personnel["status"] })}>
+                    <Select value={getFormDutyStatus(form.resignDate)} onValueChange={(v) => setForm({ ...form, status: v as Personnel["status"] })}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="active">在岗</SelectItem>
@@ -508,8 +541,20 @@ export default function PersonnelPage() {
                   </div>
                   <div className="space-y-2">
                     <Label>离职日期</Label>
-                    <Input type="date" value={form.resignDate} onChange={(e) => setForm({ ...form, resignDate: e.target.value })} />
-                    <p className="text-xs text-muted-foreground">填写后状态自动变为"离职"</p>
+                    <div className="flex items-center gap-2">
+                      <Input type="date" value={form.resignDate} onChange={(e) => setForm({ ...form, resignDate: e.target.value })} />
+                      {form.resignDate ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setForm({ ...form, resignDate: '', status: 'active' })}
+                        >
+                          清除
+                        </Button>
+                      ) : null}
+                    </div>
+                    <p className="text-xs text-muted-foreground">可点「清除」去掉离职日；离职日已过显示离职，未来日期仍为在岗</p>
                   </div>
                 </div>
 
