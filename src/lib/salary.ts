@@ -46,6 +46,43 @@ export function filterByMonth(records: SalesRecord[], yearMonth?: string): Sales
   return records.filter((s) => (s.saleDate || "").startsWith(yearMonth));
 }
 
+/** 某年月的起止日期 YYYY-MM-DD */
+function getYearMonthRange(yearMonth: string): { start: string; end: string } {
+  const [y, m] = yearMonth.split("-").map(Number);
+  const lastDay = new Date(y, m, 0).getDate();
+  return {
+    start: `${yearMonth}-01`,
+    end: `${yearMonth}-${String(lastDay).padStart(2, "0")}`,
+  };
+}
+
+/**
+ * 判断人员在指定月份是否应计入人力成本 / 提成
+ * - 有 yearMonth：按入职/离职日落在该月是否在岗（不依赖 status 字段）
+ * - 无 yearMonth：与人员管理「在岗」一致（离职日未到 or status 非 inactive）
+ */
+export function isPersonnelOnDutyInMonth(
+  person: { hireDate?: string; resignDate?: string; status?: string },
+  yearMonth?: string,
+): boolean {
+  const hire = (person.hireDate || "").slice(0, 10);
+  const resign = (person.resignDate || "").slice(0, 10);
+
+  if (yearMonth) {
+    const { start, end } = getYearMonthRange(yearMonth);
+    if (hire && hire > end) return false;
+    // 离职日早于当月 1 日 → 当月不计
+    if (resign && resign < start) return false;
+    return true;
+  }
+
+  if (resign) {
+    const today = new Date().toISOString().slice(0, 10);
+    return resign >= today;
+  }
+  return person.status !== "inactive";
+}
+
 /**
  * 计算个人销售额（给定销售记录）
  * 优先按 personnelId；无 id 时按销售人员姓名匹配（导入/同步未挂人员时）
@@ -251,21 +288,47 @@ export function calcPersonalCommissionByProduct(
   });
 
   const configuredProducts = new Set<string>();
+  // 优先按销售记录上的单位匹配提成配置（避免人员调岗后对不上）
+  const saleUnitIds = new Set(personRecords.map((r) => r.salesUnitId).filter(Boolean));
   const personPpcList = ppcList.filter(
-    (ppc) => ppc.personnelId === person.id && ppc.salesUnitId === person.salesUnitId
+    (ppc) =>
+      ppc.personnelId === person.id &&
+      (ppc.salesUnitId === person.salesUnitId || saleUnitIds.has(ppc.salesUnitId)),
   );
-  personPpcList.forEach((ppc) => {
-    const sales = productSalesMap.get(ppc.productId) || 0;
-    const qty = productQtyMap.get(ppc.productId) || 0;
-    if (sales <= 0 && qty <= 0) return;
-    configuredProducts.add(ppc.productId);
-    if (ppc.personalCommissionType === "fixed") {
-      totalPersonal += qty * (ppc.personalCommissionAmount || 0);
-      return;
-    }
-    if (sales > (ppc.personalCommissionThreshold || 0)) {
-      totalPersonal += (sales - ppc.personalCommissionThreshold) * (ppc.personalCommissionRate / 100);
-    }
+
+  // 按产品汇总时，取该产品对应销售单位上的配置（同一产品多单位时分别算）
+  const productUnitKeys = new Map<string, Set<string>>();
+  personRecords.forEach((r) => {
+    if (!r.productId) return;
+    if (!productUnitKeys.has(r.productId)) productUnitKeys.set(r.productId, new Set());
+    if (r.salesUnitId) productUnitKeys.get(r.productId)!.add(r.salesUnitId);
+  });
+
+  productUnitKeys.forEach((unitIds, productId) => {
+    unitIds.forEach((unitId) => {
+      const ppc = personPpcList.find(
+        (x) => x.productId === productId && x.salesUnitId === unitId,
+      ) || personPpcList.find(
+        (x) => x.productId === productId && x.salesUnitId === person.salesUnitId,
+      );
+      if (!ppc) return;
+
+      const unitRecords = personRecords.filter(
+        (r) => r.productId === productId && r.salesUnitId === unitId,
+      );
+      const sales = unitRecords.reduce((sum, r) => sum + r.totalAmount, 0);
+      const qty = unitRecords.reduce((sum, r) => sum + (r.quantity || 0), 0);
+      if (sales <= 0 && qty <= 0) return;
+      configuredProducts.add(productId);
+      if (ppc.personalCommissionType === "fixed") {
+        totalPersonal += qty * (ppc.personalCommissionAmount || 0);
+        return;
+      }
+      if (sales > (ppc.personalCommissionThreshold || 0)) {
+        totalPersonal +=
+          (sales - ppc.personalCommissionThreshold) * (ppc.personalCommissionRate / 100);
+      }
+    });
   });
 
   // 未配置的产品用默认值（仍为比例）
@@ -279,7 +342,9 @@ export function calcPersonalCommissionByProduct(
 
   // 特殊时段按件奖励（按销售日匹配）
   for (const r of personRecords) {
-    const ppc = personPpcList.find((x) => x.productId === r.productId);
+    const ppc = personPpcList.find(
+      (x) => x.productId === r.productId && x.salesUnitId === r.salesUnitId,
+    ) || personPpcList.find((x) => x.productId === r.productId);
     totalPersonal += calcSaleCommissionReward(r, ppc);
   }
 
@@ -439,9 +504,24 @@ export function getUnitSalaryCost(
   productPersonCommissions?: ProductPersonCommission[],
   teamMgmtContext?: TeamMgmtSalaryContext,
 ): UnitSalaryCost {
-  const activeMembers = personnel.filter(
-    (p) => p.salesUnitId === unitId && p.status === "active"
+  const monthlySales = filterByMonth(salesRecords, yearMonth);
+  // 当月在该单位有成交的人员（销售记录侧），避免「有提成预估但成本为 0」
+  const salesPersonIdSet = new Set(
+    monthlySales
+      .filter((r) => r.salesUnitId === unitId && r.personnelId)
+      .map((r) => r.personnelId),
   );
+
+  const memberMap = new Map<string, Personnel>();
+  personnel.forEach((p) => {
+    const belongsUnit = p.salesUnitId === unitId;
+    const hasSalesHere = salesPersonIdSet.has(p.id);
+    if (!belongsUnit && !hasSalesHere) return;
+    // 本单位成员：按月在岗；仅因有销售挂进来的：始终计入（保证提成进成本）
+    if (belongsUnit && !isPersonnelOnDutyInMonth(p, yearMonth) && !hasSalesHere) return;
+    memberMap.set(p.id, p);
+  });
+  const activeMembers = Array.from(memberMap.values());
 
   const details = activeMembers.map((p) => {
     const adj = monthlyAdjustments.find(

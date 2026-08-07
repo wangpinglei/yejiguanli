@@ -348,6 +348,15 @@ export default function PersonnelPage() {
         <Badge variant="secondary">共 {filteredPersonnel.length} 人</Badge>
       </div>
 
+      <div className="mb-4 rounded-lg border border-violet-200 bg-violet-50/70 px-3 py-2 text-sm text-violet-900">
+        <span className="font-medium">个人提成怎么配：</span>
+        在表格「个人提成」列点击
+        <span className="mx-1 inline-flex items-center rounded bg-violet-100 px-1.5 py-0.5 text-xs font-medium text-violet-800">
+          提成配置
+        </span>
+        ，按「人员 × 产品」设置销售个人提成（支持多选一键配置）。团队管理提成请到成本管理。
+      </div>
+
       {/* Table */}
       <Card>
         <CardContent className="p-0">
@@ -374,6 +383,7 @@ export default function PersonnelPage() {
                   <TableHead>状态</TableHead>
                   <TableHead>入职日期</TableHead>
                   <TableHead>离职日期</TableHead>
+                  <TableHead className="text-center min-w-[96px]">个人提成</TableHead>
                   <TableHead className="text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
@@ -405,11 +415,19 @@ export default function PersonnelPage() {
                       </TableCell>
                       <TableCell className="text-muted-foreground">{formatDate(person.hireDate)}</TableCell>
                       <TableCell className="text-muted-foreground">{person.resignDate ? formatDate(person.resignDate) : "-"}</TableCell>
+                      <TableCell className="text-center">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 border-violet-300 text-violet-700 hover:bg-violet-50"
+                          onClick={() => setCommissionPerson(person)}
+                        >
+                          <Percent className="mr-1 h-3.5 w-3.5" />
+                          提成配置
+                        </Button>
+                      </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
-                          <Button variant="ghost" size="icon" title="个人提成配置" onClick={() => setCommissionPerson(person)}>
-                            <Percent className="h-4 w-4 text-violet-600" />
-                          </Button>
                           <Button variant="ghost" size="icon" title="薪资明细" onClick={() => setSalaryDetailPerson(person)}>
                             <Eye className="h-4 w-4" />
                           </Button>
@@ -432,7 +450,7 @@ export default function PersonnelPage() {
                 })}
                 {filteredPersonnel.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-12 text-muted-foreground">
+                    <TableCell colSpan={11} className="text-center py-12 text-muted-foreground">
                       暂无数据
                     </TableCell>
                   </TableRow>

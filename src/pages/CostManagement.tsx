@@ -5,7 +5,9 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, formatDate, formatDateTime, getYearMonth } from "@/lib/format";
 import { matchesRecurringYearMonth, RECURRING_ALL_MONTHS } from "@/utils/recurringRecord";
-import { getTotalSalaryCost, calcLeaveDeduction, MONTHLY_WORK_DAYS } from "@/lib/salary";
+import {
+  getTotalSalaryCost, calcLeaveDeduction, MONTHLY_WORK_DAYS, isPersonnelOnDutyInMonth,
+} from "@/lib/salary";
 import type { CostRecord, CostItem, IncomeRecord, IncomeItem } from "@/types";
 import {
   Plus, Search, Pencil, Trash2, Wallet, X, ChevronDown, ChevronRight, Clock,
@@ -166,13 +168,15 @@ export default function CostManagement() {
 
   const grandTotal = manualCostTotal + salaryCosts.grandTotal;
 
-  // 选中单位和月份下的在职人员（用于月度调整面板）
+  // 选中单位和月份下的在岗人员（用于月度调整面板；按入离职日判定）
   const adjustmentPersonnel = useMemo(() => {
     const unitIds = filterUnit === "all"
       ? salesUnits.map((u) => u.id)
       : [filterUnit];
-    return personnel.filter((p) => p.status === "active" && unitIds.includes(p.salesUnitId));
-  }, [personnel, salesUnits, filterUnit]);
+    return personnel.filter(
+      (p) => unitIds.includes(p.salesUnitId) && isPersonnelOnDutyInMonth(p, selectedMonth),
+    );
+  }, [personnel, salesUnits, filterUnit, selectedMonth]);
 
   // 初始化调整表单（从已有数据加载）
   useEffect(() => {
