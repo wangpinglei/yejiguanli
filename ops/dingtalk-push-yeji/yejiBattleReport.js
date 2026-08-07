@@ -7,8 +7,10 @@ const axios = require('axios')
 const sharp = require('sharp')
 const { buildYejiBattleSvg } = require('./yejiBattleReportSvg')
 
-const PUBLIC_DIR = path.join(__dirname, '..', 'public', 'yeji-battle')
+const PUBLIC_DIR = path.join(__dirname, '..', 'public', 'war-reports')
 const SENT_FILE = path.join(__dirname, '..', 'data', 'sent_yeji_battle_reports.json')
+/** 与现有钉钉战报同一 URL 前缀，走同一域名反代 */
+const PUBLIC_PATH_PREFIX = '/war-reports'
 
 function addLog(msg) {
   console.log(`[单位战报] ${msg}`)
@@ -36,7 +38,7 @@ function getDateKey(month) {
   return month || new Date().toISOString().slice(0, 7)
 }
 
-/** 与战报一致：优先 WAR_REPORT_PUBLIC_BASE_URL=http://101.132.42.171 */
+/** 与战报一致：优先 WAR_REPORT_PUBLIC_BASE_URL（域名反代地址） */
 function getPublicBase() {
   return (
     process.env.YEJI_BATTLE_PUBLIC_BASE ||
@@ -125,11 +127,11 @@ async function renderPng(report) {
   const filePath = path.join(PUBLIC_DIR, fileName)
   const latestPath = path.join(PUBLIC_DIR, `yeji-battle-${safeUnit}-latest.png`)
   const pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer()
-  // 与 warReport 相同：落盘到 public，供 http://101.132.42.171/... 访问
+  // 落盘到 public/war-reports，与钉钉战报同一反代路径
   fs.writeFileSync(filePath, pngBuffer)
   fs.writeFileSync(latestPath, pngBuffer)
   const publicBase = getPublicBase()
-  const imageUrl = `${publicBase}/yeji-battle/${fileName}`
+  const imageUrl = `${publicBase}${PUBLIC_PATH_PREFIX}/${fileName}`
   addLog(`图片已保存: ${filePath}`)
   addLog(`公网地址: ${imageUrl}`)
   return { filePath, imageUrl, fileName, latestPath }
