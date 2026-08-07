@@ -509,7 +509,7 @@ export default function UserManagement() {
                     </Table>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    勾选编辑时会自动勾选查看。数据看板、单位战报仅支持查看。
+                    勾选编辑时会自动勾选查看。数据看板仅支持查看；单位战报编辑权用于业绩目标与岗位分组配置。
                   </p>
                 </div>
               </>

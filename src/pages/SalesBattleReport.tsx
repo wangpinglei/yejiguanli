@@ -81,7 +81,13 @@ export default function SalesBattleReport() {
     targets: performanceTargets,
     upsList: unitProductSettlements,
   }), [teamMgmtCommissionRules, performanceTargets, unitProductSettlements]);
-  const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleSalesRecords: salesRecords } = usePermissions();
+  const {
+    visibleSalesUnits: salesUnits,
+    visiblePersonnel: personnel,
+    visibleSalesRecords: salesRecords,
+    canEditBattleReport,
+  } = usePermissions();
+  const canEditTargets = canEditBattleReport;
 
   const [yearMonth, setYearMonth] = useState(getCurrentYearMonth());
   const [unitId, setUnitId] = useState<string>("");
@@ -261,6 +267,10 @@ export default function SalesBattleReport() {
   const [unitTargetNote, setUnitTargetNote] = useState("");
 
   const startEditUnitTarget = () => {
+    if (!canEditTargets) {
+      alert("无单位战报编辑权限，无法修改业绩目标");
+      return;
+    }
     setUnitTargetDraft(unitTarget?.targetAmount || 0);
     setUnitTargetNote(unitTarget?.note || "");
     setEditingUnitTarget(true);
@@ -284,6 +294,10 @@ export default function SalesBattleReport() {
   const [personTargetDraft, setPersonTargetDraft] = useState(0);
 
   const startEditPersonTarget = (personId: string, current: number | undefined) => {
+    if (!canEditTargets) {
+      alert("无单位战报编辑权限，无法修改业绩目标");
+      return;
+    }
     setEditingPersonId(personId);
     setPersonTargetDraft(current || 0);
   };
@@ -311,6 +325,10 @@ export default function SalesBattleReport() {
   const [batchDraft, setBatchDraft] = useState<Record<string, number>>({});
 
   const openBatchEdit = () => {
+    if (!canEditTargets) {
+      alert("无单位战报编辑权限，无法修改业绩目标");
+      return;
+    }
     const draft: Record<string, number> = {};
     battlePersonnel.forEach((p) => {
       draft[p.id] = personnelTargets.get(p.id) || 0;
@@ -493,20 +511,24 @@ export default function SalesBattleReport() {
 
             <div className="flex-1" />
 
-            <Button variant="outline" onClick={() => setLabelConfigOpen(true)}>
-              <Settings className="mr-2 h-4 w-4" />
-              岗位分组配置
-              {positionGroupLabels.length > 0 && (
-                <Badge variant="secondary" className="ml-2 h-5 min-w-[20px] rounded-full px-1.5 text-[10px]">
-                  {positionGroupLabels.length}
-                </Badge>
-              )}
-            </Button>
+            {canEditTargets && (
+            <>
+              <Button variant="outline" onClick={() => setLabelConfigOpen(true)}>
+                <Settings className="mr-2 h-4 w-4" />
+                岗位分组配置
+                {positionGroupLabels.length > 0 && (
+                  <Badge variant="secondary" className="ml-2 h-5 min-w-[20px] rounded-full px-1.5 text-[10px]">
+                    {positionGroupLabels.length}
+                  </Badge>
+                )}
+              </Button>
 
-            <Button variant="outline" onClick={openBatchEdit}>
-              <Edit3 className="mr-2 h-4 w-4" />
-              人员目标批量录入
-            </Button>
+              <Button variant="outline" onClick={openBatchEdit}>
+                <Edit3 className="mr-2 h-4 w-4" />
+                人员目标批量录入
+              </Button>
+            </>
+          )}
           </div>
         </CardContent>
       </Card>
@@ -621,9 +643,11 @@ export default function SalesBattleReport() {
                     </div>
                   )}
                 </div>
-                <Button variant="outline" size="sm" onClick={startEditUnitTarget}>
-                  <Edit3 className="mr-2 h-4 w-4" />编辑
-                </Button>
+                {canEditTargets && (
+                  <Button variant="outline" size="sm" onClick={startEditUnitTarget}>
+                    <Edit3 className="mr-2 h-4 w-4" />编辑
+                  </Button>
+                )}
               </div>
               {/* 人员目标汇总对比 */}
               {totalTarget > 0 || unitTarget.targetAmount > 0 ? (
@@ -674,9 +698,9 @@ export default function SalesBattleReport() {
               <p className="text-sm text-muted-foreground">
                 尚未录入单位整体目标。可在右侧批量录入人员目标，或录入整体目标。
               </p>
-              <Button variant="outline" size="sm" onClick={startEditUnitTarget}>
+              {canEditTargets && (<Button variant="outline" size="sm" onClick={startEditUnitTarget}>
                 <Edit3 className="mr-2 h-4 w-4" />录入目标
-              </Button>
+              </Button>)}
             </div>
           )}
         </CardContent>
@@ -754,12 +778,13 @@ export default function SalesBattleReport() {
                         <button
                           type="button"
                           onClick={() => startEditPersonTarget(person.id, targetAmount)}
-                          className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm hover:bg-muted transition-colors ${targetAmount > 0 ? "font-medium" : "text-muted-foreground"}`}
+                          disabled={!canEditTargets}
+                          className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm transition-colors ${!canEditTargets ? 'cursor-default' : 'hover:bg-muted'} ${targetAmount > 0 ? 'font-medium' : 'text-muted-foreground'}`}
                         >
-                          {targetAmount > 0 ? formatCurrency(targetAmount) : "—"}
-                          <Edit3 className="h-3 w-3 opacity-40 hover:opacity-100" />
+                          {targetAmount > 0 ? formatCurrency(targetAmount) : '—'}
+                          {canEditTargets && <Edit3 className="h-3 w-3 opacity-40 hover:opacity-100" />}
                         </button>
-                      ) : (
+                      ) : canEditTargets ? (
                         <button
                           type="button"
                           onClick={() => startEditPersonTarget(person.id, undefined)}
@@ -768,6 +793,8 @@ export default function SalesBattleReport() {
                           —
                           <Edit3 className="h-3 w-3 opacity-40 hover:opacity-100" />
                         </button>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">—</span>
                       )}
                     </TableCell>
                     <TableCell className="text-center border-r font-medium">

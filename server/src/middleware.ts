@@ -93,3 +93,25 @@ export function requireEditPermission(req: Request, res: Response, next: NextFun
   }
   next();
 }
+
+/** 要求指定模块之一具备编辑权限（超管放行） */
+export function requireModuleEdit(...keys: Array<import("./permissions").ModuleKey>) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "未登录" });
+    }
+    if (req.user.role === "superadmin") {
+      return next();
+    }
+    if (isReadOnly(req.user)) {
+      return res.status(403).json({ error: "当前账号为只读权限，无法编辑" });
+    }
+    const ok = keys.some((key) =>
+      hasModuleEdit(req.user!.permissions, key, req.user!.role),
+    );
+    if (!ok) {
+      return res.status(403).json({ error: "权限不足：需要对应模块的编辑权限" });
+    }
+    next();
+  };
+}

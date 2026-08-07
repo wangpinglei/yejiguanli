@@ -32,7 +32,7 @@ export const MODULE_DEFS: ModuleDef[] = [
   { key: "sales_records", label: "销售记录", path: "/sales-records", canEdit: true },
   { key: "cost_management", label: "成本管理", path: "/cost-management", canEdit: true },
   { key: "profit_analysis", label: "收支利润", path: "/profit-analysis", canEdit: true },
-  { key: "sales_battle_report", label: "单位战报", path: "/sales-battle-report", canEdit: false },
+  { key: "sales_battle_report", label: "单位战报", path: "/sales-battle-report", canEdit: true },
   { key: "product_settlement", label: "业务域产品结算和分类", path: "/product-settlement", canEdit: true },
   { key: "users", label: "权限分配", path: "/users", canEdit: true },
 ];

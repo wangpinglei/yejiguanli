@@ -7,7 +7,7 @@ import {
   rowToTeamMgmtCommissionRule,
 } from "../db";
 import { authMiddleware } from "../auth";
-import { getVisibleUnitIds, requireEditPermission } from "../middleware";
+import { getVisibleUnitIds, requireEditPermission, requireModuleEdit } from "../middleware";
 
 const router = Router();
 router.use(authMiddleware);
@@ -460,7 +460,7 @@ router.get("/performance-targets", (req, res) => {
   res.json(rows.map(rowToPerformanceTarget));
 });
 
-router.post("/performance-targets/upsert", requireEditPermission, (req, res) => {
+router.post("/performance-targets/upsert", requireModuleEdit("sales_battle_report"), (req, res) => {
   const b = req.body;
   if (!b.salesUnitId || !b.yearMonth) return res.status(400).json({ error: "单位和月份不能为空" });
   const db = getDb();
@@ -488,7 +488,7 @@ router.post("/performance-targets/upsert", requireEditPermission, (req, res) => 
   res.json(rowToPerformanceTarget(db.prepare("SELECT * FROM performance_targets WHERE id=?").get(id)));
 });
 
-router.post("/performance-targets/batch", requireEditPermission, (req, res) => {
+router.post("/performance-targets/batch", requireModuleEdit("sales_battle_report"), (req, res) => {
   const items = Array.isArray(req.body) ? req.body : (req.body.items || []);
   const results: any[] = [];
   const db = getDb();
@@ -523,7 +523,7 @@ router.post("/performance-targets/batch", requireEditPermission, (req, res) => {
   res.json(results);
 });
 
-router.delete("/performance-targets/:id", requireEditPermission, (req, res) => {
+router.delete("/performance-targets/:id", requireModuleEdit("sales_battle_report"), (req, res) => {
   const db = getDb();
   const result = db.prepare("DELETE FROM performance_targets WHERE id=?").run(req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: "记录不存在" });
@@ -536,7 +536,7 @@ router.get("/position-group-labels", (_req, res) => {
   res.json(db.prepare("SELECT * FROM position_group_labels ORDER BY created_at").all().map(rowToPositionGroupLabel));
 });
 
-router.post("/position-group-labels", requireEditPermission, (req, res) => {
+router.post("/position-group-labels", requireModuleEdit("sales_battle_report"), (req, res) => {
   const { keyword, label, color, description } = req.body;
   if (!keyword || !label) return res.status(400).json({ error: "关键词和标签不能为空" });
   const id = generateId("pgl");
@@ -547,7 +547,7 @@ router.post("/position-group-labels", requireEditPermission, (req, res) => {
   res.json(rowToPositionGroupLabel(db.prepare("SELECT * FROM position_group_labels WHERE id=?").get(id)));
 });
 
-router.put("/position-group-labels/:id", requireEditPermission, (req, res) => {
+router.put("/position-group-labels/:id", requireModuleEdit("sales_battle_report"), (req, res) => {
   const db = getDb();
   const existing = db.prepare("SELECT * FROM position_group_labels WHERE id=?").get(req.params.id);
   if (!existing) return res.status(404).json({ error: "标签不存在" });
@@ -561,7 +561,7 @@ router.put("/position-group-labels/:id", requireEditPermission, (req, res) => {
   res.json(rowToPositionGroupLabel(db.prepare("SELECT * FROM position_group_labels WHERE id=?").get(req.params.id)));
 });
 
-router.delete("/position-group-labels/:id", requireEditPermission, (req, res) => {
+router.delete("/position-group-labels/:id", requireModuleEdit("sales_battle_report"), (req, res) => {
   const db = getDb();
   const result = db.prepare("DELETE FROM position_group_labels WHERE id=?").run(req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: "标签不存在" });

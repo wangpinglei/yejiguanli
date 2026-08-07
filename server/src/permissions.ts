@@ -36,6 +36,7 @@ const EDITABLE = new Set<ModuleKey>([
   "sales_records",
   "cost_management",
   "profit_analysis",
+  "sales_battle_report",
   "product_settlement",
   "users",
 ]);
