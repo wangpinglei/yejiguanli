@@ -5,9 +5,8 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, formatDate, formatDateTime, getYearMonth } from "@/lib/format";
 import { matchesRecurringYearMonth, RECURRING_ALL_MONTHS } from "@/utils/recurringRecord";
-import {
-  getTotalSalaryCost, calcLeaveDeduction, MONTHLY_WORK_DAYS, isPersonnelOnDutyInMonth,
-} from "@/lib/salary";
+import { getTotalSalaryCost, calcLeaveDeduction, MONTHLY_WORK_DAYS, isPersonnelOnDutyInMonth, filterByMonth } from "@/lib/salary";
+import { calcSalePersonCommissionPreview } from "@/lib/commissionReward";
 import type { CostRecord, CostItem, IncomeRecord, IncomeItem } from "@/types";
 import {
   Plus, Search, Pencil, Trash2, Wallet, X, ChevronDown, ChevronRight, Clock,
@@ -134,6 +133,27 @@ export default function CostManagement() {
     return filteredRecords.reduce((sum, c) => sum + c.totalCost, 0);
   }, [filteredRecords]);
 
+  // 个人提成：与销售记录「提成预估」同一算法（按当月成交明细汇总），避免在职人数为 0 时整卡变成 0
+  const personalCommissionFromSales = useMemo(() => {
+    const monthly = filterByMonth(salesRecords, selectedMonth).filter(
+      (s) => filterUnit === "all" || s.salesUnitId === filterUnit,
+    );
+    return monthly.reduce(
+      (sum, s) => sum + calcSalePersonCommissionPreview(s, productPersonCommissions),
+      0,
+    );
+  }, [salesRecords, selectedMonth, filterUnit, productPersonCommissions]);
+
+  const teamMgmtCommissionTotal = useMemo(() => {
+    return salaryCosts.units.reduce(
+      (sum, u) => sum + u.details.reduce((s, d) => s + d.managementCommission, 0),
+      0,
+    );
+  }, [salaryCosts]);
+
+  // 销售提成合计 = 个人（按销售明细）+ 团队管理提成
+  const productCommissionTotal = personalCommissionFromSales + teamMgmtCommissionTotal;
+
   // 按月过滤收入记录（同时匹配普通记录和月度固定记录）
   const filteredIncomeRecords = useMemo(() => {
     const targetMonth = selectedMonth; // "2026-08"
@@ -162,7 +182,6 @@ export default function CostManagement() {
     return filteredIncomeRecords.reduce((sum, r) => sum + r.totalAmount, 0);
   }, [filteredIncomeRecords]);
 
-  const productCommissionTotal = salaryCosts.grandSalesCommission;
   const leaveDeductionTotal = salaryCosts.grandLeaveDeduction;
   const otherAdjustmentTotal = salaryCosts.grandOtherAdjustment;
 
@@ -577,7 +596,9 @@ export default function CostManagement() {
             <div>
               <p className="text-sm text-muted-foreground">销售提成合计</p>
               <p className="text-xl font-bold text-violet-600">{formatCurrency(productCommissionTotal)}</p>
-              <p className="text-[10px] text-muted-foreground">个人+团队管理提成</p>
+              <p className="text-[10px] text-muted-foreground">
+                个人 {formatCurrency(personalCommissionFromSales)} + 团队 {formatCurrency(teamMgmtCommissionTotal)}
+              </p>
             </div>
           </CardContent>
         </Card>
