@@ -3,12 +3,13 @@ import { Link } from 'react-router-dom'
 import { useData } from '@/context/DataContext'
 import { formatCurrency } from '@/lib/format'
 import type { Personnel, Product, UnitProductSettlement } from '@/types'
-import { Package, Pencil, Percent, Plus, Trash2 } from 'lucide-react'
+import { Layers, Package, Pencil, Percent, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
@@ -73,6 +74,10 @@ function formatPpcSummary(opts: {
   return base + reward
 }
 
+function toggleIdInList(list: string[], id: string): string[] {
+  return list.includes(id) ? list.filter((x) => x !== id) : [...list, id]
+}
+
 type Props = {
   person: Personnel | null
   open: boolean
@@ -93,11 +98,14 @@ export default function MPersonProductCommission({
     unitProductSettlements: upsList,
     salesUnits,
     upsertProductPersonCommission,
+    batchUpsertProductPersonCommissions,
     deleteProductPersonCommission,
   } = useData()
 
   const [search, setSearch] = useState('')
   const [editProductId, setEditProductId] = useState<string | null>(null)
+  const [batchProductIds, setBatchProductIds] = useState<string[]>([])
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [form, setForm] = useState({ ...EMPTY_FORM })
   const [addProductId, setAddProductId] = useState('')
   const [saving, setSaving] = useState(false)
@@ -155,6 +163,19 @@ export default function MPersonProductCommission({
   }, [person, products, personProductIds])
 
   const configuredCount = productRows.filter((r) => r.ppc).length
+  const visibleIds = productRows.map((r) => r.product.id)
+  const allVisibleSelected =
+    visibleIds.length > 0 && visibleIds.every((id) => selectedIds.includes(id))
+  const someVisibleSelected = visibleIds.some((id) => selectedIds.includes(id))
+
+  function resetTransientState() {
+    setEditProductId(null)
+    setBatchProductIds([])
+    setSelectedIds([])
+    setSearch('')
+    setAddProductId('')
+    setForm({ ...EMPTY_FORM })
+  }
 
   function openEdit(productId: string) {
     if (!person) return
@@ -185,34 +206,79 @@ export default function MPersonProductCommission({
     } else {
       setForm({ ...EMPTY_FORM, personalCommissionType: defaultType })
     }
+    setBatchProductIds([])
     setEditProductId(productId)
   }
 
+  function openBatchEdit() {
+    if (!person || selectedIds.length === 0) return
+    const firstId = selectedIds[0]
+    const defaultType = getDefaultPersonalCommissionType(
+      firstId,
+      person.salesUnitId,
+      upsList,
+      products,
+    )
+    // 若所选产品结算方式一致为固定，默认固定提成
+    const allFixed = selectedIds.every((pid) =>
+      getDefaultPersonalCommissionType(pid, person.salesUnitId, upsList, products) === 'fixed',
+    )
+    setForm({
+      ...EMPTY_FORM,
+      personalCommissionType: allFixed ? 'fixed' : defaultType,
+    })
+    setEditProductId(null)
+    setBatchProductIds([...selectedIds])
+  }
+
+  function buildPpcPayload(productId: string) {
+    if (!person) return null
+    return {
+      salesUnitId: person.salesUnitId,
+      productId,
+      personnelId: person.id,
+      managementCommissionRate: 0,
+      managementCommissionThreshold: 0,
+      managementCommissionCondition: '',
+      personalCommissionType: form.personalCommissionType || 'percentage',
+      personalCommissionRate: form.personalCommissionRate || 0,
+      personalCommissionAmount: form.personalCommissionAmount || 0,
+      personalCommissionThreshold: form.personalCommissionThreshold || 0,
+      personalCommissionCondition: form.personalCommissionCondition,
+      rewardAmount: form.rewardAmount || 0,
+      rewardFrom: form.rewardFrom || '',
+      rewardTo: form.rewardTo || '',
+    }
+  }
+
   async function handleSave() {
-    if (!person || !editProductId) return
+    if (!person) return
     if (!person.salesUnitId) {
       alert('该人员尚未归属销售单位，请先在人员信息中设置所属单位')
       return
     }
+    const targetIds = batchProductIds.length > 0
+      ? batchProductIds
+      : editProductId
+        ? [editProductId]
+        : []
+    if (targetIds.length === 0) return
+
     setSaving(true)
     try {
-      await upsertProductPersonCommission({
-        salesUnitId: person.salesUnitId,
-        productId: editProductId,
-        personnelId: person.id,
-        managementCommissionRate: 0,
-        managementCommissionThreshold: 0,
-        managementCommissionCondition: '',
-        personalCommissionType: form.personalCommissionType || 'percentage',
-        personalCommissionRate: form.personalCommissionRate || 0,
-        personalCommissionAmount: form.personalCommissionAmount || 0,
-        personalCommissionThreshold: form.personalCommissionThreshold || 0,
-        personalCommissionCondition: form.personalCommissionCondition,
-        rewardAmount: form.rewardAmount || 0,
-        rewardFrom: form.rewardFrom || '',
-        rewardTo: form.rewardTo || '',
-      })
+      if (targetIds.length === 1) {
+        const payload = buildPpcPayload(targetIds[0])
+        if (!payload) return
+        await upsertProductPersonCommission(payload)
+      } else {
+        const items = targetIds
+          .map((id) => buildPpcPayload(id))
+          .filter((x): x is NonNullable<typeof x> => !!x)
+        await batchUpsertProductPersonCommissions(items)
+      }
       setEditProductId(null)
+      setBatchProductIds([])
+      setSelectedIds([])
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : '未知错误'
       alert('保存失败: ' + msg)
@@ -249,20 +315,31 @@ export default function MPersonProductCommission({
     setAddProductId('')
   }
 
+  function handleToggleAllVisible(checked: boolean) {
+    if (checked) {
+      setSelectedIds((prev) => Array.from(new Set([...prev, ...visibleIds])))
+    } else {
+      setSelectedIds((prev) => prev.filter((id) => !visibleIds.includes(id)))
+    }
+  }
+
+  function handleSelectUnconfigured() {
+    const ids = productRows.filter((r) => !r.ppc).map((r) => r.product.id)
+    setSelectedIds(ids)
+  }
+
   const editProduct = editProductId
     ? products.find((p) => p.id === editProductId)
     : undefined
+  const isBatchEdit = batchProductIds.length > 0
+  const editDialogOpen = !!editProductId || isBatchEdit
 
   return (
     <>
       <Dialog
         open={open && !!person}
         onOpenChange={(v) => {
-          if (!v) {
-            setEditProductId(null)
-            setSearch('')
-            setAddProductId('')
-          }
+          if (!v) resetTransientState()
           onOpenChange(v)
         }}
       >
@@ -287,11 +364,11 @@ export default function MPersonProductCommission({
                   {unitName}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  按「人员 × 产品」单独设置提成；团队管理提成仍在
+                  按「人员 × 产品」设置提成；可多选后一键配置相同规则。团队管理提成仍在
                   <Link to="/cost-management" className="mx-1 text-emerald-700 underline">
                     成本管理
                   </Link>
-                  配置。已配 {configuredCount} / {productRows.length} 个产品
+                  。已配 {configuredCount} / {productRows.length} 个产品
                 </p>
               </div>
 
@@ -328,6 +405,28 @@ export default function MPersonProductCommission({
                     </Button>
                   </div>
                 )}
+                {canEdit && productRows.some((r) => !r.ppc) && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleSelectUnconfigured}
+                  >
+                    勾选未配置
+                  </Button>
+                )}
+                {canEdit && (
+                  <Button
+                    type="button"
+                    variant="default"
+                    size="sm"
+                    disabled={selectedIds.length === 0}
+                    onClick={openBatchEdit}
+                  >
+                    <Layers className="mr-1 h-3.5 w-3.5" />
+                    一键配置所选（{selectedIds.length}）
+                  </Button>
+                )}
               </div>
 
               <Card>
@@ -336,89 +435,118 @@ export default function MPersonProductCommission({
                     <Table>
                       <TableHeader>
                         <TableRow className="bg-muted/40">
+                          {canEdit && (
+                            <TableHead className="w-10">
+                              <Checkbox
+                                checked={
+                                  allVisibleSelected
+                                    ? true
+                                    : someVisibleSelected
+                                      ? 'indeterminate'
+                                      : false
+                                }
+                                onCheckedChange={(v) => handleToggleAllVisible(!!v)}
+                                aria-label="全选当前列表"
+                              />
+                            </TableHead>
+                          )}
                           <TableHead>产品</TableHead>
                           <TableHead>个人提成</TableHead>
                           <TableHead className="text-right w-28">操作</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {productRows.map(({ product, ppc }) => (
-                          <TableRow key={product.id}>
-                            <TableCell>
-                              <div className="flex items-center gap-2 min-w-0">
-                                <Package className="h-4 w-4 shrink-0 text-muted-foreground" />
-                                <div className="min-w-0">
-                                  <p className="font-medium truncate">{product.name}</p>
-                                  {product.category ? (
-                                    <p className="text-xs text-muted-foreground">
-                                      {product.category}
-                                    </p>
-                                  ) : null}
-                                </div>
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              {ppc ? (
-                                <div className="space-y-1">
-                                  <Badge className="bg-violet-100 text-violet-800">
-                                    已配置
-                                  </Badge>
-                                  <p className="text-xs text-muted-foreground">
-                                    {formatPpcSummary({
-                                      type: ppc.personalCommissionType || 'percentage',
-                                      rate: ppc.personalCommissionRate,
-                                      amount: ppc.personalCommissionAmount || 0,
-                                      threshold: ppc.personalCommissionThreshold,
-                                      rewardAmount: ppc.rewardAmount || 0,
-                                      rewardFrom: ppc.rewardFrom,
-                                      rewardTo: ppc.rewardTo,
-                                    })}
-                                  </p>
-                                </div>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">未配置</span>
+                        {productRows.map(({ product, ppc }) => {
+                          const checked = selectedIds.includes(product.id)
+                          return (
+                            <TableRow key={product.id}>
+                              {canEdit && (
+                                <TableCell>
+                                  <Checkbox
+                                    checked={checked}
+                                    onCheckedChange={() =>
+                                      setSelectedIds((prev) => toggleIdInList(prev, product.id))
+                                    }
+                                    aria-label={`选择 ${product.name}`}
+                                  />
+                                </TableCell>
                               )}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex justify-end gap-1">
-                                {canEdit ? (
-                                  <>
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      title="编辑提成"
-                                      onClick={() => openEdit(product.id)}
-                                    >
-                                      <Pencil className="h-4 w-4" />
-                                    </Button>
-                                    {ppc?.id && (
+                              <TableCell>
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <Package className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                  <div className="min-w-0">
+                                    <p className="font-medium truncate">{product.name}</p>
+                                    {product.category ? (
+                                      <p className="text-xs text-muted-foreground">
+                                        {product.category}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                {ppc ? (
+                                  <div className="space-y-1">
+                                    <Badge className="bg-violet-100 text-violet-800">
+                                      已配置
+                                    </Badge>
+                                    <p className="text-xs text-muted-foreground">
+                                      {formatPpcSummary({
+                                        type: ppc.personalCommissionType || 'percentage',
+                                        rate: ppc.personalCommissionRate,
+                                        amount: ppc.personalCommissionAmount || 0,
+                                        threshold: ppc.personalCommissionThreshold,
+                                        rewardAmount: ppc.rewardAmount || 0,
+                                        rewardFrom: ppc.rewardFrom,
+                                        rewardTo: ppc.rewardTo,
+                                      })}
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">未配置</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex justify-end gap-1">
+                                  {canEdit ? (
+                                    <>
                                       <Button
                                         variant="ghost"
                                         size="icon"
-                                        title="删除配置"
-                                        onClick={() => handleClear(product.id)}
+                                        title="编辑提成"
+                                        onClick={() => openEdit(product.id)}
                                       >
-                                        <Trash2 className="h-4 w-4 text-destructive" />
+                                        <Pencil className="h-4 w-4" />
                                       </Button>
-                                    )}
-                                  </>
-                                ) : (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => openEdit(product.id)}
-                                  >
-                                    查看
-                                  </Button>
-                                )}
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                                      {ppc?.id && (
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          title="删除配置"
+                                          onClick={() => handleClear(product.id)}
+                                        >
+                                          <Trash2 className="h-4 w-4 text-destructive" />
+                                        </Button>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => openEdit(product.id)}
+                                    >
+                                      查看
+                                    </Button>
+                                  )}
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })}
                         {productRows.length === 0 && (
                           <TableRow>
                             <TableCell
-                              colSpan={3}
+                              colSpan={canEdit ? 4 : 3}
                               className="py-10 text-center text-sm text-muted-foreground"
                             >
                               暂无关联产品。可从销售记录产生关联，或上方选择产品进行配置。
@@ -436,16 +564,46 @@ export default function MPersonProductCommission({
       </Dialog>
 
       <Dialog
-        open={!!editProductId}
+        open={editDialogOpen}
         onOpenChange={(v) => {
-          if (!v) setEditProductId(null)
+          if (!v) {
+            setEditProductId(null)
+            setBatchProductIds([])
+          }
         }}
       >
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{canEdit ? '配置产品提成' : '查看产品提成'}</DialogTitle>
+            <DialogTitle>
+              {isBatchEdit
+                ? `一键配置所选产品（${batchProductIds.length}）`
+                : canEdit
+                  ? '配置产品提成'
+                  : '查看产品提成'}
+            </DialogTitle>
           </DialogHeader>
-          {person && editProduct && (
+          {person && isBatchEdit && (
+            <div className="mb-2 rounded-lg bg-violet-50 border border-violet-200 px-3 py-2 text-sm space-y-1">
+              <p>
+                <span className="text-muted-foreground">人员：</span>
+                {person.name}
+              </p>
+              <p>
+                <span className="text-muted-foreground">单位：</span>
+                {unitName}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                将把同一套提成规则应用到已选 {batchProductIds.length} 个产品（覆盖已有配置）
+              </p>
+              <div className="max-h-24 overflow-y-auto text-xs text-muted-foreground space-y-0.5">
+                {batchProductIds.map((id) => {
+                  const name = products.find((p) => p.id === id)?.name || id
+                  return <div key={id}>· {name}</div>
+                })}
+              </div>
+            </div>
+          )}
+          {person && editProduct && !isBatchEdit && (
             <div className="mb-2 rounded-lg bg-violet-50 border border-violet-200 px-3 py-2 text-sm space-y-1">
               <p>
                 <span className="text-muted-foreground">人员：</span>
@@ -603,7 +761,7 @@ export default function MPersonProductCommission({
             </div>
           </div>
           <DialogFooter className="gap-2">
-            {canEdit && editProductId && (
+            {canEdit && editProductId && !isBatchEdit && (
               <Button
                 variant="destructive"
                 onClick={() => handleClear(editProductId)}
@@ -611,12 +769,22 @@ export default function MPersonProductCommission({
                 删除配置
               </Button>
             )}
-            <Button variant="outline" onClick={() => setEditProductId(null)}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setEditProductId(null)
+                setBatchProductIds([])
+              }}
+            >
               {canEdit ? '取消' : '关闭'}
             </Button>
             {canEdit && (
               <Button disabled={saving} onClick={handleSave}>
-                {saving ? '保存中…' : '保存'}
+                {saving
+                  ? '保存中…'
+                  : isBatchEdit
+                    ? `应用到 ${batchProductIds.length} 个产品`
+                    : '保存'}
               </Button>
             )}
           </DialogFooter>
