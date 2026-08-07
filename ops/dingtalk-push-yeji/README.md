@@ -23,8 +23,9 @@ grep -q 'YEJI_BATTLE_ENABLED' .env || cat >> .env <<'EOF'
 
 # === 业绩系统单位战报 ===
 YEJI_BATTLE_ENABLED=1
-YEJI_API_BASE=http://127.0.0.1:3001
+YEJI_API_BASE=http://127.0.0.1:8100
 YEJI_API_KEY=eco-sync-2026-secret
+YEJI_BATTLE_UNIT_NAME=海南运营中心
 YEJI_BATTLE_WEBHOOK_URL=https://oapi.dingtalk.com/robot/send?access_token=d64d7d63b39a6c65988de2deec51885d6680aa0df0afbf8f13e463528148587c
 YEJI_BATTLE_CRON=0 8 * * *,0 17 * * *
 YEJI_BATTLE_CRON_SLOTS=morning,evening

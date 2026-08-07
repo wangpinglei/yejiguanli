@@ -54,6 +54,30 @@ function getWebhookUrl() {
   )
 }
 
+/** 只推指定单位，默认：海南运营中心 */
+function getTargetUnitName() {
+  return (process.env.YEJI_BATTLE_UNIT_NAME || '海南运营中心').trim()
+}
+
+function filterTargetUnits(units) {
+  const name = getTargetUnitName()
+  const id = (process.env.YEJI_BATTLE_UNIT_ID || '').trim()
+  const list = Array.isArray(units) ? units : []
+  const matched = list.filter((u) => {
+    if (id && String(u.salesUnitId) === id) return true
+    if (name && String(u.salesUnitName || '').trim() === name) return true
+    return false
+  })
+  if (!matched.length) {
+    addLog(
+      `未找到目标单位「${name || id}」，当前单位: ${
+        list.map((u) => u.salesUnitName).join('、') || '(空)'
+      }`,
+    )
+  }
+  return matched
+}
+
 async function sendMarkdown(title, text) {
   const url = getWebhookUrl()
   if (!url) throw new Error('未配置 YEJI_BATTLE_WEBHOOK_URL')
@@ -72,7 +96,7 @@ async function sendMarkdown(title, text) {
 }
 
 async function fetchBattleData(month) {
-  const base = (process.env.YEJI_API_BASE || 'http://127.0.0.1:3001').replace(
+  const base = (process.env.YEJI_API_BASE || 'http://127.0.0.1:8100').replace(
     /\/$/,
     '',
   )
@@ -116,8 +140,9 @@ async function renderPng(report) {
  */
 async function generatePreview(month) {
   const data = await fetchBattleData(month || getDateKey())
+  const units = filterTargetUnits(data.units || [])
   const images = []
-  for (const unit of data.units || []) {
+  for (const unit of units) {
     const { imageUrl, fileName } = await renderPng(unit)
     images.push({
       salesUnitId: unit.salesUnitId,
@@ -126,8 +151,8 @@ async function generatePreview(month) {
       fileName,
     })
   }
-  addLog(`已生成 ${images.length} 张预览图`)
-  return { month: data.month, images }
+  addLog(`已生成 ${images.length} 张预览图（仅 ${getTargetUnitName()}）`)
+  return { month: data.month, images, targetUnit: getTargetUnitName() }
 }
 
 /**
@@ -146,12 +171,18 @@ async function pushAll(options = {}) {
     return { skipped: true, reason: 'already_sent', key: dedupeKey }
   }
 
-  addLog(`正在拉取单位战报数据... month=${month} slot=${slot}`)
+  addLog(
+    `正在拉取单位战报... month=${month} slot=${slot} 目标=${getTargetUnitName()}`,
+  )
   const data = await fetchBattleData(month)
-  const units = data.units || []
+  const units = filterTargetUnits(data.units || [])
   if (!units.length) {
-    addLog('无销售单位数据')
-    return { skipped: true, reason: 'empty' }
+    addLog('无匹配的目标单位，跳过推送')
+    return {
+      skipped: true,
+      reason: 'unit_not_found',
+      targetUnit: getTargetUnitName(),
+    }
   }
 
   const results = []
@@ -164,16 +195,26 @@ async function pushAll(options = {}) {
     markdown += `　团队目标 **${fmtShort(unit.effectiveTeamTarget)}**\n\n`
     markdown += `![战报](${imageUrl})`
     await sendMarkdown(title, markdown)
-    results.push({ salesUnitId: unit.salesUnitId, imageUrl })
+    results.push({
+      salesUnitId: unit.salesUnitId,
+      salesUnitName: unit.salesUnitName,
+      imageUrl,
+    })
   }
 
   sent[dedupeKey] = {
     at: new Date().toISOString(),
     count: results.length,
+    targetUnit: getTargetUnitName(),
   }
   saveSent(sent)
-  addLog(`✅ 已推送 ${results.length} 个单位 (${dedupeKey})`)
-  return { skipped: false, results, key: dedupeKey }
+  addLog(`✅ 已推送 ${results.length} 张（${getTargetUnitName()}）(${dedupeKey})`)
+  return {
+    skipped: false,
+    results,
+    key: dedupeKey,
+    targetUnit: getTargetUnitName(),
+  }
 }
 
 function fmtShort(n) {

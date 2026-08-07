@@ -36,8 +36,9 @@ if ! grep -q 'YEJI_BATTLE_ENABLED' .env 2>/dev/null; then
 
 # === 业绩系统单位战报（存图同战报：public + http://101.132.42.171）===
 YEJI_BATTLE_ENABLED=1
-YEJI_API_BASE=http://127.0.0.1:3001
+YEJI_API_BASE=http://127.0.0.1:8100
 YEJI_API_KEY=eco-sync-2026-secret
+YEJI_BATTLE_UNIT_NAME=海南运营中心
 YEJI_BATTLE_WEBHOOK_URL=https://oapi.dingtalk.com/robot/send?access_token=d64d7d63b39a6c65988de2deec51885d6680aa0df0afbf8f13e463528148587c
 YEJI_BATTLE_CRON=0 8 * * *,0 17 * * *
 YEJI_BATTLE_CRON_SLOTS=morning,evening
@@ -45,6 +46,8 @@ EOF
   echo "已追加 YEJI_BATTLE_* 到 .env"
 else
   echo ".env 已有 YEJI_BATTLE_*，跳过追加"
+  grep -q 'YEJI_BATTLE_UNIT_NAME' .env || \
+    echo 'YEJI_BATTLE_UNIT_NAME=海南运营中心' >> .env
 fi
 
 # 检查 index.js 是否已接入
