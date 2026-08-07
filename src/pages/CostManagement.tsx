@@ -4,6 +4,7 @@ import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, formatDate, formatDateTime, getYearMonth } from "@/lib/format";
+import { matchesRecurringYearMonth, RECURRING_ALL_MONTHS } from "@/utils/recurringRecord";
 import { getTotalSalaryCost, calcLeaveDeduction, MONTHLY_WORK_DAYS } from "@/lib/salary";
 import type { CostRecord, CostItem, IncomeRecord, IncomeItem } from "@/types";
 import {
@@ -58,6 +59,9 @@ export default function CostManagement() {
     date: new Date().toISOString().slice(0, 10),
     remark: "",
     changeReason: "",
+    isRecurring: false,
+    recurringMonths: [...RECURRING_ALL_MONTHS] as number[],
+    recurringEndDate: "",
   });
   const [formItems, setFormItems] = useState<CostItem[]>([
     { id: `ci${Date.now()}`, category: "人力成本", amount: 0, description: "" },
@@ -110,14 +114,14 @@ export default function CostManagement() {
     );
   }, [salesUnits, personnel, salesRecords, filterUnit, products, selectedMonth, monthlyAdjustments, productPersonCommissions, teamMgmtContext]);
 
-  // 按月过滤手动成本记录
+  // 按月过滤手动成本记录（含月度固定循环成本）
   const filteredRecords = useMemo(() => {
     return costRecords
       .filter((c) => {
         const matchUnit = filterUnit === "all" || c.salesUnitId === filterUnit;
-        const matchMonth = getYearMonth(c.date) === selectedMonth;
-        const matchSearch = c.remark.toLowerCase().includes(search.toLowerCase());
-        return matchUnit && matchMonth && matchSearch;
+        if (!matchUnit) return false;
+        if (!matchesRecurringYearMonth(c, selectedMonth)) return false;
+        return c.remark.toLowerCase().includes(search.toLowerCase());
       })
       .sort((a, b) => (b.createdAt || b.date).localeCompare(a.createdAt || a.date));
   }, [costRecords, filterUnit, selectedMonth, search]);
@@ -214,6 +218,9 @@ export default function CostManagement() {
       date: new Date().toISOString().slice(0, 10),
       remark: "",
       changeReason: "",
+      isRecurring: false,
+      recurringMonths: [...RECURRING_ALL_MONTHS],
+      recurringEndDate: "",
     });
     setFormItems([{ id: `ci${Date.now()}`, category: "人力成本", amount: 0, description: "" }]);
     setDialogOpen(true);
@@ -226,6 +233,9 @@ export default function CostManagement() {
       date: record.date,
       remark: record.remark,
       changeReason: "",
+      isRecurring: !!record.isRecurring,
+      recurringMonths: record.recurringMonths || [...RECURRING_ALL_MONTHS],
+      recurringEndDate: record.recurringEndDate || "",
     });
     setFormItems(record.items.length > 0 ? record.items.map((i) => ({ ...i })) : [{ id: `ci${Date.now()}`, category: "人力成本", amount: 0, description: "" }]);
     setDialogOpen(true);
@@ -257,7 +267,23 @@ export default function CostManagement() {
       alert("请填写变更原因");
       return;
     }
-    const data = { ...form, items: validItems, createdBy: user?.name };
+    if (form.isRecurring && form.recurringMonths.length === 0) {
+      alert("请至少勾选一个适用月份");
+      return;
+    }
+    const data = {
+      salesUnitId: form.salesUnitId,
+      date: form.date,
+      remark: form.remark,
+      items: validItems,
+      createdBy: user?.name,
+      isRecurring: form.isRecurring || undefined,
+      recurringMonths: form.isRecurring ? form.recurringMonths : undefined,
+      recurringStartDate: form.isRecurring ? form.date : undefined,
+      recurringEndDate: form.isRecurring && form.recurringEndDate
+        ? form.recurringEndDate
+        : undefined,
+    };
     try {
       if (editingRecord) {
         await updateCostRecord(editingRecord.id, data, form.changeReason.trim(), operator);
@@ -712,7 +738,8 @@ export default function CostManagement() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-8"></TableHead>
-                  <TableHead>记录日期</TableHead>
+                  <TableHead>周期</TableHead>
+                  <TableHead>记录/起始日期</TableHead>
                   <TableHead>销售单位</TableHead>
                   <TableHead className="text-right">成本项数</TableHead>
                   <TableHead className="text-right">总成本</TableHead>
@@ -732,6 +759,15 @@ export default function CostManagement() {
                           <button className="flex h-6 w-6 items-center justify-center rounded">
                             {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                           </button>
+                        </TableCell>
+                        <TableCell>
+                          {record.isRecurring ? (
+                            <Badge className="bg-orange-100 text-orange-800 hover:bg-orange-100">
+                              <Repeat className="mr-1 h-3 w-3" />每月
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary">单次</Badge>
+                          )}
                         </TableCell>
                         <TableCell className="font-medium">{formatDate(record.date)}</TableCell>
                         <TableCell><Badge variant="outline">{getUnitName(record.salesUnitId)}</Badge></TableCell>
@@ -764,7 +800,7 @@ export default function CostManagement() {
                       </TableRow>
                       {isExpanded && (
                         <TableRow key={record.id + "-detail"} className="bg-muted/30">
-                          <TableCell colSpan={9} className="py-3">
+                          <TableCell colSpan={10} className="py-3">
                             <div className="ml-8 space-y-2">
                               {record.items.map((item) => (
                                 <div key={item.id} className="flex items-center gap-4 rounded-lg border bg-card px-4 py-2 text-sm">
@@ -777,6 +813,19 @@ export default function CostManagement() {
                                 <span className="mr-3 text-muted-foreground">合计</span>
                                 <span className="font-bold text-orange-600">{formatCurrency(record.totalCost)}</span>
                               </div>
+                              {record.isRecurring && (
+                                <div className="rounded-lg bg-orange-50 px-3 py-2 text-xs text-orange-800">
+                                  <Repeat className="inline mr-1 h-3 w-3" />
+                                  月度固定成本
+                                  {record.recurringEndDate
+                                    ? ` · 至 ${formatDate(record.recurringEndDate)} 止`
+                                    : " · 永久生效"}
+                                  {" · "}
+                                  {record.recurringMonths?.length === 12
+                                    ? "全年"
+                                    : (record.recurringMonths || []).map((m) => `${m}月`).join("、")}
+                                </div>
+                              )}
                               {record.changeReason && (
                                 <div className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">
                                   <strong>最近变更原因：</strong>{record.changeReason}
@@ -791,7 +840,12 @@ export default function CostManagement() {
                 })}
                 {filteredRecords.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center py-12 text-muted-foreground">{selectedMonth} 月暂无手动成本记录</TableCell>
+                    <TableCell colSpan={10} className="text-center py-12 text-muted-foreground">
+                      {selectedMonth} 月暂无手动成本记录
+                      {costRecords.some((r) => r.isRecurring) && (
+                        <div className="text-xs mt-1">（已配置月度固定成本但未选中适用月份）</div>
+                      )}
+                    </TableCell>
                   </TableRow>
                 )}
               </TableBody>
@@ -959,10 +1013,87 @@ export default function CostManagement() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>记录日期</Label>
+                <Label>{form.isRecurring ? "生效起始日期" : "记录日期"}</Label>
                 <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
               </div>
             </div>
+
+            <div className="flex items-center justify-between rounded-lg border border-orange-200 bg-orange-50/50 px-4 py-3">
+              <div className="flex items-center gap-2">
+                <Repeat className="h-4 w-4 text-orange-600" />
+                <div>
+                  <Label className="text-sm font-medium text-orange-900 cursor-pointer">设为月度固定成本</Label>
+                  <p className="text-xs text-orange-700 mt-0.5">开启后只需录入一次，系统按勾选月份循环计入（可设结束日期）</p>
+                </div>
+              </div>
+              <Switch
+                checked={form.isRecurring}
+                onCheckedChange={(checked) => setForm({ ...form, isRecurring: checked })}
+              />
+            </div>
+
+            {form.isRecurring && (
+              <div className="space-y-3 rounded-lg border border-orange-200 bg-orange-50/30 p-4">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm font-medium">适用月份 <span className="text-xs font-normal text-muted-foreground">（勾选需要循环生效的月份）</span></Label>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-6 text-xs"
+                        onClick={() => setForm({ ...form, recurringMonths: [...RECURRING_ALL_MONTHS] })}
+                      >
+                        全选
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-6 text-xs"
+                        onClick={() => setForm({ ...form, recurringMonths: [] })}
+                      >
+                        清空
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-6 gap-2">
+                    {RECURRING_ALL_MONTHS.map((m) => (
+                      <label
+                        key={m}
+                        className={`flex items-center gap-1.5 rounded border px-2 py-1.5 text-sm cursor-pointer ${
+                          form.recurringMonths.includes(m)
+                            ? "border-orange-400 bg-orange-100 text-orange-900"
+                            : "border-muted bg-background"
+                        }`}
+                      >
+                        <Checkbox
+                          checked={form.recurringMonths.includes(m)}
+                          onCheckedChange={(checked) => {
+                            const next = checked
+                              ? [...form.recurringMonths, m].sort((a, b) => a - b)
+                              : form.recurringMonths.filter((x) => x !== m);
+                            setForm({ ...form, recurringMonths: next });
+                          }}
+                        />
+                        {m}月
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-sm">循环结束日期（可选）</Label>
+                  <Input
+                    type="date"
+                    value={form.recurringEndDate}
+                    onChange={(e) => setForm({ ...form, recurringEndDate: e.target.value })}
+                  />
+                  <p className="text-xs text-muted-foreground">不填则从起始月起长期按勾选月份循环计入</p>
+                </div>
+                <p className="text-xs text-orange-800">
+                  已选 {form.recurringMonths.length} 个月份，将自动按月计入成本
+                </p>
+              </div>
+            )}
 
             {/* 录入信息提示 */}
             {!editingRecord && (

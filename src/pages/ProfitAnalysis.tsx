@@ -6,6 +6,10 @@ import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, formatDate, getYearMonth } from "@/lib/format";
 import { getTotalSalaryCost, filterByMonth } from "@/lib/salary";
 import { calcSaleSettlementIncome } from "@/lib/settlement";
+import {
+  listRecurringYearMonths,
+  matchesRecurringYearMonth,
+} from "@/utils/recurringRecord";
 import type { RevenueSettlement } from "@/types";
 import {
   TrendingUp, DollarSign, Award, AlertTriangle,
@@ -55,7 +59,10 @@ export default function ProfitAnalysis() {
 
   // 按月过滤
   const monthlySales = useMemo(() => filterByMonth(salesRecords, selectedMonth), [salesRecords, selectedMonth]);
-  const monthlyCosts = useMemo(() => costRecords.filter((c) => getYearMonth(c.date) === selectedMonth), [costRecords, selectedMonth]);
+  const monthlyCosts = useMemo(
+    () => costRecords.filter((c) => matchesRecurringYearMonth(c, selectedMonth)),
+    [costRecords, selectedMonth],
+  );
 
   // 筛选数据
   const filteredSales = useMemo(() => {
@@ -125,10 +132,12 @@ unitIds,
     });
     costRecords.forEach((c) => {
       if (filterUnit !== "all" && c.salesUnitId !== filterUnit) return;
-      const ym = getYearMonth(c.date);
-      const existing = monthMap.get(ym) || { salesAmount: 0, settlementIncome: 0, cost: 0 };
-      existing.cost += c.totalCost;
-      monthMap.set(ym, existing);
+      const yearMonths = listRecurringYearMonths(c, selectedMonth);
+      yearMonths.forEach((ym) => {
+        const existing = monthMap.get(ym) || { salesAmount: 0, settlementIncome: 0, cost: 0 };
+        existing.cost += c.totalCost;
+        monthMap.set(ym, existing);
+      });
     });
     const unitIds = filterUnit === "all" ? salesUnits.map((u) => u.id) : [filterUnit];
     return Array.from(monthMap.entries())
@@ -154,7 +163,7 @@ unitIds,
             : 0,
         };
       });
-  }, [filterUnit, salesUnits, personnel, salesRecords, products, costRecords, monthlyAdjustments, visibleUnitProductSettlements, productPersonCommissions, teamMgmtContext]);
+  }, [filterUnit, salesUnits, personnel, salesRecords, products, costRecords, monthlyAdjustments, visibleUnitProductSettlements, productPersonCommissions, teamMgmtContext, selectedMonth]);
 
   // 各单位对比（按月度）
   const unitComparison = useMemo(() => {

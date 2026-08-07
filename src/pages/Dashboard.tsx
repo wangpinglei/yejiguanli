@@ -4,6 +4,10 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { formatCurrency, formatPercent, getYearMonth } from "@/lib/format";
 import { getTotalSalaryCost, filterByMonth } from "@/lib/salary";
 import {
+  listRecurringYearMonths,
+  matchesRecurringYearMonth,
+} from "@/utils/recurringRecord";
+import {
   TrendingUp,
   TrendingDown,
   Wallet,
@@ -139,8 +143,8 @@ export default function Dashboard() {
     [filteredSalesRecords, selectedMonth]
   );
   const monthlyCosts = useMemo(
-    () => filteredCostRecords.filter((c) => getYearMonth(c.date) === selectedMonth),
-    [filteredCostRecords, selectedMonth]
+    () => filteredCostRecords.filter((c) => matchesRecurringYearMonth(c, selectedMonth)),
+    [filteredCostRecords, selectedMonth],
   );
 
   // 计算统计（按月度）
@@ -197,10 +201,12 @@ filterUnitIds,
     });
 
     filteredCostRecords.forEach((c) => {
-      const ym = getYearMonth(c.date);
-      const existing = monthMap.get(ym) || { revenue: 0, cost: 0 };
-      existing.cost += c.totalCost;
-      monthMap.set(ym, existing);
+      const yearMonths = listRecurringYearMonths(c, selectedMonth);
+      yearMonths.forEach((ym) => {
+        const existing = monthMap.get(ym) || { revenue: 0, cost: 0 };
+        existing.cost += c.totalCost;
+        monthMap.set(ym, existing);
+      });
     });
 
     return Array.from(monthMap.entries())

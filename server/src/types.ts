@@ -117,6 +117,11 @@ export interface CostRecord {
   remark: string;
   createdAt: string;
   createdBy?: string;
+  changeReason?: string;
+  isRecurring?: boolean;
+  recurringMonths?: number[];
+  recurringStartDate?: string;
+  recurringEndDate?: string;
 }
 
 // JWT payload

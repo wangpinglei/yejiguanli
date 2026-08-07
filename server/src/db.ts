@@ -344,6 +344,13 @@ function initSchema() {
 
   ensureColumns("cost_records", [
     { name: "change_reason", ddl: "change_reason TEXT DEFAULT ''" },
+    { name: "is_recurring", ddl: "is_recurring INTEGER DEFAULT 0" },
+    {
+      name: "recurring_months",
+      ddl: "recurring_months TEXT DEFAULT '[1,2,3,4,5,6,7,8,9,10,11,12]'",
+    },
+    { name: "recurring_start_date", ddl: "recurring_start_date TEXT DEFAULT ''" },
+    { name: "recurring_end_date", ddl: "recurring_end_date TEXT DEFAULT ''" },
   ]);
 }
 
@@ -476,6 +483,10 @@ export function rowToCostRecord(row: any) {
     createdAt: row.created_at,
     createdBy: row.created_by || undefined,
     changeReason: row.change_reason || undefined,
+    isRecurring: Boolean(row.is_recurring),
+    recurringMonths: JSON.parse(row.recurring_months || "[1,2,3,4,5,6,7,8,9,10,11,12]"),
+    recurringStartDate: row.recurring_start_date || undefined,
+    recurringEndDate: row.recurring_end_date || undefined,
   };
 }
 

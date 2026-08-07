@@ -143,12 +143,23 @@ router.post("/", (req, res) => {
       const itemsJson = JSON.stringify(cr.items || []);
       upsertById(
         db, "cost_records", cr.id,
-        `INSERT INTO cost_records (id, sales_unit_id, date, items, total_cost, remark, created_at, created_by, change_reason)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [cr.id, cr.salesUnitId, cr.date, itemsJson, cr.totalCost || 0, cr.remark || "",
-          cr.createdAt || new Date().toISOString(), cr.createdBy || null, cr.changeReason || ""],
-        `UPDATE cost_records SET sales_unit_id=?, date=?, items=?, total_cost=?, remark=?, created_by=?, change_reason=? WHERE id=?`,
-        [cr.salesUnitId, cr.date, itemsJson, cr.totalCost || 0, cr.remark || "", cr.createdBy || null, cr.changeReason || "", cr.id]
+        `INSERT INTO cost_records (
+          id, sales_unit_id, date, items, total_cost, remark, created_at, created_by, change_reason,
+          is_recurring, recurring_months, recurring_start_date, recurring_end_date
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          cr.id, cr.salesUnitId, cr.date, itemsJson, cr.totalCost || 0, cr.remark || "",
+          cr.createdAt || new Date().toISOString(), cr.createdBy || null, cr.changeReason || "",
+          cr.isRecurring ? 1 : 0, JSON.stringify(cr.recurringMonths || [1,2,3,4,5,6,7,8,9,10,11,12]),
+          cr.recurringStartDate || "", cr.recurringEndDate || "",
+        ],
+        `UPDATE cost_records SET sales_unit_id=?, date=?, items=?, total_cost=?, remark=?, created_by=?, change_reason=?,
+          is_recurring=?, recurring_months=?, recurring_start_date=?, recurring_end_date=? WHERE id=?`,
+        [
+          cr.salesUnitId, cr.date, itemsJson, cr.totalCost || 0, cr.remark || "", cr.createdBy || null, cr.changeReason || "",
+          cr.isRecurring ? 1 : 0, JSON.stringify(cr.recurringMonths || [1,2,3,4,5,6,7,8,9,10,11,12]),
+          cr.recurringStartDate || "", cr.recurringEndDate || "", cr.id,
+        ]
       );
       stats.costRecords++;
     }

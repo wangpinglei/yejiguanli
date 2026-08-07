@@ -151,13 +151,18 @@ export interface CostItem {
 export interface CostRecord {
   id: string;
   salesUnitId: string;
-  date: string;
+  date: string; // 录入日期（月度固定模式下表示起始日期）
   items: CostItem[];
   totalCost: number;
   remark: string;
   createdAt: string; // 录入时间
   createdBy?: string; // 录入人姓名
   changeReason?: string; // 最近一次变更原因
+  // 月度固定模式：录入一次按月循环计入
+  isRecurring?: boolean;
+  recurringMonths?: number[]; // 适用月份（1-12）
+  recurringStartDate?: string;
+  recurringEndDate?: string;
 }
 
 // 收入项（动态行，用于其他收入录入）
