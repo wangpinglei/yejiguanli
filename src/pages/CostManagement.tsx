@@ -7,11 +7,12 @@ import { formatCurrency, formatDate, formatDateTime, getYearMonth } from "@/lib/
 import { matchesRecurringYearMonth, RECURRING_ALL_MONTHS } from "@/utils/recurringRecord";
 import { getTotalSalaryCost, calcLeaveDeduction, MONTHLY_WORK_DAYS, isPersonnelOnDutyInMonth, filterByMonth } from "@/lib/salary";
 import { calcSalePersonCommissionPreview } from "@/lib/commissionReward";
+import { calcSaleSettlementIncome } from "@/lib/settlement";
 import type { CostRecord, CostItem, IncomeRecord, IncomeItem } from "@/types";
 import {
   Plus, Search, Pencil, Trash2, Wallet, X, ChevronDown, ChevronRight, Clock,
   Users, Calculator, History, Percent, CalendarDays, Save, TrendingUp, Repeat, AlertTriangle,
-  Maximize2, Minimize2,
+  Maximize2, Minimize2, Receipt,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -153,6 +154,22 @@ export default function CostManagement() {
 
   // 销售提成合计 = 个人（按销售明细）+ 团队管理提成
   const productCommissionTotal = personalCommissionFromSales + teamMgmtCommissionTotal;
+
+  // 结算收入：与收支利润页同一口径（当月销售 × 产品结算配置）
+  const settlementIncomeTotal = useMemo(() => {
+    const monthly = filterByMonth(salesRecords, selectedMonth).filter(
+      (s) => filterUnit === "all" || s.salesUnitId === filterUnit,
+    );
+    return monthly.reduce(
+      (sum, s) => sum + calcSaleSettlementIncome(s, unitProductSettlements),
+      0,
+    );
+  }, [salesRecords, selectedMonth, filterUnit, unitProductSettlements]);
+
+  const onDutyCount = useMemo(
+    () => salaryCosts.units.reduce((sum, u) => sum + u.activeCount, 0),
+    [salaryCosts],
+  );
 
   // 按月过滤收入记录（同时匹配普通记录和月度固定记录）
   const filteredIncomeRecords = useMemo(() => {
@@ -514,90 +531,76 @@ export default function CostManagement() {
         )}
       </div>
 
-      {/* Summary Cards */}
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      {/* Summary Cards：经营一眼卡 */}
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <Card>
           <CardContent className="flex items-center gap-4 p-5">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50">
-              <Calculator className="h-6 w-6 text-blue-600" />
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-cyan-50">
+              <Receipt className="h-6 w-6 text-cyan-600" />
             </div>
-            <div>
-              <p className="text-sm text-muted-foreground">自动人力成本</p>
-              <p className="text-xl font-bold text-blue-600">{formatCurrency(salaryCosts.grandTotal)}</p>
-              <p className="text-[10px] text-muted-foreground">薪酬 {formatCurrency(salaryCosts.grandSalary)} + 社保公积金 {formatCurrency(salaryCosts.grandSocialInsurance + salaryCosts.grandHousingFund)}</p>
+            <div className="min-w-0">
+              <p className="text-sm text-muted-foreground">结算收入</p>
+              <p className="text-xl font-bold text-cyan-600">{formatCurrency(settlementIncomeTotal)}</p>
+              <p className="text-[10px] text-muted-foreground">按产品结算配置 · 与收支利润一致</p>
             </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="flex items-center gap-4 p-5">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-red-50">
-              <Wallet className="h-6 w-6 text-red-600" />
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">社保公积金合计</p>
-              <p className="text-xl font-bold text-red-600">{formatCurrency(salaryCosts.grandSocialInsurance + salaryCosts.grandHousingFund)}</p>
-              <p className="text-[10px] text-muted-foreground">社保 {formatCurrency(salaryCosts.grandSocialInsurance)} / 公积金 {formatCurrency(salaryCosts.grandHousingFund)}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center gap-4 p-5">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-orange-50">
-              <Wallet className="h-6 w-6 text-orange-600" />
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">手动录入成本</p>
-              <p className="text-xl font-bold text-orange-600">{formatCurrency(manualCostTotal)}</p>
-              <p className="text-[10px] text-muted-foreground">{selectedMonth} 月</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center gap-4 p-5">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-50">
-              <CalendarDays className="h-6 w-6 text-amber-600" />
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">请假扣款 / 其他调整</p>
-              <p className="text-xl font-bold text-amber-600">-{formatCurrency(leaveDeductionTotal)}</p>
-              <p className="text-[10px] text-muted-foreground">其他调整 {otherAdjustmentTotal >= 0 ? "+" : ""}{formatCurrency(otherAdjustmentTotal)}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center gap-4 p-5">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-emerald-50">
               <TrendingUp className="h-6 w-6 text-emerald-600" />
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-sm text-muted-foreground">其他收入</p>
               <p className="text-xl font-bold text-emerald-600">{formatCurrency(incomeTotal)}</p>
-              <p className="text-[10px] text-muted-foreground">{selectedMonth} 月 · {filteredIncomeRecords.length} 条</p>
+              <p className="text-[10px] text-muted-foreground">
+                来源：录入收入 · {filteredIncomeRecords.length} 条
+              </p>
             </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="flex items-center gap-4 p-5">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-violet-50">
-              <Users className="h-6 w-6 text-violet-600" />
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-50">
+              <Calculator className="h-6 w-6 text-blue-600" />
             </div>
-            <div>
-              <p className="text-sm text-muted-foreground">在职人数 / 总成本</p>
-              <p className="text-xl font-bold">{salaryCosts.units.reduce((sum, u) => sum + u.activeCount, 0)} 人</p>
-              <p className="text-[10px] font-medium text-red-600">{formatCurrency(grandTotal)}</p>
+            <div className="min-w-0">
+              <p className="text-sm text-muted-foreground">总人力成本</p>
+              <p className="text-xl font-bold text-blue-600">{formatCurrency(salaryCosts.grandTotal)}</p>
+              <p className="text-[10px] text-muted-foreground">
+                薪资 {formatCurrency(salaryCosts.grandSalary)}
+                + 社保 {formatCurrency(salaryCosts.grandSocialInsurance)}
+                + 公积金 {formatCurrency(salaryCosts.grandHousingFund)}
+              </p>
             </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="flex items-center gap-4 p-5">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-violet-50">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-orange-50">
+              <Wallet className="h-6 w-6 text-orange-600" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm text-muted-foreground">支出</p>
+              <p className="text-xl font-bold text-orange-600">{formatCurrency(manualCostTotal)}</p>
+              <p className="text-[10px] text-muted-foreground">
+                来源：录入成本 · 合计成本 {formatCurrency(grandTotal)}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="flex items-center gap-4 p-5">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-violet-50">
               <Percent className="h-6 w-6 text-violet-600" />
             </div>
-            <div>
-              <p className="text-sm text-muted-foreground">销售提成合计</p>
+            <div className="min-w-0">
+              <p className="text-sm text-muted-foreground">总提成</p>
               <p className="text-xl font-bold text-violet-600">{formatCurrency(productCommissionTotal)}</p>
               <p className="text-[10px] text-muted-foreground">
-                个人 {formatCurrency(personalCommissionFromSales)} + 团队 {formatCurrency(teamMgmtCommissionTotal)}
+                个人 {formatCurrency(personalCommissionFromSales)}
+                + 团队 {formatCurrency(teamMgmtCommissionTotal)}
+                · 已计入总人力成本
               </p>
             </div>
           </CardContent>
@@ -643,9 +646,19 @@ export default function CostManagement() {
       {/* ===================== 自动薪酬成本明细 ===================== */}
       <Card className="mb-6">
         <CardContent className="p-0">
-          <div className="flex items-center gap-2 border-b px-4 py-3">
-            <Calculator className="h-5 w-5 text-blue-600" />
-            <h3 className="text-base font-semibold">自动计入人力成本 / 实时薪资（{selectedMonth} 月度）</h3>
+          <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
+            <Calculator className="h-5 w-5 text-blue-600 shrink-0" />
+            <h3 className="text-base font-semibold">
+              自动计入人力成本 / 实时薪资（{selectedMonth} 月度）
+            </h3>
+            <Badge variant="outline" className="border-blue-200 text-blue-700">
+              在岗 {onDutyCount} 人
+            </Badge>
+            <span className="text-xs text-muted-foreground">
+              请假扣款 -{formatCurrency(leaveDeductionTotal)}
+              · 其他调整 {otherAdjustmentTotal >= 0 ? "+" : ""}
+              {formatCurrency(otherAdjustmentTotal)}
+            </span>
             <Badge variant="secondary" className="ml-auto">系统自动计算</Badge>
           </div>
           <div className="overflow-x-auto">
