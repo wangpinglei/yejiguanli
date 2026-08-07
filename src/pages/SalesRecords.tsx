@@ -32,6 +32,11 @@ import {
 import {
   Popover, PopoverContent, PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  UNCATEGORIZED,
+  UNCATEGORIZED_LABEL,
+  getProductDomainKey,
+} from "./ProductSettlement/components/m-business-domain-section";
 
 /** 长文本截断，点击展开查看全文 */
 function ExpandableCellText({
@@ -456,6 +461,7 @@ export default function SalesRecords() {
   const [filterUnit, setFilterUnit] = useState("all");
   const [filterPerson, setFilterPerson] = useState("all");
   const [filterSync, setFilterSync] = useState("all"); // all | manual | synced
+  const [filterDomain, setFilterDomain] = useState("all");
   const [filterDuplicate, setFilterDuplicate] = useState<"all" | "duplicate" | "unique">("all");
   const [importDupFilter, setImportDupFilter] = useState<"all" | "duplicate" | "unique">("all");
   const [dateFrom, setDateFrom] = useState("");
@@ -521,6 +527,24 @@ export default function SalesRecords() {
     return set;
   }, [salesRecords, products]);
 
+  const domainOptions = useMemo(() => {
+    const set = new Set<string>();
+    let hasUncategorized = false;
+    products.forEach((p) => {
+      const key = getProductDomainKey(p);
+      if (key === UNCATEGORIZED) hasUncategorized = true;
+      else set.add(key);
+    });
+    // 销售记录里找不到产品时，也视作未分类
+    salesRecords.forEach((s) => {
+      const product = products.find((p) => p.id === s.productId);
+      if (!product) hasUncategorized = true;
+    });
+    const list = Array.from(set).sort((a, b) => a.localeCompare(b, "zh-CN"));
+    if (hasUncategorized) list.push(UNCATEGORIZED);
+    return list;
+  }, [products, salesRecords]);
+
   const baseFilteredRecords = useMemo(() => {
     return salesRecords
       .filter((s) => {
@@ -536,13 +560,18 @@ export default function SalesRecords() {
         const matchUnit = filterUnit === "all" || s.salesUnitId === filterUnit;
         const matchPerson = filterPerson === "all" || s.personnelId === filterPerson;
         const matchSync = filterSync === "all" || (filterSync === "synced" ? s.synced : !s.synced);
+        const domainKey = product ? getProductDomainKey(product) : UNCATEGORIZED;
+        const matchDomain = filterDomain === "all" || domainKey === filterDomain;
         const saleDate = (s.saleDate || "").slice(0, 10);
         const matchFrom = !dateFrom || saleDate >= dateFrom;
         const matchTo = !dateTo || saleDate <= dateTo;
-        return matchSearch && matchUnit && matchPerson && matchSync && matchFrom && matchTo;
+        return matchSearch && matchUnit && matchPerson && matchSync && matchDomain && matchFrom && matchTo;
       })
       .sort((a, b) => (b.saleDate || "").localeCompare(a.saleDate || ""));
-  }, [salesRecords, personnel, products, search, filterUnit, filterPerson, filterSync, dateFrom, dateTo]);
+  }, [
+    salesRecords, personnel, products, search, filterUnit, filterPerson, filterSync,
+    filterDomain, dateFrom, dateTo,
+  ]);
 
   const duplicateCountInFilters = useMemo(
     () => baseFilteredRecords.filter((s) => duplicateRecordIdSet.has(s.id)).length,
@@ -562,7 +591,7 @@ export default function SalesRecords() {
   // 筛选条件变化时回到第 1 页
   useEffect(() => {
     setPage(1);
-  }, [search, filterUnit, filterPerson, filterSync, filterDuplicate, dateFrom, dateTo, pageSize]);
+  }, [search, filterUnit, filterPerson, filterSync, filterDomain, filterDuplicate, dateFrom, dateTo, pageSize]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRecords.length / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -1075,6 +1104,17 @@ export default function SalesRecords() {
             <SelectItem value="all">全部来源</SelectItem>
             <SelectItem value="synced">仅同步</SelectItem>
             <SelectItem value="manual">仅手动</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={filterDomain} onValueChange={setFilterDomain}>
+          <SelectTrigger className="w-40"><SelectValue placeholder="业务域" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部业务域</SelectItem>
+            {domainOptions.map((d) => (
+              <SelectItem key={d} value={d}>
+                {d === UNCATEGORIZED ? UNCATEGORIZED_LABEL : d}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <Select value={filterDuplicate} onValueChange={(v) => setFilterDuplicate(v as "all" | "duplicate" | "unique")}>
