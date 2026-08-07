@@ -10,6 +10,7 @@ import productRoutes from "./routes/products";
 import salesRecordRoutes from "./routes/salesRecords";
 import costRecordRoutes from "./routes/costRecords";
 import migrateRoutes from "./routes/migrate";
+import battleReportRoutes from "./routes/battleReport";
 import extraRoutes from "./routes/extra";
 
 const app = express();
@@ -47,6 +48,9 @@ app.get("/api/health", (_req, res) => {
 app.get("/api/synced-orders", (_req, res) => {
   res.json({ success: true, orders: [] });
 });
+
+// 单位战报（钉钉推送用，X-API-Key，无需登录）
+app.use("/api", battleReportRoutes);
 
 app.use("/api", extraRoutes);
 

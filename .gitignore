@@ -38,3 +38,7 @@ server/public/
 # Webhook 部署密钥（切勿提交；仅在服务器本地生成）
 .webhook_secret
 
+# 本地临时
+tmp-users.json
+ops/dingtalk-push-yeji/preview-out/
+
