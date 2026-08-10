@@ -14,6 +14,9 @@ import {
   Building2,
   Users,
   Swords,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -77,6 +80,8 @@ export default function SalesUnits() {
   const { users } = useAuth();
   const { canEditUnit, visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleSalesRecords: salesRecords, visibleCostRecords: costRecords } = usePermissions();
   const [search, setSearch] = useState("");
+  /** none | desc | asc — 利润排序 */
+  const [profitSortOrder, setProfitSortOrder] = useState<"none" | "desc" | "asc">("none");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingUnit, setEditingUnit] = useState<SalesUnit | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -120,12 +125,60 @@ export default function SalesUnits() {
     );
   }, [salesUnits, search]);
 
-  const getUnitStats = (unitId: string) => {
-    const unitPersonnel = personnel.filter((p) => p.salesUnitId === unitId);
-    const revenue = salesRecords.filter((s) => s.salesUnitId === unitId).reduce((sum, s) => sum + s.totalAmount, 0);
-    const cost = costRecords.filter((c) => c.salesUnitId === unitId).reduce((sum, c) => sum + c.totalCost, 0);
-    return { personnelCount: unitPersonnel.length, revenue, cost, profit: revenue - cost };
-  };
+  const unitStatsById = useMemo(() => {
+    const map: Record<
+      string,
+      { personnelCount: number; revenue: number; cost: number; profit: number }
+    > = {}
+    for (const u of salesUnits) {
+      const unitPersonnel = personnel.filter((p) => p.salesUnitId === u.id)
+      const revenue = salesRecords
+        .filter((s) => s.salesUnitId === u.id)
+        .reduce((sum, s) => sum + s.totalAmount, 0)
+      const cost = costRecords
+        .filter((c) => c.salesUnitId === u.id)
+        .reduce((sum, c) => sum + c.totalCost, 0)
+      map[u.id] = {
+        personnelCount: unitPersonnel.length,
+        revenue,
+        cost,
+        profit: revenue - cost,
+      }
+    }
+    return map
+  }, [salesUnits, personnel, salesRecords, costRecords])
+
+  function getUnitStats(unitId: string) {
+    return (
+      unitStatsById[unitId] || {
+        personnelCount: 0,
+        revenue: 0,
+        cost: 0,
+        profit: 0,
+      }
+    )
+  }
+
+  function handleToggleProfitSort() {
+    setProfitSortOrder((prev) => {
+      if (prev === 'none') return 'desc'
+      if (prev === 'desc') return 'asc'
+      return 'none'
+    })
+  }
+
+  const displayedUnits = useMemo(() => {
+    const list = [...filteredUnits]
+    if (profitSortOrder === 'none') return list
+    const dir = profitSortOrder === 'desc' ? -1 : 1
+    list.sort((a, b) => {
+      const pa = getUnitStats(a.id).profit
+      const pb = getUnitStats(b.id).profit
+      if (pa === pb) return a.name.localeCompare(b.name, 'zh')
+      return (pa - pb) * dir
+    })
+    return list
+  }, [filteredUnits, profitSortOrder, unitStatsById])
 
   const openAdd = () => {
     setEditingUnit(null);
@@ -242,12 +295,33 @@ export default function SalesUnits() {
                   <TableHead>组织部</TableHead>
                   <TableHead>单位负责人</TableHead>
                   <TableHead className="text-right">人员数</TableHead>
-                  <TableHead className="text-right">利润</TableHead>
+                  <TableHead className="text-right">
+                    <button
+                      type="button"
+                      className="ml-auto inline-flex items-center gap-1 rounded px-1 py-0.5 font-medium hover:bg-muted/80"
+                      onClick={handleToggleProfitSort}
+                      title="点击按利润排序"
+                    >
+                      利润
+                      {profitSortOrder === "desc" ? (
+                        <ArrowDown className="h-3.5 w-3.5 text-emerald-600" />
+                      ) : profitSortOrder === "asc" ? (
+                        <ArrowUp className="h-3.5 w-3.5 text-emerald-600" />
+                      ) : (
+                        <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                      )}
+                      {profitSortOrder === "desc" ? (
+                        <span className="text-[10px] font-normal text-emerald-600">高→低</span>
+                      ) : profitSortOrder === "asc" ? (
+                        <span className="text-[10px] font-normal text-emerald-600">低→高</span>
+                      ) : null}
+                    </button>
+                  </TableHead>
                   <TableHead className="text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredUnits.map((unit) => {
+                {displayedUnits.map((unit) => {
                   const stats = getUnitStats(unit.id);
                   return (
                     <TableRow key={unit.id}>
@@ -307,7 +381,7 @@ export default function SalesUnits() {
                     </TableRow>
                   );
                 })}
-                {filteredUnits.length === 0 && (
+                {displayedUnits.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={8} className="text-center py-12 text-muted-foreground">
                       暂无数据
