@@ -1,11 +1,13 @@
 // 格式化货币
 export function formatCurrency(amount: number): string {
+  const n = Number(amount);
+  const safe = Number.isFinite(n) ? n : 0;
   return new Intl.NumberFormat("zh-CN", {
     style: "currency",
     currency: "CNY",
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  }).format(amount);
+  }).format(safe);
 }
 
 // 格式化数字

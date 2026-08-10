@@ -466,8 +466,8 @@ export function calculateMonthlySalary(
         isDistribution: false,
         fixedRatio: 1,
       };
-  const s = pay.salary;
-  const fixedRatio = pay.fixedRatio;
+  const s = pay.salary || EMPTY_SALARY;
+  const fixedRatio = Number.isFinite(pay.fixedRatio) ? pay.fixedRatio : 1;
   const personalSales = getPersonalSales(person.id, monthlyRecords, person.name);
 
   // 个人提成：优先产品×单位×人员配置（按成交日分段）
@@ -533,7 +533,10 @@ export function calculateMonthlySalary(
  * 计算固定部分月薪（底薪 + 绩效 + 岗位补贴，不含提成）
  */
 export function getFixedSalary(salary: SalaryStructure): number {
-  return salary.baseSalary + salary.performance + salary.positionAllowance;
+  const s = salary || EMPTY_SALARY;
+  return (Number(s.baseSalary) || 0)
+    + (Number(s.performance) || 0)
+    + (Number(s.positionAllowance) || 0);
 }
 
 // ===================== 薪酬成本汇总（含社保公积金） =====================
