@@ -482,8 +482,8 @@ export default function CostManagement() {
   return (
     <div>
       <PageHeader
-        title="成本管理"
-        description="按月度管理人员成本；团队管理提成在本页配置，个人提成请到人员管理按人×产品设置"
+        title="成本与收入录入"
+        description="本页负责记账：录入成本/其他收入、人力成本明细、团队管理提成。看盈亏请到「盈亏分析」。"
         action={
           <div className="flex gap-2">
             {isSuperadmin && (
@@ -531,8 +531,46 @@ export default function CostManagement() {
         )}
       </div>
 
-      {/* Summary Cards：经营一眼卡 */}
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+        <span className="font-medium">本页 = 记账录入</span>
+        <span className="mx-1 text-muted-foreground">·</span>
+        成本、其他收入、人力明细与提成配置都在这里；
+        <Link
+          to="/profit-analysis"
+          className="mx-1 font-medium text-cyan-700 underline-offset-2 hover:underline"
+        >
+          去盈亏分析看利润
+        </Link>
+      </div>
+
+      <div className="mb-4 flex flex-wrap gap-2">
+        {[
+          { id: 'section-overview', label: '本月概览' },
+          { id: 'section-team-commission', label: '团队提成' },
+          { id: 'section-salary', label: '人力成本' },
+          { id: 'section-cost-records', label: '成本录入' },
+          { id: 'section-income-records', label: '其他收入' },
+        ].map((item) => (
+          <Button
+            key={item.id}
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8"
+            onClick={() =>
+              document.getElementById(item.id)?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'start',
+              })
+            }
+          >
+            {item.label}
+          </Button>
+        ))}
+      </div>
+
+      {/* Summary Cards：录入侧概览 */}
+      <div id="section-overview" className="mb-6 grid scroll-mt-20 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <Card>
           <CardContent className="flex items-center gap-4 p-5">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-cyan-50">
@@ -541,7 +579,7 @@ export default function CostManagement() {
             <div className="min-w-0">
               <p className="text-sm text-muted-foreground">结算收入</p>
               <p className="text-xl font-bold text-cyan-600">{formatCurrency(settlementIncomeTotal)}</p>
-              <p className="text-[10px] text-muted-foreground">按产品结算配置 · 与收支利润一致</p>
+              <p className="text-[10px] text-muted-foreground">销售结算口径 · 与盈亏分析一致</p>
             </div>
           </CardContent>
         </Card>
@@ -609,7 +647,7 @@ export default function CostManagement() {
 
       {/* 团队管理提成：单位级规则 */}
       <section
-        id="team-mgmt-commission-config"
+        id="section-team-commission"
         className="mb-6 rounded-xl border-2 border-emerald-300 bg-emerald-50/40 p-5"
       >
         <MTeamMgmtCommissionPanel selectedMonth={selectedMonth} />
@@ -644,7 +682,7 @@ export default function CostManagement() {
       </section>
 
       {/* ===================== 自动薪酬成本明细 ===================== */}
-      <Card className="mb-6">
+      <Card id="section-salary" className="mb-6 scroll-mt-20">
         <CardContent className="p-0">
           <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
             <Calculator className="h-5 w-5 text-blue-600 shrink-0" />
@@ -760,7 +798,7 @@ export default function CostManagement() {
       </Card>
 
       {/* ===================== 手动录入成本 ===================== */}
-      <div className="mb-4 flex items-center gap-2">
+      <div id="section-cost-records" className="mb-4 flex scroll-mt-20 items-center gap-2">
         <Wallet className="h-5 w-5 text-orange-600" />
         <h3 className="text-base font-semibold">手动录入成本记录</h3>
         <Badge variant="outline" className="ml-1">{selectedMonth} · {filteredRecords.length} 条</Badge>
@@ -899,7 +937,7 @@ export default function CostManagement() {
       </Card>
 
       {/* ===================== 其他收入记录 ===================== */}
-      <div className="mt-8 mb-4 flex items-center gap-2">
+      <div id="section-income-records" className="mt-8 mb-4 flex scroll-mt-20 items-center gap-2">
         <TrendingUp className="h-5 w-5 text-emerald-600" />
         <h3 className="text-base font-semibold">其他收入记录</h3>
         <Badge variant="outline" className="ml-1 border-emerald-200 text-emerald-700">{selectedMonth} · {filteredIncomeRecords.length} 条</Badge>

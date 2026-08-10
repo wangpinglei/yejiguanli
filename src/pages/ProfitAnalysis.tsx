@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useData } from "@/context/DataContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useAuth } from "@/context/AuthContext";
@@ -94,6 +95,25 @@ unitIds,
     ).grandSalesCommission;
   }
 
+  // 其他收入（录入侧）按月过滤，提前供盈亏汇总使用
+  const monthlyIncomeRecords = useMemo(() => {
+    const targetM = parseInt(selectedMonth.slice(5, 7), 10);
+    return incomeRecords
+      .filter((r) => {
+        const matchUnit = filterUnit === "all" || r.salesUnitId === filterUnit;
+        if (!matchUnit) return false;
+        if (r.isRecurring) {
+          const months = r.recurringMonths || [1,2,3,4,5,6,7,8,9,10,11,12];
+          if (!months.includes(targetM)) return false;
+          if (r.recurringStartDate && selectedMonth < r.recurringStartDate.slice(0, 7)) return false;
+          if (r.recurringEndDate && selectedMonth > r.recurringEndDate.slice(0, 7)) return false;
+          return true;
+        }
+        return getYearMonth(r.date) === selectedMonth;
+      })
+      .sort((a, b) => (b.createdAt || b.date).localeCompare(a.createdAt || a.date));
+  }, [incomeRecords, filterUnit, selectedMonth]);
+
   // 汇总（按月度）
   const summary = useMemo(() => {
     const totalSalesAmount = filteredSales.reduce((sum, s) => sum + s.totalAmount, 0); // 实收总额
@@ -109,23 +129,51 @@ unitIds,
       teamMgmtContext,
     );
     const totalCommission = salaryData.grandSalesCommission; // 销售提成（按人）
+    const totalOtherIncome = monthlyIncomeRecords.reduce((sum, r) => sum + r.totalAmount, 0)
+    const totalRevenue = totalSettlementIncome + totalOtherIncome
     const productProfit = totalSettlementIncome - totalCommission; // 产品利润 = 结算收入 - 提成
     const manualCost = filteredCosts.reduce((sum, c) => sum + c.totalCost, 0);
     const salaryCost = salaryData.grandTotal;
     const totalCost = manualCost + salaryCost;
-    // 净利润 = 结算收入 - 总成本（总成本已含人员提成）
-    const totalProfit = totalSettlementIncome - totalCost;
-    const profitMargin = totalSettlementIncome > 0 ? (totalProfit / totalSettlementIncome) * 100 : 0;
-    return { totalSalesAmount, totalSettlementIncome, totalCommission, productProfit, totalCost, manualCost, salaryCost, totalProfit, profitMargin };
-  }, [filteredSales, filteredCosts, filterUnit, salesUnits, personnel, salesRecords, products, selectedMonth, monthlyAdjustments, visibleUnitProductSettlements, productPersonCommissions, teamMgmtContext]);
+    // 净利润 =（结算收入 + 其他收入）- 总成本（总成本已含人员提成）
+    const totalProfit = totalRevenue - totalCost;
+    const profitMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
+    return {
+      totalSalesAmount,
+      totalSettlementIncome,
+      totalOtherIncome,
+      totalRevenue,
+      totalCommission,
+      productProfit,
+      totalCost,
+      manualCost,
+      salaryCost,
+      totalProfit,
+      profitMargin,
+    };
+  }, [
+    filteredSales,
+    filteredCosts,
+    filterUnit,
+    salesUnits,
+    personnel,
+    salesRecords,
+    products,
+    selectedMonth,
+    monthlyAdjustments,
+    visibleUnitProductSettlements,
+    productPersonCommissions,
+    teamMgmtContext,
+    monthlyIncomeRecords,
+  ]);
 
   // 月度趋势
   const monthlyData = useMemo(() => {
-    const monthMap = new Map<string, { salesAmount: number; settlementIncome: number; cost: number }>();
+    const monthMap = new Map<string, { salesAmount: number; settlementIncome: number; otherIncome: number; cost: number }>();
     salesRecords.forEach((s) => {
       if (filterUnit !== "all" && s.salesUnitId !== filterUnit) return;
       const ym = getYearMonth(s.saleDate);
-      const existing = monthMap.get(ym) || { salesAmount: 0, settlementIncome: 0, cost: 0 };
+      const existing = monthMap.get(ym) || { salesAmount: 0, settlementIncome: 0, otherIncome: 0, cost: 0 };
       existing.salesAmount += s.totalAmount;
       existing.settlementIncome += calcSaleSettlementIncome(s, visibleUnitProductSettlements);
       monthMap.set(ym, existing);
@@ -134,11 +182,28 @@ unitIds,
       if (filterUnit !== "all" && c.salesUnitId !== filterUnit) return;
       const yearMonths = listRecurringYearMonths(c, selectedMonth);
       yearMonths.forEach((ym) => {
-        const existing = monthMap.get(ym) || { salesAmount: 0, settlementIncome: 0, cost: 0 };
+        const existing = monthMap.get(ym) || { salesAmount: 0, settlementIncome: 0, otherIncome: 0, cost: 0 };
         existing.cost += c.totalCost;
         monthMap.set(ym, existing);
       });
     });
+    incomeRecords.forEach((r) => {
+      if (filterUnit !== "all" && r.salesUnitId !== filterUnit) return;
+      const months = r.isRecurring
+        ? listRecurringYearMonths(r, selectedMonth)
+        : [getYearMonth(r.date)]
+      months.forEach((ym) => {
+        if (!ym) return
+        const existing = monthMap.get(ym) || {
+          salesAmount: 0,
+          settlementIncome: 0,
+          otherIncome: 0,
+          cost: 0,
+        }
+        existing.otherIncome += r.totalAmount || 0
+        monthMap.set(ym, existing)
+      })
+    })
     const unitIds = filterUnit === "all" ? salesUnits.map((u) => u.id) : [filterUnit];
     return Array.from(monthMap.entries())
       .sort((a, b) => a[0].localeCompare(b[0]))
@@ -153,17 +218,18 @@ unitIds,
       teamMgmtContext,
     );
         const monthSalary = monthSalaryData.grandTotal;
+        const revenue = data.settlementIncome + data.otherIncome
+        const cost = data.cost + monthSalary
+        const profit = revenue - cost
         return {
           month: month.split("-")[1] + "月",
-          revenue: data.settlementIncome,
-          cost: data.cost + monthSalary,
-          profit: data.settlementIncome - data.cost - monthSalary,
-          margin: data.settlementIncome > 0
-            ? ((data.settlementIncome - data.cost - monthSalary) / data.settlementIncome) * 100
-            : 0,
+          revenue,
+          cost,
+          profit,
+          margin: revenue > 0 ? (profit / revenue) * 100 : 0,
         };
       });
-  }, [filterUnit, salesUnits, personnel, salesRecords, products, costRecords, monthlyAdjustments, visibleUnitProductSettlements, productPersonCommissions, teamMgmtContext, selectedMonth]);
+  }, [filterUnit, salesUnits, personnel, salesRecords, products, costRecords, incomeRecords, monthlyAdjustments, visibleUnitProductSettlements, productPersonCommissions, teamMgmtContext, selectedMonth]);
 
   // 各单位对比（按月度；跟随顶部单位筛选）
   const unitComparison = useMemo(() => {
@@ -187,17 +253,22 @@ unitIds,
       );
       const commission = unitSalary.grandSalesCommission;
       const productProfit = settlementIncome - commission;
+      const otherIncome = monthlyIncomeRecords
+        .filter((r) => r.salesUnitId === unit.id)
+        .reduce((sum, r) => sum + r.totalAmount, 0)
       const manualCost = monthlyCosts
         .filter((c) => c.salesUnitId === unit.id)
         .reduce((sum, c) => sum + c.totalCost, 0);
       const salaryCost = unitSalary.grandTotal;
       const cost = manualCost + salaryCost;
-      const profit = settlementIncome - cost;
-      const margin = settlementIncome > 0 ? (profit / settlementIncome) * 100 : 0;
+      const revenue = settlementIncome + otherIncome
+      const profit = revenue - cost;
+      const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
       return {
         name: unit.name,
         salesAmount,
         settlementIncome,
+        otherIncome,
         commission,
         productProfit,
         cost,
@@ -206,7 +277,7 @@ unitIds,
       };
     }).sort((a, b) => b.profit - a.profit);
   }, [
-    salesUnits, filterUnit, monthlySales, monthlyCosts, personnel, salesRecords,
+    salesUnits, filterUnit, monthlySales, monthlyCosts, monthlyIncomeRecords, personnel, salesRecords,
     products, selectedMonth, monthlyAdjustments, visibleUnitProductSettlements,
     productPersonCommissions, teamMgmtContext,
   ]);
@@ -268,23 +339,6 @@ unitIds,
 
   // ===================== 收入明细与结算 =====================
   // 按月过滤收入记录（含月度固定）
-  const monthlyIncomeRecords = useMemo(() => {
-    const targetM = parseInt(selectedMonth.slice(5, 7), 10);
-    return incomeRecords
-      .filter((r) => {
-        const matchUnit = filterUnit === "all" || r.salesUnitId === filterUnit;
-        if (!matchUnit) return false;
-        if (r.isRecurring) {
-          const months = r.recurringMonths || [1,2,3,4,5,6,7,8,9,10,11,12];
-          if (!months.includes(targetM)) return false;
-          if (r.recurringStartDate && selectedMonth < r.recurringStartDate.slice(0, 7)) return false;
-          if (r.recurringEndDate && selectedMonth > r.recurringEndDate.slice(0, 7)) return false;
-          return true;
-        }
-        return getYearMonth(r.date) === selectedMonth;
-      })
-      .sort((a, b) => (b.createdAt || b.date).localeCompare(a.createdAt || a.date));
-  }, [incomeRecords, filterUnit, selectedMonth]);
 
   // 按单位计算收入明细
   const incomeDetail = useMemo(() => {
@@ -360,23 +414,36 @@ unitIds,
 
   const summaryCards = [
     {
-      title: "实收金额", value: formatCurrency(summary.totalSalesAmount),
-      icon: TrendingUp, color: "text-blue-600", bg: "bg-blue-50",
+      title: "结算收入",
+      value: formatCurrency(summary.totalSettlementIncome),
+      icon: DollarSign,
+      color: "text-cyan-600",
+      bg: "bg-cyan-50",
+      hint: `实收 ${formatCurrency(summary.totalSalesAmount)}`,
     },
     {
-      title: "结算收入", value: formatCurrency(summary.totalSettlementIncome),
-      icon: DollarSign, color: "text-cyan-600", bg: "bg-cyan-50",
+      title: "其他收入",
+      value: formatCurrency(summary.totalOtherIncome),
+      icon: Receipt,
+      color: "text-emerald-600",
+      bg: "bg-emerald-50",
+      hint: "来自成本与收入录入",
     },
     {
-      title: "销售提成", value: formatCurrency(summary.totalCommission),
-      icon: Award, color: "text-violet-600", bg: "bg-violet-50",
-      hint: "按单位×人员配置，计入成本",
+      title: "总成本",
+      value: formatCurrency(summary.totalCost),
+      icon: Award,
+      color: "text-orange-600",
+      bg: "bg-orange-50",
+      hint: `含提成 ${formatCurrency(summary.totalCommission)}`,
     },
     {
-      title: "净利润", value: formatCurrency(summary.totalProfit),
+      title: "净利润",
+      value: formatCurrency(summary.totalProfit),
       icon: summary.totalProfit >= 0 ? Award : AlertTriangle,
       color: summary.totalProfit >= 0 ? "text-emerald-600" : "text-red-600",
       bg: summary.totalProfit >= 0 ? "bg-emerald-50" : "bg-red-50",
+      hint: "结算收入+其他收入-总成本",
     },
   ];
 
@@ -395,8 +462,8 @@ unitIds,
   return (
     <div>
       <PageHeader
-        title="收支利润分析"
-        description="按月度观测营收、成本与利润，洞察业务盈亏状况"
+        title="盈亏分析"
+        description="本页负责看账：利润、趋势、结构与单位对比。成本/其他收入请到「成本与收入录入」。"
         action={
           <div className="flex gap-2">
             <Select value={selectedMonth} onValueChange={setSelectedMonth}>
@@ -416,8 +483,45 @@ unitIds,
         }
       />
 
+            <div className="mb-4 rounded-lg border border-cyan-200 bg-cyan-50/60 px-3 py-2 text-sm text-cyan-950">
+        <span className="font-medium">本页 = 盈亏分析</span>
+        <span className="mx-1 text-cyan-800/70">·</span>
+        净利润已含「其他收入」；录入成本/其他收入请到
+        <Link
+          to="/cost-management"
+          className="mx-1 font-medium text-cyan-800 underline-offset-2 hover:underline"
+        >
+          成本与收入录入
+        </Link>
+      </div>
+
+      <div className="mb-4 flex flex-wrap gap-2">
+        {[
+          { id: 'section-profit-overview', label: '盈亏总览' },
+          { id: 'section-profit-trend', label: '月度趋势' },
+          { id: 'section-profit-units', label: '单位对比' },
+          { id: 'section-profit-income', label: '收入构成' },
+        ].map((item) => (
+          <Button
+            key={item.id}
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8"
+            onClick={() =>
+              document.getElementById(item.id)?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'start',
+              })
+            }
+          >
+            {item.label}
+          </Button>
+        ))}
+      </div>
+
       {/* Summary Cards */}
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div id="section-profit-overview" className="mb-6 grid scroll-mt-20 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {summaryCards.map((card) => {
           const Icon = card.icon;
           return (
@@ -440,10 +544,10 @@ unitIds,
       </div>
 
       {/* Monthly Trend */}
-      <Card className="mb-6">
+      <Card id="section-profit-trend" className="mb-6 scroll-mt-20">
         <CardHeader>
           <CardTitle className="text-base">营收·成本·利润月度趋势</CardTitle>
-          <CardDescription>组合图展示每月营收、成本、利润及利润率变化</CardDescription>
+          <CardDescription>营收=结算收入+其他收入；成本含人力与录入支出</CardDescription>
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={320}>
@@ -511,9 +615,9 @@ unitIds,
       </div>
 
       {/* Unit Comparison Table */}
-      <Card className="mb-6">
+      <Card id="section-profit-units" className="mb-6 scroll-mt-20">
         <CardHeader>
-          <CardTitle className="text-base">各单位收支利润明细</CardTitle>
+          <CardTitle className="text-base">各单位盈亏明细</CardTitle>
           <CardDescription>
             {filterUnit === "all"
               ? "按销售单位对比营收、成本与利润（当前：全部单位）"
@@ -529,6 +633,7 @@ unitIds,
                   <TableHead>销售单位</TableHead>
                   <TableHead className="text-right">实收金额</TableHead>
                   <TableHead className="text-right">结算收入</TableHead>
+                  <TableHead className="text-right">其他收入</TableHead>
                   <TableHead className="text-right">销售提成</TableHead>
                   <TableHead className="text-right">产品利润</TableHead>
                   <TableHead className="text-right">运营成本</TableHead>
@@ -552,6 +657,7 @@ unitIds,
                     <TableCell className="font-medium">{unit.name}</TableCell>
                     <TableCell className="text-right text-blue-600">{formatCurrency(unit.salesAmount)}</TableCell>
                     <TableCell className="text-right text-cyan-600 font-medium">{formatCurrency(unit.settlementIncome)}</TableCell>
+                    <TableCell className="text-right text-emerald-600">{formatCurrency(unit.otherIncome || 0)}</TableCell>
                     <TableCell className="text-right text-violet-600">{formatCurrency(unit.commission)}</TableCell>
                     <TableCell className="text-right font-semibold text-emerald-600">{formatCurrency(unit.productProfit)}</TableCell>
                     <TableCell className="text-right text-orange-600">{formatCurrency(unit.cost)}</TableCell>
@@ -574,14 +680,14 @@ unitIds,
       </Card>
 
       {/* ===================== 收入明细与结算 ===================== */}
-      <Card className="mb-6">
+      <Card id="section-profit-income" className="mb-6 scroll-mt-20">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Receipt className="h-5 w-5 text-emerald-600" />
             收入明细与结算
           </CardTitle>
           <CardDescription>
-            业绩收入自动从销售记录预估，可手动纠正实际结算金额 · 其他收入来自成本管理录入
+            业绩结算可在此调整；其他收入请在「成本与收入录入」记账，本表只汇总
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
