@@ -64,6 +64,20 @@ type ImportOptionsForm = {
   forceStatus: ImportForceStatus;
 };
 
+type ImportPreviewItem = {
+  excelRow: number;
+  name: string;
+  unitName: string;
+  position: string;
+  status: string;
+  hireDate: string;
+  resignDate: string;
+  laborCompany: string;
+  matchHint: string;
+  matchOk: boolean;
+  raw: Record<string, unknown>;
+};
+
 type HrForm = {
   personnelId: string;
   gender: string;
@@ -200,6 +214,169 @@ function normalizeImportCell(headerKey: string, v: unknown): unknown {
   return v;
 }
 
+function pickImportField(
+  row: Record<string, unknown>,
+  keys: string[],
+): string {
+  for (const k of keys) {
+    const key = k.replace(/\s+/g, "");
+    if (
+      row[key] !== undefined
+      && row[key] !== null
+      && String(row[key]).trim() !== ""
+    ) {
+      return String(row[key]).trim();
+    }
+  }
+  return "";
+}
+
+function parseImportWorkbook(buf: ArrayBuffer): Record<string, unknown>[] {
+  const wb = XLSX.read(buf, { type: "array", cellDates: true });
+  let sheet = wb.Sheets[wb.SheetNames[0]];
+  for (const name of wb.SheetNames) {
+    const s = wb.Sheets[name];
+    const preview = XLSX.utils.sheet_to_json<Record<string, unknown>>(s, {
+      defval: "",
+      raw: true,
+    });
+    if (
+      preview.some((r) =>
+        Object.keys(r).some((k) => k.replace(/\s+/g, "").includes("姓名")),
+      )
+    ) {
+      sheet = s;
+      break;
+    }
+  }
+  return XLSX.utils
+    .sheet_to_json<Record<string, unknown>>(sheet, {
+      defval: "",
+      raw: true,
+    })
+    .map((row) => {
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(row)) {
+        const key = String(k).replace(/\s+/g, "").replace(/\u00a0/g, "");
+        out[key] = normalizeImportCell(key, v);
+      }
+      return out;
+    })
+    .filter((row) => Object.values(row).some((v) => String(v ?? "").trim() !== ""));
+}
+
+const IMPORT_SAMPLE_HEADERS = [
+  "姓名",
+  "部门",
+  "销售单位公司",
+  "职位",
+  "手机号码",
+  "状态",
+  "入职时间",
+  "离职日期",
+  "合同主体",
+  "性别",
+  "身份证",
+  "出生年月",
+  "年龄",
+  "民族",
+  "是否党员",
+  "学历",
+  "毕业院校",
+  "专业",
+  "毕业时间",
+  "婚姻状况",
+  "籍贯",
+  "户籍",
+  "身份证地址",
+  "联系地址",
+  "银行卡号",
+  "所属银行",
+  "开户行信息",
+  "企业邮箱",
+  "紧急联系人姓名",
+  "联系电话",
+  "与本人关系",
+  "用工性质",
+  "转正日期",
+  "司龄",
+  "实习协议开始时间",
+  "实习协议到期时间",
+  "劳动合同1开始时间",
+  "劳动合同1到期时间",
+  "劳动合同2开始时间",
+  "劳动合同2到期时间",
+  "劳动合同3开始时间",
+  "劳动合同3到期时间",
+  "合同起始日期",
+  "合同终止日期",
+] as const;
+
+function downloadImportSampleTemplate() {
+  const sample: Record<string, string> = {
+    姓名: "张三",
+    部门: "示例销售部",
+    销售单位公司: "示例销售部",
+    职位: "销售",
+    手机号码: "13800138000",
+    状态: "在职",
+    入职时间: "2024-01-15",
+    离职日期: "",
+    合同主体: "示例劳务公司",
+    性别: "男",
+    身份证: "110101199001011234",
+    出生年月: "1990-01-01",
+    年龄: "36",
+    民族: "汉",
+    是否党员: "群众",
+    学历: "本科",
+    毕业院校: "示例大学",
+    专业: "市场营销",
+    毕业时间: "2012-06-30",
+    婚姻状况: "未婚",
+    籍贯: "北京",
+    户籍: "北京",
+    身份证地址: "北京市东城区示例路1号",
+    联系地址: "北京市朝阳区示例街2号",
+    银行卡号: "6222021234567890123",
+    所属银行: "工商银行",
+    开户行信息: "北京分行营业部",
+    企业邮箱: "zhangsan@example.com",
+    紧急联系人姓名: "李四",
+    联系电话: "13900139000",
+    与本人关系: "亲属",
+    用工性质: "全职",
+    转正日期: "2024-04-15",
+    司龄: "2年",
+    实习协议开始时间: "",
+    实习协议到期时间: "",
+    劳动合同1开始时间: "2024-01-15",
+    劳动合同1到期时间: "2027-01-14",
+    劳动合同2开始时间: "",
+    劳动合同2到期时间: "",
+    劳动合同3开始时间: "",
+    劳动合同3到期时间: "",
+    合同起始日期: "2024-01-15",
+    合同终止日期: "2027-01-14",
+  };
+  const note = [
+    ["使用说明"],
+    ["1. 第一行必须是表头，且必须有「姓名」列"],
+    ["2. 「姓名」必须与「人员管理」中已有人员完全一致（导入不会新建人员）"],
+    ["3. 同名多人时请填写「部门」或「销售单位公司」，名称需与系统销售单位一致"],
+    ["4. 「合同主体」需在签署公司字典中，或导入时勾选自动创建"],
+    ["5. 日期建议用 YYYY-MM-DD，如 2024-01-15"],
+    ["6. 请把样例「张三」改成人员管理中真实存在的姓名后再导入"],
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(note), "使用说明");
+  const ws = XLSX.utils.json_to_sheet([sample], {
+    header: [...IMPORT_SAMPLE_HEADERS],
+  });
+  XLSX.utils.book_append_sheet(wb, ws, "样例数据");
+  XLSX.writeFile(wb, "人事档案批量导入样表.xlsx");
+}
+
 /** 列表展示：统一成 YYYY-MM-DD */
 function displayDate(v: string | null | undefined): string {
   if (!v) return "—";
@@ -263,6 +440,10 @@ export default function HrManagementPage() {
   const [deletingSelected, setDeletingSelected] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [importResult, setImportResult] = useState<string>("");
+  const [importFileName, setImportFileName] = useState("");
+  const [importPreviewList, setImportPreviewList] = useState<ImportPreviewItem[]>(
+    [],
+  );
   const [docUploading, setDocUploading] = useState(false);
   const docInputRef = useRef<HTMLInputElement>(null);
 
@@ -573,62 +754,127 @@ export default function HrManagementPage() {
     }
   }
 
-  async function handleImportFile(file: File) {
-    setImporting(true);
-    setImportResult("");
+  async function handleSelectImportFile(file: File) {
     try {
       const buf = await file.arrayBuffer();
-      // cellDates + raw：拿到 Date/序列数，再规范成 YYYY-MM-DD，避免 locale 串格式
-      const wb = XLSX.read(buf, { type: "array", cellDates: true });
-      // 优先用含「姓名」列的工作表
-      let sheet = wb.Sheets[wb.SheetNames[0]];
-      for (const name of wb.SheetNames) {
-        const s = wb.Sheets[name];
-        const preview = XLSX.utils.sheet_to_json<Record<string, unknown>>(s, {
-          defval: "",
-          raw: true,
-        });
-        if (
-          preview.some((r) =>
-            Object.keys(r).some((k) => k.replace(/\s+/g, "").includes("姓名")),
-          )
-        ) {
-          sheet = s;
-          break;
-        }
-      }
-      const rows = XLSX.utils
-        .sheet_to_json<Record<string, unknown>>(sheet, {
-          defval: "",
-          raw: true,
-        })
-        .map((row) => {
-          const out: Record<string, unknown> = {};
-          for (const [k, v] of Object.entries(row)) {
-            const key = String(k).replace(/\s+/g, "").replace(/\u00a0/g, "");
-            out[key] = normalizeImportCell(key, v);
-          }
-          return out;
-        })
-        .filter((row) => Object.values(row).some((v) => String(v ?? "").trim() !== ""));
-
+      const rows = parseImportWorkbook(buf);
       if (rows.length === 0) {
         alert("表格无数据，请确认第一行是表头（含「姓名」列）");
         return;
       }
 
+      const unitIdByName = new Map(
+        salesUnits.map((u) => [u.name.trim().toLowerCase(), u.id] as const),
+      );
+
+      const preview = rows.map((row, i) => {
+        const name = pickImportField(row, ["姓名", "员工姓名", "name", "Name"]);
+        const unitName = pickImportField(row, [
+          "销售单位公司",
+          "销售单位",
+          "部门",
+          "单位",
+          "所属单位",
+          "salesUnit",
+          "department",
+        ]);
+        const status = pickImportField(row, ["状态", "status"]);
+        const hireDate = pickImportField(row, ["入职时间", "入职日期", "hireDate"]);
+        const resignDate = pickImportField(row, ["离职日期", "resignDate"]);
+        const laborCompany = pickImportField(row, [
+          "合同主体",
+          "劳动合同签署公司",
+          "劳动签署公司",
+          "劳动合同公司",
+          "签署公司",
+          "laborCompany",
+        ]);
+        const position = pickImportField(row, ["职位", "岗位", "用工性质", "position"]);
+
+        let matchHint = "";
+        let matchOk = false;
+        if (!name) {
+          matchHint = "缺少姓名";
+        } else {
+          const candidates = personnel.filter(
+            (p) => String(p.name || "").trim() === name,
+          );
+          if (candidates.length === 0) {
+            matchHint = "人员管理中不存在";
+          } else if (!unitName) {
+            if (candidates.length === 1) {
+              matchOk = true;
+              matchHint = "可匹配";
+            } else {
+              matchHint = `同名 ${candidates.length} 人，请补充部门`;
+            }
+          } else {
+            const unitId = unitIdByName.get(unitName.trim().toLowerCase()) || "";
+            const matched = unitId
+              ? candidates.filter((p) => p.salesUnitId === unitId)
+              : candidates;
+            if (matched.length === 1) {
+              matchOk = true;
+              matchHint = "可匹配";
+            } else if (matched.length > 1) {
+              matchHint = "同单位下匹配到多人";
+            } else if (!unitId) {
+              matchHint = `未找到销售单位「${unitName}」`;
+            } else {
+              matchHint = `不在单位「${unitName}」下`;
+            }
+          }
+        }
+
+        return {
+          excelRow: i + 1,
+          name,
+          unitName,
+          position,
+          status,
+          hireDate,
+          resignDate,
+          laborCompany,
+          matchHint,
+          matchOk,
+          raw: row,
+        };
+      });
+
+      setImportFileName(file.name);
+      setImportPreviewList(preview);
+      setImportDialogOpen(true);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "读取表格失败";
+      alert(msg);
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  async function handleConfirmImport() {
+    if (importPreviewList.length === 0) {
+      alert("请先选择表格并预览数据");
+      return;
+    }
+    setImporting(true);
+    setImportResult("");
+    try {
       const selectedName =
         importOptions.laborCompanyName.trim()
         || laborCompanies.find((c) => c.id === importOptions.laborCompanyId)?.name
         || "";
-      const result = await hrProfilesApi.importRows(rows, {
-        laborCompanyId: importOptions.laborCompanyId || undefined,
-        laborCompanyName: selectedName || undefined,
-        preferSelectedLaborCompany: importOptions.preferSelectedLaborCompany,
-        autoCreateLaborCompany: importOptions.autoCreateLaborCompany,
-        forceStatus:
-          importOptions.forceStatus === "table" ? "" : importOptions.forceStatus,
-      });
+      const result = await hrProfilesApi.importRows(
+        importPreviewList.map((item) => item.raw),
+        {
+          laborCompanyId: importOptions.laborCompanyId || undefined,
+          laborCompanyName: selectedName || undefined,
+          preferSelectedLaborCompany: importOptions.preferSelectedLaborCompany,
+          autoCreateLaborCompany: importOptions.autoCreateLaborCompany,
+          forceStatus:
+            importOptions.forceStatus === "table" ? "" : importOptions.forceStatus,
+        },
+      );
       setImportResult(
         `成功 ${result.success} 条，失败 ${result.failed} 条` +
           (result.errors.length
@@ -639,6 +885,8 @@ export default function HrManagementPage() {
             : ""),
       );
       setImportDialogOpen(false);
+      setImportPreviewList([]);
+      setImportFileName("");
       const companies = await laborCompaniesApi.list();
       setLaborCompanies(companies);
       await loadData();
@@ -649,8 +897,12 @@ export default function HrManagementPage() {
       alert(msg);
     } finally {
       setImporting(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
     }
+  }
+
+  function clearImportPreview() {
+    setImportPreviewList([]);
+    setImportFileName("");
   }
 
   function openImportDialog() {
@@ -668,6 +920,7 @@ export default function HrManagementPage() {
           ? statusFilter
           : prev.forceStatus,
     }));
+    clearImportPreview();
     setImportDialogOpen(true);
   }
 
@@ -773,7 +1026,7 @@ export default function HrManagementPage() {
                 className="hidden"
                 onChange={(e) => {
                   const f = e.target.files?.[0];
-                  if (f) void handleImportFile(f);
+                  if (f) void handleSelectImportFile(f);
                 }}
               />
               <Button
@@ -794,6 +1047,13 @@ export default function HrManagementPage() {
               >
                 <FileUp className="mr-2 h-4 w-4" />
                 {importing ? "导入中…" : "批量导入表格"}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={downloadImportSampleTemplate}
+              >
+                <Download className="mr-2 h-4 w-4" />
+                下载导入样表
               </Button>
               <Button
                 variant="destructive"
@@ -1395,7 +1655,7 @@ export default function HrManagementPage() {
             )}
           </div>
           <p className="text-xs text-muted-foreground">
-            批量导入支持档案表头（姓名、入职时间、合同主体、劳动合同1~3、身份证等）。
+            批量导入支持档案表头（姓名、入职时间、合同主体、劳动合同1~3、身份证等）。可先下载样表，选择文件后预览再确认导入。
             合同提醒取已填期次中到期最晚的一期。签署公司≠销售单位。
           </p>
           <DialogFooter>
@@ -1409,12 +1669,32 @@ export default function HrManagementPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
-        <DialogContent className="max-w-lg">
+      <Dialog
+        open={importDialogOpen}
+        onOpenChange={(open) => {
+          setImportDialogOpen(open);
+          if (!open) clearImportPreview();
+        }}
+      >
+        <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>批量导入设置</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={downloadImportSampleTemplate}
+              >
+                <Download className="mr-2 h-4 w-4" />
+                下载导入样表
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                样表含「使用说明」与「样例数据」。姓名须与人员管理完全一致，导入不会新建人员。
+              </p>
+            </div>
             <div className="space-y-1.5">
               <Label>劳动合同签署公司</Label>
               <Select
@@ -1523,18 +1803,105 @@ export default function HrManagementPage() {
                 导入离职表选「离职」，导入在职表选「在职」，可保证档案状态与人员管理一致。
               </p>
             </div>
+
+            {importPreviewList.length > 0 ? (
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-sm">
+                    <span className="font-medium">数据预览</span>
+                    <span className="ml-2 text-muted-foreground">
+                      {importFileName} · 共 {importPreviewList.length} 行 · 预计可匹配{" "}
+                      {importPreviewList.filter((r) => r.matchOk).length} 行
+                    </span>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={importing}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    重新选择表格
+                  </Button>
+                </div>
+                <div className="max-h-72 overflow-auto rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-14">行</TableHead>
+                        <TableHead>姓名</TableHead>
+                        <TableHead>部门/单位</TableHead>
+                        <TableHead>职位</TableHead>
+                        <TableHead>状态</TableHead>
+                        <TableHead>入职</TableHead>
+                        <TableHead>离职</TableHead>
+                        <TableHead>合同主体</TableHead>
+                        <TableHead>匹配预检</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {importPreviewList.map((row) => (
+                        <TableRow key={`${row.excelRow}-${row.name}`}>
+                          <TableCell>{row.excelRow}</TableCell>
+                          <TableCell>{row.name || "—"}</TableCell>
+                          <TableCell>{row.unitName || "—"}</TableCell>
+                          <TableCell>{row.position || "—"}</TableCell>
+                          <TableCell>{row.status || "—"}</TableCell>
+                          <TableCell>{row.hireDate || "—"}</TableCell>
+                          <TableCell>{row.resignDate || "—"}</TableCell>
+                          <TableCell>{row.laborCompany || "—"}</TableCell>
+                          <TableCell>
+                            <span
+                              className={cn(
+                                "text-xs",
+                                row.matchOk ? "text-emerald-700" : "text-red-600",
+                              )}
+                            >
+                              {row.matchHint}
+                            </span>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  预检仅供参考；仍可确认导入。匹配失败的行会在导入结果中列出原因。
+                </p>
+              </div>
+            ) : (
+              <div className="rounded-md border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
+                请先选择表格，系统会展示导入数据预览，确认后再写入。
+              </div>
+            )}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setImportDialogOpen(false)}>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              disabled={importing}
+              onClick={() => {
+                setImportDialogOpen(false);
+                clearImportPreview();
+              }}
+            >
               取消
             </Button>
-            <Button
-              disabled={importing}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <FileUp className="mr-2 h-4 w-4" />
-              {importing ? "导入中…" : "选择表格并导入"}
-            </Button>
+            {importPreviewList.length === 0 ? (
+              <Button
+                disabled={importing}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <FileUp className="mr-2 h-4 w-4" />
+                选择表格并预览
+              </Button>
+            ) : (
+              <Button disabled={importing} onClick={() => void handleConfirmImport()}>
+                <Upload className="mr-2 h-4 w-4" />
+                {importing
+                  ? "导入中…"
+                  : `确认导入（${importPreviewList.length}）`}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
