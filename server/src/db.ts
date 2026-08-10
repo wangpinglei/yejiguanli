@@ -457,8 +457,69 @@ function initSchema() {
   migrateLaborCompanyIdsFromSalesUnits();
   // 迁移产生的「同名销售单位」签署公司会误导展示，清空后由人事重新维护真实签署公司
   clearSalesUnitNamedLaborCompanies();
+  // 清理误当签署公司写入的「保洁/停薪留职/外聘」等非公司名
+  cleanupInvalidLaborCompanyNames();
   // 清理人事导入曾自动创建的「人事挂靠」人员（人事档案一并删）；手动录入的人员管理数据保留
   cleanupHrAffiliateAutoCreated();
+}
+
+/** 明显不是劳动合同签署公司的脏名字（多为用工性质/状态误写入） */
+const INVALID_LABOR_COMPANY_NAMES = [
+  "保洁",
+  "停薪留职",
+  "外聘",
+  "全职",
+  "兼职",
+  "实习",
+  "在职",
+  "离职",
+  "试用",
+] as const;
+
+function isInvalidLaborCompanyName(name: string): boolean {
+  const n = name.trim();
+  if (!n) return true;
+  return INVALID_LABOR_COMPANY_NAMES.some(
+    (bad) => bad.toLowerCase() === n.toLowerCase(),
+  );
+}
+
+/**
+ * 清除误导入到「劳动合同签署公司」字典的非公司名。
+ * 若档案用工性质为空，则把该脏名回填到用工性质。
+ */
+function cleanupInvalidLaborCompanyNames() {
+  const companies = db
+    .prepare("SELECT id, name FROM labor_companies")
+    .all() as Array<{ id: string; name: string }>;
+  const junk = companies.filter((c) => isInvalidLaborCompanyName(c.name));
+  if (junk.length === 0) return;
+
+  const profilesByLabor = db.prepare(`
+    SELECT id, employment_type FROM hr_profiles WHERE labor_company_id = ?
+  `);
+  const fixProfile = db.prepare(`
+    UPDATE hr_profiles SET
+      labor_company_id = '',
+      employment_type = CASE
+        WHEN IFNULL(TRIM(employment_type), '') = '' THEN ?
+        ELSE employment_type
+      END,
+      updated_at = datetime('now')
+    WHERE id = ?
+  `);
+  const deleteLabor = db.prepare("DELETE FROM labor_companies WHERE id = ?");
+
+  for (const company of junk) {
+    const profiles = profilesByLabor.all(company.id) as Array<{
+      id: string;
+      employment_type: string;
+    }>;
+    for (const p of profiles) {
+      fixProfile.run(company.name, p.id);
+    }
+    deleteLabor.run(company.id);
+  }
 }
 
 /**
