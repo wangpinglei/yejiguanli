@@ -14,6 +14,9 @@ import {
   CalendarRange,
   Percent,
   AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -127,6 +130,8 @@ export default function PersonnelPage() {
   const [filterUnit, setFilterUnit] = useState("all");
   /** all | missing — 缺产品提成配置筛选 */
   const [filterCommission, setFilterCommission] = useState<"all" | "missing">("all");
+  /** none | desc | asc — 销售总额排序 */
+  const [salesSortOrder, setSalesSortOrder] = useState<"none" | "desc" | "asc">("none");
   const [salesRange, setSalesRange] = useState<SalesRange>("year");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
@@ -233,17 +238,48 @@ export default function PersonnelPage() {
     [salesRange, customStart, customEnd]
   );
 
-  const getPersonnelSales = (personId: string) => {
-    let records = salesRecords.filter((s) => s.personnelId === personId);
-    if (activeDateRange) {
-      records = records.filter((s) => {
-        const d = (s.saleDate || "").slice(0, 10);
-        return d >= activeDateRange.start && d <= activeDateRange.end;
-      });
+  const salesTotalByPersonId = useMemo(() => {
+    const map: Record<string, { count: number; total: number }> = {}
+    for (const p of personnel) {
+      map[p.id] = { count: 0, total: 0 }
     }
-    const total = records.reduce((sum, s) => sum + s.totalAmount, 0);
-    return { count: records.length, total };
-  };
+    for (const s of salesRecords) {
+      const pid = s.personnelId
+      if (!pid || !map[pid]) continue
+      if (activeDateRange) {
+        const d = (s.saleDate || '').slice(0, 10)
+        if (d < activeDateRange.start || d > activeDateRange.end) continue
+      }
+      map[pid].count += 1
+      map[pid].total += s.totalAmount || 0
+    }
+    return map
+  }, [personnel, salesRecords, activeDateRange])
+
+  function getPersonnelSales(personId: string) {
+    return salesTotalByPersonId[personId] || { count: 0, total: 0 }
+  }
+
+  function handleToggleSalesSort() {
+    setSalesSortOrder((prev) => {
+      if (prev === 'none') return 'desc'
+      if (prev === 'desc') return 'asc'
+      return 'none'
+    })
+  }
+
+  const displayedPersonnel = useMemo(() => {
+    const list = [...filteredPersonnel]
+    if (salesSortOrder === 'none') return list
+    const dir = salesSortOrder === 'desc' ? -1 : 1
+    list.sort((a, b) => {
+      const ta = getPersonnelSales(a.id).total
+      const tb = getPersonnelSales(b.id).total
+      if (ta === tb) return a.name.localeCompare(b.name, 'zh')
+      return (ta - tb) * dir
+    })
+    return list
+  }, [filteredPersonnel, salesSortOrder, salesTotalByPersonId])
 
   const openAdd = () => {
     setEditingPerson(null);
@@ -555,15 +591,34 @@ export default function PersonnelPage() {
                   <TableHead className="text-right">底薪</TableHead>
                   <TableHead className="text-right">固定月薪</TableHead>
                   <TableHead className="text-right">
-                    <div className="flex flex-col items-end gap-0.5">
-                      <span>销售总额</span>
+                    <button
+                      type="button"
+                      className="ml-auto flex flex-col items-end gap-0.5 rounded px-1 py-0.5 hover:bg-muted/80"
+                      onClick={handleToggleSalesSort}
+                      title="点击按销售总额排序"
+                    >
+                      <span className="inline-flex items-center gap-1 font-medium">
+                        销售总额
+                        {salesSortOrder === "desc" ? (
+                          <ArrowDown className="h-3.5 w-3.5 text-blue-600" />
+                        ) : salesSortOrder === "asc" ? (
+                          <ArrowUp className="h-3.5 w-3.5 text-blue-600" />
+                        ) : (
+                          <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                        )}
+                      </span>
                       <span className="text-[10px] font-normal text-blue-600">
                         {RANGE_LABELS[salesRange]}
                         {salesRange === "custom" && customStart && customEnd
                           ? `（${customStart} ~ ${customEnd}）`
                           : ""}
+                        {salesSortOrder === "desc"
+                          ? " · 高→低"
+                          : salesSortOrder === "asc"
+                            ? " · 低→高"
+                            : ""}
                       </span>
-                    </div>
+                    </button>
                   </TableHead>
                   <TableHead>状态</TableHead>
                   <TableHead>入职日期</TableHead>
@@ -573,7 +628,7 @@ export default function PersonnelPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredPersonnel.map((person) => {
+                {displayedPersonnel.map((person) => {
                   const sales = getPersonnelSales(person.id);
                   const fixed = getFixedSalary(person.salary);
                   return (
@@ -681,7 +736,7 @@ export default function PersonnelPage() {
                     </TableRow>
                   );
                 })}
-                {filteredPersonnel.length === 0 && (
+                {displayedPersonnel.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={11} className="text-center py-12 text-muted-foreground">
                       暂无数据
