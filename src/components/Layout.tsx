@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, Outlet } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -16,11 +16,13 @@ import {
   CheckCheck,
   Swords,
   Scale,
+  IdCard,
 } from "lucide-react";
 import { useAuth, ROLE_LABELS } from "@/context/AuthContext";
 import { useData } from "@/context/DataContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { MODULE_DEFS, type ModuleKey } from "@/config/modules";
+import { hrProfilesApi } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -46,6 +48,7 @@ const navItems: NavItem[] = [
   { path: "/", label: "数据看板", icon: LayoutDashboard, moduleKey: "dashboard" },
   { path: "/sales-units", label: "销售单位", icon: Building2, moduleKey: "sales_units" },
   { path: "/personnel", label: "人员管理", icon: Users, moduleKey: "personnel" },
+  { path: "/hr-management", label: "人事管理", icon: IdCard, moduleKey: "hr_management" },
   { path: "/sales-records", label: "销售记录", icon: ShoppingCart, moduleKey: "sales_records" },
   { path: "/cost-management", label: "成本与收入录入", icon: Wallet, moduleKey: "cost_management" },
   { path: "/profit-analysis", label: "盈亏分析", icon: TrendingUp, moduleKey: "profit_analysis" },
@@ -57,9 +60,11 @@ const navItems: NavItem[] = [
 function SidebarContent({
   onNavigate,
   canView,
+  hrReminderTotal = 0,
 }: {
   onNavigate?: () => void;
   canView: (key: ModuleKey) => boolean;
+  hrReminderTotal?: number;
 }) {
   const location = useLocation();
 
@@ -85,6 +90,8 @@ function SidebarContent({
             item.path === "/"
               ? location.pathname === "/" || location.pathname === ""
               : location.pathname.startsWith(item.path);
+          const showHrBadge =
+            item.moduleKey === "hr_management" && hrReminderTotal > 0;
           return (
             <Link
               key={item.path}
@@ -98,7 +105,12 @@ function SidebarContent({
               )}
             >
               <Icon className="h-4 w-4 shrink-0" />
-              <span>{item.label}</span>
+              <span className="flex-1">{item.label}</span>
+              {showHrBadge && (
+                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-400 px-1 text-[10px] font-bold text-amber-950">
+                  {hrReminderTotal > 99 ? "99+" : hrReminderTotal}
+                </span>
+              )}
             </Link>
           );
         })}
@@ -114,10 +126,30 @@ function SidebarContent({
 export default function Layout() {
   const { user, logout } = useAuth();
   const { notifications, unreadCount, markNotificationRead, markAllNotificationsRead } = useData();
-  const { canView, isSuperadmin, canManageUsers } = usePermissions();
+  const { canView, isSuperadmin, canManageUsers, canViewHr } = usePermissions();
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [hrReminderTotal, setHrReminderTotal] = useState(0);
+
+  useEffect(() => {
+    if (!canViewHr && !isSuperadmin) {
+      setHrReminderTotal(0);
+      return;
+    }
+    let cancelled = false;
+    hrProfilesApi
+      .reminders()
+      .then((r) => {
+        if (!cancelled) setHrReminderTotal(r.total || 0);
+      })
+      .catch(() => {
+        if (!cancelled) setHrReminderTotal(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canViewHr, isSuperadmin, location.pathname]);
 
   const pageTitle =
     navItems.find((item) => item.path === location.pathname)?.label ||
@@ -139,12 +171,16 @@ export default function Layout() {
   return (
     <div className="flex h-screen overflow-hidden bg-muted/30">
       <aside className="hidden w-64 shrink-0 bg-sidebar lg:block">
-        <SidebarContent canView={canView} />
+        <SidebarContent canView={canView} hrReminderTotal={hrReminderTotal} />
       </aside>
 
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetContent side="left" className="w-64 p-0 bg-sidebar">
-          <SidebarContent onNavigate={() => setMobileOpen(false)} canView={canView} />
+          <SidebarContent
+            onNavigate={() => setMobileOpen(false)}
+            canView={canView}
+            hrReminderTotal={hrReminderTotal}
+          />
         </SheetContent>
       </Sheet>
 

@@ -67,6 +67,63 @@ export interface Personnel {
   status: "active" | "inactive";
 }
 
+export interface LaborCompany {
+  id: string;
+  name: string;
+  remark?: string;
+  createdAt?: string;
+}
+
+export type ContractAlert = "expired" | "due30" | "due60" | "ok" | "empty";
+
+/** 人事档案（机密字段 + 联动人员管理字段） */
+export interface HrProfile {
+  id: string;
+  personnelId: string;
+  gender: string;
+  contractStartDate: string;
+  contractEndDate: string;
+  idNumber: string;
+  birthDate: string;
+  age: number | null;
+  ethnicity: string;
+  politicalStatus: string;
+  education: string;
+  school: string;
+  major: string;
+  bankAccount: string;
+  bankName: string;
+  address: string;
+  emergencyContact: string;
+  emergencyPhone: string;
+  /** 劳动签署公司（独立字典 labor_companies） */
+  laborCompanyId: string;
+  laborCompanyName?: string;
+  /** 销售单位公司（展示用；业绩归属以人员管理 salesUnitId 为准） */
+  salesCompanyId: string;
+  updatedAt?: string;
+  // 联动人员管理（只读展示；改单位请到人员管理）
+  name: string;
+  salesUnitId: string;
+  position: string;
+  phone: string;
+  hireDate: string;
+  resignDate?: string;
+  status: "active" | "inactive";
+  salary: SalaryStructure;
+  socialInsurance: number;
+  housingFund: number;
+  contractAlert: ContractAlert;
+  contractDaysLeft: number | null;
+}
+
+export interface HrReminders {
+  expired: number;
+  due30: number;
+  due60: number;
+  total: number;
+}
+
 // 产品
 export interface Product {
   id: string;
@@ -118,7 +175,7 @@ export interface SalesRecord {
   activityName?: string; // 参加活动（如：小游戏风月庆）
 }
 
-// 生态圈同步的订单（后端存储格式）
+// 生态圈同步的订单（后端存储格式 / GET synced-orders 返回）
 export interface SyncedOrder {
   id: string;
   externalOrderId: string;
@@ -132,6 +189,9 @@ export interface SyncedOrder {
   quantity: number;
   unitPrice: number;
   totalAmount: number;
+  orderAmount?: number;
+  orderType?: string;
+  activityName?: string;
   saleDate: string;
   customerName: string;
   remark: string;

@@ -70,6 +70,8 @@ export function usePermissions() {
   const canEditUnit = canEdit("sales_units");
   const canEditPersonnel = canEdit("personnel");
   const canEditPersonnelDates = canEdit("personnel");
+  const canEditHr = canEdit("hr_management");
+  const canViewHr = canView("hr_management");
   const canEditSales = canEdit("sales_records");
   const canEditCost = canEdit("cost_management") || canEdit("profit_analysis");
   const canEditProduct = canEdit("product_settlement");
@@ -79,6 +81,7 @@ export function usePermissions() {
   const isReadOnly = !isSuperadmin && !(
     canEditUnit
     || canEditPersonnel
+    || canEditHr
     || canEditSales
     || canEditCost
     || canEditProduct
@@ -105,6 +108,8 @@ export function usePermissions() {
     canEditUnit,
     canEditPersonnel,
     canEditPersonnelDates,
+    canEditHr,
+    canViewHr,
     canEditSales,
     canEditCost,
     canEditProduct,

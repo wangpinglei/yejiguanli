@@ -96,6 +96,38 @@ function initSchema() {
       FOREIGN KEY (sales_unit_id) REFERENCES sales_units(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS hr_profiles (
+      id TEXT PRIMARY KEY,
+      personnel_id TEXT NOT NULL UNIQUE,
+      gender TEXT DEFAULT '',
+      contract_start_date TEXT DEFAULT '',
+      contract_end_date TEXT DEFAULT '',
+      id_number TEXT DEFAULT '',
+      birth_date TEXT DEFAULT '',
+      age INTEGER,
+      ethnicity TEXT DEFAULT '',
+      political_status TEXT DEFAULT '',
+      education TEXT DEFAULT '',
+      school TEXT DEFAULT '',
+      major TEXT DEFAULT '',
+      bank_account TEXT DEFAULT '',
+      bank_name TEXT DEFAULT '',
+      address TEXT DEFAULT '',
+      emergency_contact TEXT DEFAULT '',
+      emergency_phone TEXT DEFAULT '',
+      labor_company_id TEXT DEFAULT '',
+      sales_company_id TEXT DEFAULT '',
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (personnel_id) REFERENCES personnel(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS labor_companies (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      remark TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS products (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -279,6 +311,9 @@ function initSchema() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_personnel_unit ON personnel(sales_unit_id);
+    CREATE INDEX IF NOT EXISTS idx_hr_profiles_personnel ON hr_profiles(personnel_id);
+    CREATE INDEX IF NOT EXISTS idx_hr_profiles_contract_end ON hr_profiles(contract_end_date);
+    CREATE INDEX IF NOT EXISTS idx_labor_companies_name ON labor_companies(name);
     CREATE INDEX IF NOT EXISTS idx_sales_unit ON sales_records(sales_unit_id);
     CREATE INDEX IF NOT EXISTS idx_sales_personnel ON sales_records(personnel_id);
     CREATE INDEX IF NOT EXISTS idx_cost_unit ON cost_records(sales_unit_id);
@@ -352,6 +387,52 @@ function initSchema() {
     { name: "recurring_start_date", ddl: "recurring_start_date TEXT DEFAULT ''" },
     { name: "recurring_end_date", ddl: "recurring_end_date TEXT DEFAULT ''" },
   ]);
+
+  ensureColumns("hr_profiles", [
+    { name: "labor_company_id", ddl: "labor_company_id TEXT DEFAULT ''" },
+    { name: "sales_company_id", ddl: "sales_company_id TEXT DEFAULT ''" },
+  ]);
+
+  // 将误挂在销售单位上的 labor_company_id 迁移为独立签署公司字典
+  migrateLaborCompanyIdsFromSalesUnits();
+}
+
+function migrateLaborCompanyIdsFromSalesUnits() {
+  const profiles = db
+    .prepare(
+      "SELECT id, labor_company_id FROM hr_profiles WHERE labor_company_id IS NOT NULL AND labor_company_id != ''",
+    )
+    .all() as Array<{ id: string; labor_company_id: string }>;
+  if (profiles.length === 0) return;
+
+  const findUnit = db.prepare("SELECT id, name FROM sales_units WHERE id = ?");
+  const findLaborById = db.prepare("SELECT id FROM labor_companies WHERE id = ?");
+  const findLaborByName = db.prepare(
+    "SELECT id FROM labor_companies WHERE name = ? COLLATE NOCASE",
+  );
+  const insertLabor = db.prepare(
+    "INSERT INTO labor_companies (id, name, remark) VALUES (?, ?, ?)",
+  );
+  const updateProfile = db.prepare(
+    "UPDATE hr_profiles SET labor_company_id = ? WHERE id = ?",
+  );
+
+  for (const p of profiles) {
+    if (findLaborById.get(p.labor_company_id)) continue;
+
+    const unit = findUnit.get(p.labor_company_id) as
+      | { id: string; name: string }
+      | undefined;
+    if (!unit) continue;
+
+    const byName = findLaborByName.get(unit.name) as { id: string } | undefined;
+    let laborId = byName?.id;
+    if (!laborId) {
+      laborId = generateId("lc");
+      insertLabor.run(laborId, unit.name, "由原销售单位名称迁移");
+    }
+    updateProfile.run(laborId, p.id);
+  }
 }
 
 function seedDefaultAdmin() {
@@ -421,6 +502,84 @@ export function rowToPersonnel(row: any) {
     hireDate: row.hire_date || "",
     resignDate: row.resign_date || undefined,
     status: row.status || "active",
+  };
+}
+
+export type ContractAlert = "expired" | "due30" | "due60" | "ok" | "empty";
+
+export function getContractAlert(endDate: string | null | undefined, today = new Date()): {
+  contractAlert: ContractAlert;
+  contractDaysLeft: number | null;
+} {
+  const raw = (endDate || "").trim();
+  if (!raw) return { contractAlert: "empty", contractDaysLeft: null };
+  const end = new Date(`${raw.slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(end.getTime())) return { contractAlert: "empty", contractDaysLeft: null };
+  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const daysLeft = Math.round((end.getTime() - start.getTime()) / 86400000);
+  if (daysLeft < 0) return { contractAlert: "expired", contractDaysLeft: daysLeft };
+  if (daysLeft <= 30) return { contractAlert: "due30", contractDaysLeft: daysLeft };
+  if (daysLeft <= 60) return { contractAlert: "due60", contractDaysLeft: daysLeft };
+  return { contractAlert: "ok", contractDaysLeft: daysLeft };
+}
+
+export function calcAgeFromIdOrBirth(idNumber?: string, birthDate?: string): number | null {
+  let ymd = (birthDate || "").trim().slice(0, 10);
+  const id = (idNumber || "").trim();
+  if (!ymd && /^\d{17}[\dXx]$/.test(id)) {
+    ymd = `${id.slice(6, 10)}-${id.slice(10, 12)}-${id.slice(12, 14)}`;
+  }
+  if (!ymd || ymd.length < 10) return null;
+  const birth = new Date(`${ymd}T00:00:00`);
+  if (Number.isNaN(birth.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - birth.getFullYear();
+  const m = now.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < birth.getDate())) age -= 1;
+  return age >= 0 && age < 150 ? age : null;
+}
+
+export function rowToHrProfile(row: any) {
+  const alert = getContractAlert(row.contract_end_date);
+  const age =
+    row.age != null && row.age !== ""
+      ? Number(row.age)
+      : calcAgeFromIdOrBirth(row.id_number, row.birth_date);
+  return {
+    id: row.id,
+    personnelId: row.personnel_id,
+    gender: row.gender || "",
+    contractStartDate: row.contract_start_date || "",
+    contractEndDate: row.contract_end_date || "",
+    idNumber: row.id_number || "",
+    birthDate: row.birth_date || "",
+    age: age == null || Number.isNaN(age) ? null : age,
+    ethnicity: row.ethnicity || "",
+    politicalStatus: row.political_status || "",
+    education: row.education || "",
+    school: row.school || "",
+    major: row.major || "",
+    bankAccount: row.bank_account || "",
+    bankName: row.bank_name || "",
+    address: row.address || "",
+    emergencyContact: row.emergency_contact || "",
+    emergencyPhone: row.emergency_phone || "",
+    laborCompanyId: row.labor_company_id || "",
+    laborCompanyName: row.labor_company_name || "",
+    salesCompanyId: row.sales_company_id || "",
+    updatedAt: row.updated_at || "",
+    // 联动人员管理
+    name: row.name || "",
+    salesUnitId: row.sales_unit_id || "",
+    position: row.position || "",
+    phone: row.phone || "",
+    hireDate: row.hire_date || "",
+    resignDate: row.resign_date || undefined,
+    status: row.status || "active",
+    salary: typeof row.salary === "string" ? JSON.parse(row.salary || "{}") : (row.salary || {}),
+    socialInsurance: row.social_insurance || 0,
+    housingFund: row.housing_fund || 0,
+    ...alert,
   };
 }
 

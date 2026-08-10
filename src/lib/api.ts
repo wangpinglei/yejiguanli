@@ -34,8 +34,14 @@ async function apiRequest<T>(method: string, path: string, body?: unknown): Prom
     throw new Error("登录已过期，请重新登录");
   }
 
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || `请求失败 (${res.status})`);
+  const raw = await res.text();
+  let data: any = null;
+  try {
+    data = raw ? JSON.parse(raw) : null;
+  } catch {
+    throw new Error(raw?.slice(0, 200) || `请求失败 (${res.status})`);
+  }
+  if (!res.ok) throw new Error(data?.error || data?.message || `请求失败 (${res.status})`);
   return data as T;
 }
 
@@ -114,6 +120,36 @@ export const personnelApi = {
   create: (data: any) => api.post<any>("/personnel", data),
   update: (id: string, data: any) => api.put<any>(`/personnel/${id}`, data),
   delete: (id: string) => api.delete(`/personnel/${id}`),
+};
+
+export const hrProfilesApi = {
+  list: () => api.get<import("@/types").HrProfile[]>("/hr-profiles"),
+  reminders: () => api.get<import("@/types").HrReminders>("/hr-profiles/reminders"),
+  create: (data: Partial<import("@/types").HrProfile> & { personnelId: string }) =>
+    api.post<import("@/types").HrProfile>("/hr-profiles", data),
+  update: (id: string, data: Partial<import("@/types").HrProfile>) =>
+    api.put<import("@/types").HrProfile>(`/hr-profiles/${id}`, data),
+  delete: (id: string) => api.delete(`/hr-profiles/${id}`),
+  batchCreate: () =>
+    api.post<{ created: number; skipped: number; totalPersonnel: number }>(
+      "/hr-profiles/batch-create",
+    ),
+  importRows: (rows: Record<string, unknown>[]) =>
+    api.post<{
+      success: number;
+      failed: number;
+      createdPersonnel?: number;
+      errors: Array<{ row: number; name: string; reason: string }>;
+    }>("/hr-profiles/import", { rows }),
+};
+
+export const laborCompaniesApi = {
+  list: () => api.get<import("@/types").LaborCompany[]>("/labor-companies"),
+  create: (data: { name: string; remark?: string }) =>
+    api.post<import("@/types").LaborCompany>("/labor-companies", data),
+  update: (id: string, data: { name?: string; remark?: string }) =>
+    api.put<import("@/types").LaborCompany>(`/labor-companies/${id}`, data),
+  delete: (id: string) => api.delete(`/labor-companies/${id}`),
 };
 
 export const productsApi = {

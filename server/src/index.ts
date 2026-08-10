@@ -11,6 +11,9 @@ import salesRecordRoutes from "./routes/salesRecords";
 import costRecordRoutes from "./routes/costRecords";
 import migrateRoutes from "./routes/migrate";
 import battleReportRoutes from "./routes/battleReport";
+import syncOrdersRoutes from "./routes/syncOrders";
+import hrProfilesRoutes from "./routes/hrProfiles";
+import laborCompaniesRoutes from "./routes/laborCompanies";
 import extraRoutes from "./routes/extra";
 
 const app = express();
@@ -34,6 +37,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/sales-units", salesUnitRoutes);
 app.use("/api/personnel", personnelRoutes);
+app.use("/api/hr-profiles", hrProfilesRoutes);
+app.use("/api/labor-companies", laborCompaniesRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/sales-records", salesRecordRoutes);
 app.use("/api/cost-records", costRecordRoutes);
@@ -44,10 +49,8 @@ app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// 生态圈同步订单（占位：当前返回空列表，真实同步逻辑可在后续接入）
-app.get("/api/synced-orders", (_req, res) => {
-  res.json({ success: true, orders: [] });
-});
+// 外部订单同步（X-API-Key，写入销售记录）
+app.use("/api", syncOrdersRoutes);
 
 // 单位战报（钉钉推送用，X-API-Key，无需登录）
 app.use("/api", battleReportRoutes);

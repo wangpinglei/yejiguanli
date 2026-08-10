@@ -307,24 +307,32 @@ export function DataProvider({ children }: { children: ReactNode }) {
   }, [authLoading, user, managedUnitKey, refreshAll]);
 
   const allSalesRecords = useMemo(() => {
-    const syncedAsSales: SalesRecord[] = syncedOrders.map((o) => ({
-      id: o.id,
-      salesUnitId: o.salesUnitId,
-      personnelId: o.personnelId,
-      productId: o.productId,
-      quantity: o.quantity,
-      unitPrice: o.unitPrice,
-      totalAmount: o.totalAmount,
-      saleDate: o.saleDate,
-      remark: o.remark,
-      synced: true,
-      externalOrderId: o.externalOrderId,
-      customerName: o.customerName,
-      salesUnitName: o.salesUnitName,
-      salesPersonName: o.salesPersonName,
-      productName: o.productName,
-      syncedAt: o.syncedAt,
-    }));
+    const existingExt = new Set(
+      salesRecords.map((s) => s.externalOrderId).filter(Boolean) as string[],
+    );
+    const syncedAsSales: SalesRecord[] = syncedOrders
+      .filter((o) => !o.externalOrderId || !existingExt.has(o.externalOrderId))
+      .map((o) => ({
+        id: o.id,
+        salesUnitId: o.salesUnitId,
+        personnelId: o.personnelId,
+        productId: o.productId,
+        quantity: o.quantity,
+        unitPrice: o.unitPrice,
+        totalAmount: o.totalAmount,
+        saleDate: o.saleDate,
+        remark: o.remark,
+        synced: true,
+        externalOrderId: o.externalOrderId,
+        customerName: o.customerName,
+        salesUnitName: o.salesUnitName,
+        salesPersonName: o.salesPersonName,
+        productName: o.productName,
+        syncedAt: o.syncedAt,
+        orderAmount: o.orderAmount,
+        orderType: o.orderType,
+        activityName: o.activityName,
+      }));
     return [...salesRecords, ...syncedAsSales];
   }, [salesRecords, syncedOrders]);
 

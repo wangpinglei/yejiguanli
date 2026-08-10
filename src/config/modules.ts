@@ -3,12 +3,16 @@ export type ModuleKey =
   | "dashboard"
   | "sales_units"
   | "personnel"
+  | "hr_management"
   | "sales_records"
   | "cost_management"
   | "profit_analysis"
   | "sales_battle_report"
   | "product_settlement"
   | "users";
+
+/** 机密模块：旧角色默认不开放，仅超管在权限分配中手动勾选 */
+const CONFIDENTIAL_MODULE_KEYS = new Set<ModuleKey>(["hr_management"]);
 
 export interface ModulePermission {
   view: boolean;
@@ -29,6 +33,7 @@ export const MODULE_DEFS: ModuleDef[] = [
   { key: "dashboard", label: "数据看板", path: "/", canEdit: false },
   { key: "sales_units", label: "销售单位", path: "/sales-units", canEdit: true },
   { key: "personnel", label: "人员管理", path: "/personnel", canEdit: true },
+  { key: "hr_management", label: "人事管理", path: "/hr-management", canEdit: true },
   { key: "sales_records", label: "销售记录", path: "/sales-records", canEdit: true },
   { key: "cost_management", label: "成本与收入录入", path: "/cost-management", canEdit: true },
   { key: "profit_analysis", label: "盈亏分析", path: "/profit-analysis", canEdit: true },
@@ -58,7 +63,11 @@ export function permissionsFromLegacyRole(role: string): UserPermissions {
   const empty = createEmptyPermissions();
   const viewAll = () => {
     MODULE_DEFS.forEach((m) => {
-      if (m.key !== "users") empty[m.key] = { view: true, edit: false };
+      if (m.key === "users" || CONFIDENTIAL_MODULE_KEYS.has(m.key)) {
+        empty[m.key] = { view: false, edit: false };
+      } else {
+        empty[m.key] = { view: true, edit: false };
+      }
     });
   };
 
@@ -67,8 +76,11 @@ export function permissionsFromLegacyRole(role: string): UserPermissions {
       return createFullPermissions();
     case "group_admin":
       MODULE_DEFS.forEach((m) => {
-        if (m.key === "users") empty[m.key] = { view: false, edit: false };
-        else empty[m.key] = { view: true, edit: m.canEdit };
+        if (m.key === "users" || CONFIDENTIAL_MODULE_KEYS.has(m.key)) {
+          empty[m.key] = { view: false, edit: false };
+        } else {
+          empty[m.key] = { view: true, edit: m.canEdit };
+        }
       });
       return empty;
     case "military_cadre":
@@ -82,13 +94,14 @@ export function permissionsFromLegacyRole(role: string): UserPermissions {
     case "unit_leader":
     case "unit_manager":
       MODULE_DEFS.forEach((m) => {
-        if (m.key === "users" || m.key === "product_settlement") {
-          empty[m.key] = { view: m.key !== "users", edit: false };
+        if (m.key === "users" || CONFIDENTIAL_MODULE_KEYS.has(m.key)) {
+          empty[m.key] = { view: false, edit: false };
+        } else if (m.key === "product_settlement") {
+          empty[m.key] = { view: true, edit: false };
         } else {
           empty[m.key] = { view: true, edit: m.canEdit };
         }
       });
-      empty.product_settlement = { view: true, edit: false };
       return empty;
     default:
       viewAll();

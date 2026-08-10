@@ -14,6 +14,8 @@ import ProfitAnalysis from "@/pages/ProfitAnalysis";
 import SalesBattleReport from "@/pages/SalesBattleReport";
 import UserManagement from "@/pages/UserManagement";
 import ProductSettlement from "@/pages/ProductSettlement";
+import HrManagement from "@/pages/HrManagement";
+import { usePermissions } from "@/hooks/usePermissions";
 import type { ReactNode } from "react";
 
 function UsersManageRoute({ children }: { children: ReactNode }) {
@@ -23,6 +25,12 @@ function UsersManageRoute({ children }: { children: ReactNode }) {
     user.role === "superadmin" ||
     Boolean(user.permissions?.users?.edit || user.permissions?.users?.view);
   if (!canManage) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
+function HrManageRoute({ children }: { children: ReactNode }) {
+  const { canViewHr, isSuperadmin } = usePermissions();
+  if (!isSuperadmin && !canViewHr) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
 
@@ -46,6 +54,14 @@ export default function App() {
               <Route index element={<Dashboard />} />
               <Route path="sales-units" element={<SalesUnits />} />
               <Route path="personnel" element={<Personnel />} />
+              <Route
+                path="hr-management"
+                element={
+                  <HrManageRoute>
+                    <HrManagement />
+                  </HrManageRoute>
+                }
+              />
               <Route path="products" element={<Products />} />
               <Route path="sales-records" element={<SalesRecords />} />
               <Route path="cost-management" element={<CostManagement />} />

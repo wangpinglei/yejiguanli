@@ -4,6 +4,7 @@ export type ModuleKey =
   | "dashboard"
   | "sales_units"
   | "personnel"
+  | "hr_management"
   | "sales_records"
   | "cost_management"
   | "profit_analysis"
@@ -22,6 +23,7 @@ const MODULE_KEYS: ModuleKey[] = [
   "dashboard",
   "sales_units",
   "personnel",
+  "hr_management",
   "sales_records",
   "cost_management",
   "profit_analysis",
@@ -30,9 +32,13 @@ const MODULE_KEYS: ModuleKey[] = [
   "users",
 ];
 
+/** 机密模块：旧角色默认映射一律关闭，仅超管手动授权 */
+const CONFIDENTIAL = new Set<ModuleKey>(["hr_management"]);
+
 const EDITABLE = new Set<ModuleKey>([
   "sales_units",
   "personnel",
+  "hr_management",
   "sales_records",
   "cost_management",
   "profit_analysis",
@@ -59,7 +65,11 @@ export function permissionsFromLegacyRole(role: string): UserPermissions {
   const empty = createEmptyPermissions();
   const viewAll = () => {
     MODULE_KEYS.forEach((key) => {
-      if (key !== "users") empty[key] = { view: true, edit: false };
+      if (key === "users" || CONFIDENTIAL.has(key)) {
+        empty[key] = { view: false, edit: false };
+      } else {
+        empty[key] = { view: true, edit: false };
+      }
     });
   };
 
@@ -68,7 +78,7 @@ export function permissionsFromLegacyRole(role: string): UserPermissions {
       return createFullPermissions();
     case "group_admin":
       MODULE_KEYS.forEach((key) => {
-        empty[key] = key === "users"
+        empty[key] = (key === "users" || CONFIDENTIAL.has(key))
           ? { view: false, edit: false }
           : { view: true, edit: EDITABLE.has(key) };
       });
@@ -84,8 +94,9 @@ export function permissionsFromLegacyRole(role: string): UserPermissions {
     case "unit_leader":
     case "unit_manager":
       MODULE_KEYS.forEach((key) => {
-        if (key === "users") empty[key] = { view: false, edit: false };
-        else if (key === "product_settlement") {
+        if (key === "users" || CONFIDENTIAL.has(key)) {
+          empty[key] = { view: false, edit: false };
+        } else if (key === "product_settlement") {
           empty[key] = { view: true, edit: false };
         } else {
           empty[key] = { view: true, edit: EDITABLE.has(key) };

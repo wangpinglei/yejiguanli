@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import type { JwtPayload, UserRole } from "./types";
 import { getDb, rowToSalesUnit } from "./db";
-import { hasAnyEdit, hasModuleEdit } from "./permissions";
+import { hasAnyEdit, hasModuleEdit, hasModuleView } from "./permissions";
 
 // ===================== 角色权限中间件 =====================
 
@@ -92,6 +92,25 @@ export function requireEditPermission(req: Request, res: Response, next: NextFun
     return res.status(403).json({ error: "当前账号为只读权限，无法编辑" });
   }
   next();
+}
+
+/** 要求指定模块之一具备查看权限（超管放行） */
+export function requireModuleView(...keys: Array<import("./permissions").ModuleKey>) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "未登录" });
+    }
+    if (req.user.role === "superadmin") {
+      return next();
+    }
+    const ok = keys.some((key) =>
+      hasModuleView(req.user!.permissions, key, req.user!.role),
+    );
+    if (!ok) {
+      return res.status(403).json({ error: "权限不足：需要对应模块的查看权限" });
+    }
+    next();
+  };
 }
 
 /** 要求指定模块之一具备编辑权限（超管放行） */
