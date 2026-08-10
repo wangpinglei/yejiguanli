@@ -150,7 +150,11 @@ export function buildUnitBattleReport(options: {
     return getPersonalSales(p.id, monthUnitSales, p.name) > 0
   })
 
-  const battlePersonnel = unitPersonnel.filter((p) => isSalesBattlePosition(p.position))
+  const battlePersonnel = unitPersonnel.filter(
+    (p) =>
+      isSalesBattlePosition(p.position) ||
+      getPersonalSales(p.id, monthUnitSales, p.name) > 0,
+  )
   const unitMonthlyRecords = filterByMonth(salesRecords, yearMonth).filter(
     (r) => r.salesUnitId === salesUnitId,
   )

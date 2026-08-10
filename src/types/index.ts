@@ -96,11 +96,30 @@ export interface HrProfile {
   address: string;
   emergencyContact: string;
   emergencyPhone: string;
-  /** 劳动签署公司（独立字典 labor_companies） */
+  /** 劳动合同签署公司（独立字典 labor_companies，≠销售单位） */
   laborCompanyId: string;
   laborCompanyName?: string;
-  /** 销售单位公司（展示用；业绩归属以人员管理 salesUnitId 为准） */
+  /** 展示用镜像；业绩归属以人员管理 salesUnitId 为准 */
   salesCompanyId: string;
+  companyTenure: string;
+  regularizationDate: string;
+  employmentType: string;
+  maritalStatus: string;
+  nativePlace: string;
+  householdRegister: string;
+  idAddress: string;
+  graduationDate: string;
+  emergencyRelation: string;
+  internshipStartDate: string;
+  internshipEndDate: string;
+  contract1StartDate: string;
+  contract1EndDate: string;
+  contract2StartDate: string;
+  contract2EndDate: string;
+  contract3StartDate: string;
+  contract3EndDate: string;
+  bankBelong: string;
+  companyEmail: string;
   updatedAt?: string;
   // 联动人员管理（只读展示；改单位请到人员管理）
   name: string;

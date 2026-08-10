@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import {
   AlertTriangle,
+  Eraser,
   Zap,
   FileUp,
   Pencil,
@@ -64,6 +65,27 @@ type HrForm = {
   emergencyPhone: string;
   laborCompanyId: string;
   salesCompanyId: string;
+  hireDate: string;
+  resignDate: string;
+  companyTenure: string;
+  regularizationDate: string;
+  employmentType: string;
+  maritalStatus: string;
+  nativePlace: string;
+  householdRegister: string;
+  idAddress: string;
+  graduationDate: string;
+  emergencyRelation: string;
+  internshipStartDate: string;
+  internshipEndDate: string;
+  contract1StartDate: string;
+  contract1EndDate: string;
+  contract2StartDate: string;
+  contract2EndDate: string;
+  contract3StartDate: string;
+  contract3EndDate: string;
+  bankBelong: string;
+  companyEmail: string;
 };
 
 const EMPTY_FORM: HrForm = {
@@ -85,6 +107,27 @@ const EMPTY_FORM: HrForm = {
   emergencyPhone: "",
   laborCompanyId: "",
   salesCompanyId: "",
+  hireDate: "",
+  resignDate: "",
+  companyTenure: "",
+  regularizationDate: "",
+  employmentType: "",
+  maritalStatus: "",
+  nativePlace: "",
+  householdRegister: "",
+  idAddress: "",
+  graduationDate: "",
+  emergencyRelation: "",
+  internshipStartDate: "",
+  internshipEndDate: "",
+  contract1StartDate: "",
+  contract1EndDate: "",
+  contract2StartDate: "",
+  contract2EndDate: "",
+  contract3StartDate: "",
+  contract3EndDate: "",
+  bankBelong: "",
+  companyEmail: "",
 };
 
 function getAlertLabel(alert: ContractAlert, daysLeft: number | null): string {
@@ -123,6 +166,7 @@ export default function HrManagementPage() {
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
   const [batchCreating, setBatchCreating] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [importResult, setImportResult] = useState<string>("");
 
   const unitNameMap = useMemo(() => {
@@ -214,9 +258,37 @@ export default function HrManagementPage() {
       emergencyPhone: row.emergencyPhone,
       laborCompanyId: row.laborCompanyId || "",
       salesCompanyId: row.salesUnitId || "",
+      hireDate: row.hireDate || "",
+      resignDate: row.resignDate || "",
+      companyTenure: row.companyTenure || "",
+      regularizationDate: row.regularizationDate || "",
+      employmentType: row.employmentType || "",
+      maritalStatus: row.maritalStatus || "",
+      nativePlace: row.nativePlace || "",
+      householdRegister: row.householdRegister || "",
+      idAddress: row.idAddress || "",
+      graduationDate: row.graduationDate || "",
+      emergencyRelation: row.emergencyRelation || "",
+      internshipStartDate: row.internshipStartDate || "",
+      internshipEndDate: row.internshipEndDate || "",
+      contract1StartDate: row.contract1StartDate || "",
+      contract1EndDate: row.contract1EndDate || "",
+      contract2StartDate: row.contract2StartDate || "",
+      contract2EndDate: row.contract2EndDate || "",
+      contract3StartDate: row.contract3StartDate || "",
+      contract3EndDate: row.contract3EndDate || "",
+      bankBelong: row.bankBelong || "",
+      companyEmail: row.companyEmail || "",
     });
     setNewLaborName("");
     setDialogOpen(true);
+  }
+
+  function getDutyStatusFromResign(resignDate: string): "active" | "inactive" {
+    const resign = resignDate.trim().slice(0, 10);
+    if (!resign) return "active";
+    const today = new Date().toISOString().slice(0, 10);
+    return resign < today ? "inactive" : "active";
   }
 
   async function handleAddLaborCompany() {
@@ -242,7 +314,52 @@ export default function HrManagementPage() {
     if (!editing) return;
     setSaving(true);
     try {
-      await hrProfilesApi.update(editing.id, form);
+      const hireDate = form.hireDate.trim();
+      const resignDate = form.resignDate.trim();
+      await hrProfilesApi.update(editing.id, {
+        gender: form.gender,
+        contractStartDate: form.contractStartDate,
+        contractEndDate: form.contractEndDate,
+        idNumber: form.idNumber,
+        birthDate: form.birthDate,
+        ethnicity: form.ethnicity,
+        politicalStatus: form.politicalStatus,
+        education: form.education,
+        school: form.school,
+        major: form.major,
+        bankAccount: form.bankAccount,
+        bankName: form.bankName,
+        address: form.address,
+        emergencyContact: form.emergencyContact,
+        emergencyPhone: form.emergencyPhone,
+        laborCompanyId: form.laborCompanyId,
+        hireDate,
+        resignDate: resignDate || null,
+        status: getDutyStatusFromResign(resignDate),
+        companyTenure: form.companyTenure,
+        regularizationDate: form.regularizationDate,
+        employmentType: form.employmentType,
+        maritalStatus: form.maritalStatus,
+        nativePlace: form.nativePlace,
+        householdRegister: form.householdRegister,
+        idAddress: form.idAddress,
+        graduationDate: form.graduationDate,
+        emergencyRelation: form.emergencyRelation,
+        internshipStartDate: form.internshipStartDate,
+        internshipEndDate: form.internshipEndDate,
+        contract1StartDate: form.contract1StartDate,
+        contract1EndDate: form.contract1EndDate,
+        contract2StartDate: form.contract2StartDate,
+        contract2EndDate: form.contract2EndDate,
+        contract3StartDate: form.contract3StartDate,
+        contract3EndDate: form.contract3EndDate,
+        bankBelong: form.bankBelong,
+        companyEmail: form.companyEmail,
+      } as Parameters<typeof hrProfilesApi.update>[1] & {
+        hireDate: string;
+        resignDate: string | null;
+        status: "active" | "inactive";
+      });
       setDialogOpen(false);
       await loadData();
       await refreshAll();
@@ -287,6 +404,30 @@ export default function HrManagementPage() {
       await loadData();
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : "删除失败");
+    }
+  }
+
+  async function handleClearAll() {
+    if (list.length === 0) {
+      alert("当前没有人事档案可清空");
+      return;
+    }
+    const ok = confirm(
+      `确认清空全部 ${list.length} 条人事档案？\n\n只删除人事档案，不会删除「人员管理」中的人员。此操作不可恢复。`,
+    );
+    if (!ok) return;
+    const ok2 = confirm("再次确认：真的要清空全部人事档案吗？");
+    if (!ok2) return;
+    setClearing(true);
+    setImportResult("");
+    try {
+      const result = await hrProfilesApi.clearAll();
+      setImportResult(`已清空人事档案 ${result.deleted} 条（人员管理未改动）`);
+      await loadData();
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "清空失败");
+    } finally {
+      setClearing(false);
     }
   }
 
@@ -376,7 +517,7 @@ export default function HrManagementPage() {
     <div className="space-y-4 p-6">
       <PageHeader
         title="人事管理"
-        description="与人员管理 1:1 联动。劳动签署公司为独立字典；销售单位以人员管理为准（人事侧只读）。导入按姓名+部门匹配已有人员，不自动建人。薪酬与提成请到人员管理。"
+        description="劳动合同签署公司与销售单位是两套概念。入离职以人事为准并同步人员管理；薪酬与提成在人员管理。"
         action={
           canEdit ? (
             <div className="flex flex-wrap gap-2">
@@ -391,7 +532,7 @@ export default function HrManagementPage() {
                 }}
               />
               <Button
-                disabled={batchCreating || loading}
+                disabled={batchCreating || loading || clearing}
                 onClick={() => void handleBatchCreate()}
               >
                 <Zap className="mr-2 h-4 w-4" />
@@ -403,11 +544,19 @@ export default function HrManagementPage() {
               </Button>
               <Button
                 variant="outline"
-                disabled={importing}
+                disabled={importing || clearing}
                 onClick={() => fileInputRef.current?.click()}
               >
                 <FileUp className="mr-2 h-4 w-4" />
                 {importing ? "导入中…" : "批量导入表格"}
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={clearing || loading || list.length === 0}
+                onClick={() => void handleClearAll()}
+              >
+                <Eraser className="mr-2 h-4 w-4" />
+                {clearing ? "清空中…" : "清空人事档案"}
               </Button>
             </div>
           ) : undefined
@@ -456,7 +605,7 @@ export default function HrManagementPage() {
         </div>
         <Select value={unitFilter} onValueChange={setUnitFilter}>
           <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="销售单位" />
+            <SelectValue placeholder="业绩归属单位" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部单位</SelectItem>
@@ -511,25 +660,42 @@ export default function HrManagementPage() {
                   </TableHead>
                   <TableHead>性别</TableHead>
                   <TableHead>手机号</TableHead>
-                  <TableHead>劳动签署公司</TableHead>
-                  <TableHead>销售单位</TableHead>
+                  <TableHead>劳动合同签署公司</TableHead>
+                  <TableHead>业绩归属单位</TableHead>
                   <TableHead>职位</TableHead>
+                  <TableHead>用工性质</TableHead>
                   <TableHead>入职日期</TableHead>
-                  <TableHead>合同起始</TableHead>
-                  <TableHead>合同终止</TableHead>
+                  <TableHead>离职日期</TableHead>
+                  <TableHead>司龄</TableHead>
+                  <TableHead>转正日期</TableHead>
+                  <TableHead>合同提醒到期</TableHead>
                   <TableHead>合同提醒</TableHead>
-                  <TableHead>身份证号</TableHead>
-                  <TableHead>出生日期</TableHead>
+                  <TableHead>劳动合同1起</TableHead>
+                  <TableHead>劳动合同1止</TableHead>
+                  <TableHead>劳动合同2起</TableHead>
+                  <TableHead>劳动合同2止</TableHead>
+                  <TableHead>劳动合同3起</TableHead>
+                  <TableHead>劳动合同3止</TableHead>
+                  <TableHead>身份证</TableHead>
+                  <TableHead>出生年月</TableHead>
                   <TableHead>年龄</TableHead>
                   <TableHead>民族</TableHead>
-                  <TableHead>政治面貌</TableHead>
+                  <TableHead>婚姻状况</TableHead>
+                  <TableHead>籍贯</TableHead>
+                  <TableHead>户籍</TableHead>
+                  <TableHead>是否党员</TableHead>
                   <TableHead>学历</TableHead>
                   <TableHead>毕业院校</TableHead>
+                  <TableHead>毕业时间</TableHead>
                   <TableHead>专业</TableHead>
+                  <TableHead>企业邮箱</TableHead>
                   <TableHead>银行卡号</TableHead>
+                  <TableHead>所属银行</TableHead>
                   <TableHead>开户行</TableHead>
-                  <TableHead>现住址</TableHead>
+                  <TableHead>身份证地址</TableHead>
+                  <TableHead>联系地址</TableHead>
                   <TableHead>紧急联系人</TableHead>
+                  <TableHead>关系</TableHead>
                   <TableHead>紧急电话</TableHead>
                   {canEdit && <TableHead className="min-w-[100px]">操作</TableHead>}
                 </TableRow>
@@ -537,14 +703,14 @@ export default function HrManagementPage() {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={25} className="py-10 text-center text-muted-foreground">
+                    <TableCell colSpan={42} className="py-10 text-center text-muted-foreground">
                       加载中…
                     </TableCell>
                   </TableRow>
                 ) : filtered.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={25} className="py-10 text-center text-muted-foreground">
-                      暂无人事档案。可点「一键建档」从人员管理生成，或「批量导入表格」（须先在人员管理建好人员）。
+                    <TableCell colSpan={42} className="py-10 text-center text-muted-foreground">
+                      暂无人事档案。可点「一键建档」或「批量导入表格」（匹配不到人会自动建挂靠人员）。
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -564,14 +730,17 @@ export default function HrManagementPage() {
                       <TableCell>
                         {row.laborCompanyName
                           || laborNameMap.get(row.laborCompanyId)
-                          || "未匹配"}
+                          || "未设置"}
                       </TableCell>
                       <TableCell>
                         {unitNameMap.get(row.salesUnitId) || "未分配"}
                       </TableCell>
                       <TableCell>{row.position || "—"}</TableCell>
+                      <TableCell>{row.employmentType || "—"}</TableCell>
                       <TableCell>{row.hireDate || "—"}</TableCell>
-                      <TableCell>{row.contractStartDate || "—"}</TableCell>
+                      <TableCell>{row.resignDate || "—"}</TableCell>
+                      <TableCell>{row.companyTenure || "—"}</TableCell>
+                      <TableCell>{row.regularizationDate || "—"}</TableCell>
                       <TableCell
                         className={cn(
                           row.contractAlert === "due60" || row.contractAlert === "due30"
@@ -596,20 +765,36 @@ export default function HrManagementPage() {
                           "—"
                         )}
                       </TableCell>
+                      <TableCell>{row.contract1StartDate || "—"}</TableCell>
+                      <TableCell>{row.contract1EndDate || "—"}</TableCell>
+                      <TableCell>{row.contract2StartDate || "—"}</TableCell>
+                      <TableCell>{row.contract2EndDate || "—"}</TableCell>
+                      <TableCell>{row.contract3StartDate || "—"}</TableCell>
+                      <TableCell>{row.contract3EndDate || "—"}</TableCell>
                       <TableCell className="whitespace-nowrap">{row.idNumber || "—"}</TableCell>
                       <TableCell>{row.birthDate || "—"}</TableCell>
                       <TableCell>{row.age ?? "—"}</TableCell>
                       <TableCell>{row.ethnicity || "—"}</TableCell>
+                      <TableCell>{row.maritalStatus || "—"}</TableCell>
+                      <TableCell>{row.nativePlace || "—"}</TableCell>
+                      <TableCell>{row.householdRegister || "—"}</TableCell>
                       <TableCell>{row.politicalStatus || "—"}</TableCell>
                       <TableCell>{row.education || "—"}</TableCell>
                       <TableCell>{row.school || "—"}</TableCell>
+                      <TableCell>{row.graduationDate || "—"}</TableCell>
                       <TableCell>{row.major || "—"}</TableCell>
+                      <TableCell>{row.companyEmail || "—"}</TableCell>
                       <TableCell className="whitespace-nowrap">{row.bankAccount || "—"}</TableCell>
+                      <TableCell>{row.bankBelong || "—"}</TableCell>
                       <TableCell>{row.bankName || "—"}</TableCell>
+                      <TableCell className="max-w-[160px] truncate" title={row.idAddress}>
+                        {row.idAddress || "—"}
+                      </TableCell>
                       <TableCell className="max-w-[200px] truncate" title={row.address}>
                         {row.address || "—"}
                       </TableCell>
                       <TableCell>{row.emergencyContact || "—"}</TableCell>
+                      <TableCell>{row.emergencyRelation || "—"}</TableCell>
                       <TableCell>{row.emergencyPhone || "—"}</TableCell>
                       {canEdit && (
                         <TableCell>
@@ -639,7 +824,7 @@ export default function HrManagementPage() {
           </DialogHeader>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label>劳动签署公司</Label>
+              <Label>劳动合同签署公司</Label>
               <Select
                 value={form.laborCompanyId || "__none__"}
                 onValueChange={(v) =>
@@ -647,10 +832,10 @@ export default function HrManagementPage() {
                 }
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="选择签署公司" />
+                  <SelectValue placeholder="独立维护，勿与销售单位混用" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__none__">未匹配</SelectItem>
+                  <SelectItem value="__none__">未设置</SelectItem>
                   {laborCompanies.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
                       {c.name}
@@ -661,7 +846,7 @@ export default function HrManagementPage() {
               {canEdit && (
                 <div className="flex gap-2 pt-1">
                   <Input
-                    placeholder="新签署公司名称"
+                    placeholder="真实签署公司全称（≠销售单位名）"
                     value={newLaborName}
                     onChange={(e) => setNewLaborName(e.target.value)}
                   />
@@ -670,9 +855,12 @@ export default function HrManagementPage() {
                   </Button>
                 </div>
               )}
+              <p className="text-xs text-muted-foreground">
+                与「销售单位管理」无关；请按劳动合同上的公司名称维护。
+              </p>
             </div>
             <div className="space-y-1.5">
-              <Label>销售单位（人员管理）</Label>
+              <Label>业绩归属单位（人员管理）</Label>
               <Input
                 disabled
                 value={
@@ -682,38 +870,78 @@ export default function HrManagementPage() {
                 }
               />
               <p className="text-xs text-muted-foreground">
-                只读。改业绩归属单位请到「人员管理」。
+                只读，来自人员管理的销售单位，不是劳动合同签署公司。
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label>入职日期（在职起）</Label>
+              <Input
+                type="date"
+                value={form.hireDate}
+                onChange={(e) => setForm({ ...form, hireDate: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>离职日期（在职止）</Label>
+              <Input
+                type="date"
+                value={form.resignDate}
+                onChange={(e) => setForm({ ...form, resignDate: e.target.value })}
+              />
+              <p className="text-xs text-muted-foreground">
+                清空表示在职。保存后同步到人员管理，并用于盈亏/成本页按月计人力成本。
               </p>
             </div>
             {(
               [
                 ["gender", "性别"],
-                ["contractStartDate", "合同起始日期"],
-                ["contractEndDate", "合同终止日期"],
-                ["idNumber", "身份证号"],
-                ["birthDate", "出生日期"],
+                ["companyTenure", "司龄"],
+                ["regularizationDate", "转正日期"],
+                ["employmentType", "用工性质"],
+                ["maritalStatus", "婚姻状况"],
+                ["nativePlace", "籍贯"],
+                ["householdRegister", "户籍"],
+                ["idNumber", "身份证"],
+                ["birthDate", "出生年月"],
                 ["ethnicity", "民族"],
-                ["politicalStatus", "政治面貌"],
+                ["politicalStatus", "是否党员/政治面貌"],
+                ["idAddress", "身份证地址"],
                 ["education", "学历"],
                 ["school", "毕业院校"],
+                ["graduationDate", "毕业时间"],
                 ["major", "专业"],
+                ["companyEmail", "企业邮箱"],
+                ["contract1StartDate", "劳动合同1开始"],
+                ["contract1EndDate", "劳动合同1到期"],
+                ["contract2StartDate", "劳动合同2开始"],
+                ["contract2EndDate", "劳动合同2到期"],
+                ["contract3StartDate", "劳动合同3开始"],
+                ["contract3EndDate", "劳动合同3到期"],
+                ["internshipStartDate", "实习协议开始"],
+                ["internshipEndDate", "实习协议到期"],
                 ["bankAccount", "银行卡号"],
-                ["bankName", "开户行"],
-                ["emergencyContact", "紧急联系人"],
-                ["emergencyPhone", "紧急电话"],
+                ["bankBelong", "所属银行"],
+                ["bankName", "开户行信息"],
+                ["emergencyContact", "紧急联系人姓名"],
+                ["emergencyRelation", "与本人关系"],
+                ["emergencyPhone", "紧急联系电话"],
               ] as Array<[keyof HrForm, string]>
             ).map(([key, label]) => (
               <div key={key} className="space-y-1.5">
                 <Label>{label}</Label>
                 <Input
-                  type={key.includes("Date") ? "date" : "text"}
+                  type={
+                    key.includes("Date") || key.includes("Start") || key.includes("End")
+                      ? "date"
+                      : "text"
+                  }
                   value={form[key]}
                   onChange={(e) => setForm({ ...form, [key]: e.target.value })}
                 />
               </div>
             ))}
             <div className="sm:col-span-2 space-y-1.5">
-              <Label>现住址</Label>
+              <Label>联系地址</Label>
               <Input
                 value={form.address}
                 onChange={(e) => setForm({ ...form, address: e.target.value })}
@@ -721,7 +949,8 @@ export default function HrManagementPage() {
             </div>
           </div>
           <p className="text-xs text-muted-foreground">
-            劳动签署公司为独立名单，可与销售单位名称不同。导入须人员管理已有该人；不会自动新建人员。
+            批量导入支持档案表头（姓名、入职时间、合同主体、劳动合同1~3、身份证等）。
+            合同提醒取已填期次中到期最晚的一期。签署公司≠销售单位。
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>

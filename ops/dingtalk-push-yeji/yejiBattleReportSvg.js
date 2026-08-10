@@ -47,7 +47,7 @@ function fmtPercent(n) {
 function buildYejiBattleSvg(report) {
   const rows = report.rows || []
   const tip =
-    '展示所选月份在职期间的销售相关岗位（含当月后才离职人员）；组织部、售后等非销售岗位不显示。个人业绩按本单位销售记录归集。'
+    '展示所选月份在职期间的销售相关岗位，以及当月有业绩的其他岗位（如服务中心）。个人业绩按本单位销售记录归集。'
   const title = `${report.salesUnitName || ''} ${report.yearMonth || ''} 单位战报`
 
   const bodyH = Math.max(rows.length, 1) * ROW_H

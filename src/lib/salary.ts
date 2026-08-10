@@ -134,8 +134,9 @@ const SALES_POSITION_KEYWORDS = [
 ] as const;
 
 /**
- * 是否应出现在单位战报中
- * 规则：含「销售」→ 展示；命中非销售词 → 隐藏；否则必须命中销售相关词
+ * 是否应作为「销售相关岗位」进入战报名单
+ * 规则：含「销售」→ 是；命中非销售词 → 否；否则必须命中销售相关词
+ * 注意：有当月业绩的非销售岗仍应进战报，见 shouldShowOnBattleReport
  */
 export function isSalesBattlePosition(position?: string): boolean {
   const pos = (position || "").trim().toLowerCase().replace(/\s+/g, "");
@@ -146,6 +147,17 @@ export function isSalesBattlePosition(position?: string): boolean {
     return false;
   }
   return SALES_POSITION_KEYWORDS.some((k) => pos.includes(k.toLowerCase()));
+}
+
+/**
+ * 是否出现在单位战报：销售相关岗位，或当月本单位有个人业绩（如服务中心等）
+ */
+export function shouldShowOnBattleReport(
+  person: { id: string; name: string; position?: string },
+  monthUnitSales: SalesRecord[],
+): boolean {
+  if (isSalesBattlePosition(person.position)) return true;
+  return getPersonalSales(person.id, monthUnitSales, person.name) > 0;
 }
 
 /**

@@ -7,7 +7,7 @@ import { formatCurrency, formatPercent, getYearMonth, getCurrentYearMonth } from
 import {
   filterByMonth,
   getPersonalSales,
-  isSalesBattlePosition,
+  shouldShowOnBattleReport,
   wasEmployedInMonth,
   EMPTY_SALARY,
 } from "@/lib/salary";
@@ -100,10 +100,13 @@ export default function SalesBattleReport() {
     });
   }, [personnel, unitId, yearMonth, salesRecords]);
 
-  // 战报仅展示销售相关岗位（排除组织部、售后等非销售岗）
+  // 战报：销售相关岗位 + 当月本单位有业绩的其他岗位（如服务中心）
   const battlePersonnel = useMemo(() => {
-    return unitPersonnel.filter((p) => isSalesBattlePosition(p.position));
-  }, [unitPersonnel]);
+    const monthUnitSales = filterByMonth(salesRecords, yearMonth).filter(
+      (r) => r.salesUnitId === unitId,
+    );
+    return unitPersonnel.filter((p) => shouldShowOnBattleReport(p, monthUnitSales));
+  }, [unitPersonnel, salesRecords, yearMonth, unitId]);
 
   // 当月销售记录
   const monthlyRecords = useMemo(() => {
@@ -142,7 +145,7 @@ export default function SalesBattleReport() {
 
   // 计算每个人员的战报行
   const battleRows = useMemo(() => {
-    // 1. 系统内在职销售岗位；个人业绩 = 本单位当月销售记录按任命人员汇总
+    // 1. 系统内在职销售岗，以及当月有业绩的其他岗位；个人业绩按任命人员汇总
     const rows = battlePersonnel.map((p) => {
       const personalSales = getPersonalSales(p.id, unitMonthlyRecords, p.name);
       const targetAmount = personnelTargets.get(p.id);
@@ -679,7 +682,7 @@ export default function SalesBattleReport() {
       <Card className="overflow-hidden">
         <div className="border-b bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
           展示所选月份在职期间的销售相关岗位（含当月后才离职人员）；
-          组织部、售后等非销售岗不显示。个人业绩按本单位销售记录归集。
+          销售岗默认展示；其他岗位当月有业绩也会显示（如服务中心）。个人业绩按本单位销售记录归集。
         </div>
         <div className="overflow-x-auto">
           <Table>
@@ -873,7 +876,7 @@ export default function SalesBattleReport() {
             </DialogTitle>
             <DialogDescription>
               为 {currentUnit?.name} 在 {yearMonth.split("-")[0]}年{yearMonth.split("-")[1]}月
-              录入销售岗位人员的业绩目标（非销售岗不在战报中显示，也不在此录入）。
+              录入战报人员的业绩目标（无业绩且非销售岗的人员不在战报中，也不在此录入）。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">
@@ -893,7 +896,7 @@ export default function SalesBattleReport() {
             ))}
             {battlePersonnel.length === 0 && (
               <p className="py-8 text-center text-sm text-muted-foreground">
-                该单位该月暂无销售岗位在职人员
+                该单位该月暂无战报人员（销售岗或有业绩人员）
               </p>
             )}
           </div>

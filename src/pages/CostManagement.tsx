@@ -688,6 +688,9 @@ export default function CostManagement() {
             <Calculator className="h-5 w-5 text-blue-600 shrink-0" />
             <h3 className="text-base font-semibold">
               自动计入人力成本 / 实时薪资（{selectedMonth} 月度）
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                按人员入离职（人事同步）判定在岗
+              </span>
             </h3>
             <Badge variant="outline" className="border-blue-200 text-blue-700">
               在岗 {onDutyCount} 人

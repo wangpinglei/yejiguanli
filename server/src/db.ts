@@ -117,6 +117,25 @@ function initSchema() {
       emergency_phone TEXT DEFAULT '',
       labor_company_id TEXT DEFAULT '',
       sales_company_id TEXT DEFAULT '',
+      company_tenure TEXT DEFAULT '',
+      regularization_date TEXT DEFAULT '',
+      employment_type TEXT DEFAULT '',
+      marital_status TEXT DEFAULT '',
+      native_place TEXT DEFAULT '',
+      household_register TEXT DEFAULT '',
+      id_address TEXT DEFAULT '',
+      graduation_date TEXT DEFAULT '',
+      emergency_relation TEXT DEFAULT '',
+      internship_start_date TEXT DEFAULT '',
+      internship_end_date TEXT DEFAULT '',
+      contract1_start_date TEXT DEFAULT '',
+      contract1_end_date TEXT DEFAULT '',
+      contract2_start_date TEXT DEFAULT '',
+      contract2_end_date TEXT DEFAULT '',
+      contract3_start_date TEXT DEFAULT '',
+      contract3_end_date TEXT DEFAULT '',
+      bank_belong TEXT DEFAULT '',
+      company_email TEXT DEFAULT '',
       updated_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (personnel_id) REFERENCES personnel(id) ON DELETE CASCADE
     );
@@ -391,12 +410,89 @@ function initSchema() {
   ensureColumns("hr_profiles", [
     { name: "labor_company_id", ddl: "labor_company_id TEXT DEFAULT ''" },
     { name: "sales_company_id", ddl: "sales_company_id TEXT DEFAULT ''" },
+    { name: "company_tenure", ddl: "company_tenure TEXT DEFAULT ''" },
+    { name: "regularization_date", ddl: "regularization_date TEXT DEFAULT ''" },
+    { name: "employment_type", ddl: "employment_type TEXT DEFAULT ''" },
+    { name: "marital_status", ddl: "marital_status TEXT DEFAULT ''" },
+    { name: "native_place", ddl: "native_place TEXT DEFAULT ''" },
+    { name: "household_register", ddl: "household_register TEXT DEFAULT ''" },
+    { name: "id_address", ddl: "id_address TEXT DEFAULT ''" },
+    { name: "graduation_date", ddl: "graduation_date TEXT DEFAULT ''" },
+    { name: "emergency_relation", ddl: "emergency_relation TEXT DEFAULT ''" },
+    { name: "internship_start_date", ddl: "internship_start_date TEXT DEFAULT ''" },
+    { name: "internship_end_date", ddl: "internship_end_date TEXT DEFAULT ''" },
+    { name: "contract1_start_date", ddl: "contract1_start_date TEXT DEFAULT ''" },
+    { name: "contract1_end_date", ddl: "contract1_end_date TEXT DEFAULT ''" },
+    { name: "contract2_start_date", ddl: "contract2_start_date TEXT DEFAULT ''" },
+    { name: "contract2_end_date", ddl: "contract2_end_date TEXT DEFAULT ''" },
+    { name: "contract3_start_date", ddl: "contract3_start_date TEXT DEFAULT ''" },
+    { name: "contract3_end_date", ddl: "contract3_end_date TEXT DEFAULT ''" },
+    { name: "bank_belong", ddl: "bank_belong TEXT DEFAULT ''" },
+    { name: "company_email", ddl: "company_email TEXT DEFAULT ''" },
   ]);
 
   // 将误挂在销售单位上的 labor_company_id 迁移为独立签署公司字典
   migrateLaborCompanyIdsFromSalesUnits();
+  // 迁移产生的「同名销售单位」签署公司会误导展示，清空后由人事重新维护真实签署公司
+  clearSalesUnitNamedLaborCompanies();
 }
 
+/**
+ * 清除「由销售单位名称迁移」出来的签署公司，并断开档案关联。
+ * 劳动合同签署公司 ≠ 销售单位，二者名称不应混用展示。
+ */
+function clearSalesUnitNamedLaborCompanies() {
+  const migrated = db
+    .prepare(
+      "SELECT id FROM labor_companies WHERE remark = ? OR remark LIKE ?",
+    )
+    .all("由原销售单位名称迁移", "%销售单位%迁移%") as Array<{ id: string }>;
+
+  // 仍指向 sales_units.id 的脏数据一并清空
+  const dangling = db
+    .prepare(`
+      SELECT h.id AS profile_id, h.labor_company_id
+      FROM hr_profiles h
+      WHERE h.labor_company_id != ''
+        AND NOT EXISTS (SELECT 1 FROM labor_companies lc WHERE lc.id = h.labor_company_id)
+        AND EXISTS (SELECT 1 FROM sales_units su WHERE su.id = h.labor_company_id)
+    `)
+    .all() as Array<{ profile_id: string; labor_company_id: string }>;
+
+  const clearProfile = db.prepare(
+    "UPDATE hr_profiles SET labor_company_id = '' WHERE labor_company_id = ?",
+  );
+  const deleteLabor = db.prepare("DELETE FROM labor_companies WHERE id = ?");
+
+  for (const row of migrated) {
+    clearProfile.run(row.id);
+    deleteLabor.run(row.id);
+  }
+  for (const row of dangling) {
+    db.prepare("UPDATE hr_profiles SET labor_company_id = '' WHERE id = ?").run(
+      row.profile_id,
+    );
+  }
+
+  // 名称与销售单位完全一致、且无自定义备注的签署公司：视为误迁残留，清空关联并删除
+  const sameName = db
+    .prepare(`
+      SELECT lc.id
+      FROM labor_companies lc
+      INNER JOIN sales_units su ON su.name = lc.name COLLATE NOCASE
+      WHERE IFNULL(lc.remark, '') = '' OR lc.remark LIKE '%销售单位%'
+    `)
+    .all() as Array<{ id: string }>;
+  for (const row of sameName) {
+    clearProfile.run(row.id);
+    deleteLabor.run(row.id);
+  }
+}
+
+/**
+ * 旧数据曾把 labor_company_id 填成销售单位 id。
+ * 劳动合同签署公司 ≠ 销售单位：直接清空错误关联，不再按销售单位名生成签署公司。
+ */
 function migrateLaborCompanyIdsFromSalesUnits() {
   const profiles = db
     .prepare(
@@ -405,33 +501,17 @@ function migrateLaborCompanyIdsFromSalesUnits() {
     .all() as Array<{ id: string; labor_company_id: string }>;
   if (profiles.length === 0) return;
 
-  const findUnit = db.prepare("SELECT id, name FROM sales_units WHERE id = ?");
+  const findUnit = db.prepare("SELECT id FROM sales_units WHERE id = ?");
   const findLaborById = db.prepare("SELECT id FROM labor_companies WHERE id = ?");
-  const findLaborByName = db.prepare(
-    "SELECT id FROM labor_companies WHERE name = ? COLLATE NOCASE",
-  );
-  const insertLabor = db.prepare(
-    "INSERT INTO labor_companies (id, name, remark) VALUES (?, ?, ?)",
-  );
-  const updateProfile = db.prepare(
-    "UPDATE hr_profiles SET labor_company_id = ? WHERE id = ?",
+  const clearProfile = db.prepare(
+    "UPDATE hr_profiles SET labor_company_id = '' WHERE id = ?",
   );
 
   for (const p of profiles) {
     if (findLaborById.get(p.labor_company_id)) continue;
-
-    const unit = findUnit.get(p.labor_company_id) as
-      | { id: string; name: string }
-      | undefined;
-    if (!unit) continue;
-
-    const byName = findLaborByName.get(unit.name) as { id: string } | undefined;
-    let laborId = byName?.id;
-    if (!laborId) {
-      laborId = generateId("lc");
-      insertLabor.run(laborId, unit.name, "由原销售单位名称迁移");
+    if (findUnit.get(p.labor_company_id)) {
+      clearProfile.run(p.id);
     }
-    updateProfile.run(laborId, p.id);
   }
 }
 
@@ -567,6 +647,25 @@ export function rowToHrProfile(row: any) {
     laborCompanyId: row.labor_company_id || "",
     laborCompanyName: row.labor_company_name || "",
     salesCompanyId: row.sales_company_id || "",
+    companyTenure: row.company_tenure || "",
+    regularizationDate: row.regularization_date || "",
+    employmentType: row.employment_type || "",
+    maritalStatus: row.marital_status || "",
+    nativePlace: row.native_place || "",
+    householdRegister: row.household_register || "",
+    idAddress: row.id_address || "",
+    graduationDate: row.graduation_date || "",
+    emergencyRelation: row.emergency_relation || "",
+    internshipStartDate: row.internship_start_date || "",
+    internshipEndDate: row.internship_end_date || "",
+    contract1StartDate: row.contract1_start_date || "",
+    contract1EndDate: row.contract1_end_date || "",
+    contract2StartDate: row.contract2_start_date || "",
+    contract2EndDate: row.contract2_end_date || "",
+    contract3StartDate: row.contract3_start_date || "",
+    contract3EndDate: row.contract3_end_date || "",
+    bankBelong: row.bank_belong || "",
+    companyEmail: row.company_email || "",
     updatedAt: row.updated_at || "",
     // 联动人员管理
     name: row.name || "",

@@ -4,7 +4,7 @@
 import {
   filterByMonth,
   getPersonalSales,
-  isSalesBattlePosition,
+  shouldShowOnBattleReport,
   wasEmployedInMonth,
   EMPTY_SALARY,
 } from '@/lib/salary'
@@ -84,9 +84,14 @@ export function buildUnitBattleReport(options: {
   } = options
 
   const unitPersonnel = getUnitPersonnel(personnel, salesRecords, salesUnitId, yearMonth)
-  const battlePersonnel = unitPersonnel.filter((p) => isSalesBattlePosition(p.position))
-  const monthlyRecords = filterByMonth(salesRecords, yearMonth)
-  const unitMonthlyRecords = monthlyRecords.filter((r) => r.salesUnitId === salesUnitId)
+  const monthUnitSales = filterByMonth(salesRecords, yearMonth).filter(
+    (r) => r.salesUnitId === salesUnitId,
+  )
+  // 销售岗 + 当月有业绩的其他岗位（如服务中心）
+  const battlePersonnel = unitPersonnel.filter((p) =>
+    shouldShowOnBattleReport(p, monthUnitSales),
+  )
+  const unitMonthlyRecords = monthUnitSales
   const teamTotal = unitMonthlyRecords.reduce((sum, r) => sum + r.totalAmount, 0)
 
   const unitTarget = performanceTargets.find(
