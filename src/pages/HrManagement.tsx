@@ -1180,7 +1180,7 @@ export default function HrManagementPage() {
                   )}
                   <TableHead
                     className={cn(
-                      "sticky z-10 min-w-[48px] bg-background",
+                      "sticky z-10 w-12 min-w-[48px] bg-background",
                       canEdit ? "left-10" : "left-0",
                     )}
                   >
@@ -1188,7 +1188,7 @@ export default function HrManagementPage() {
                   </TableHead>
                   <TableHead
                     className={cn(
-                      "sticky z-10 min-w-[64px] bg-background",
+                      "sticky z-10 w-[72px] min-w-[72px] bg-background",
                       canEdit ? "left-[88px]" : "left-12",
                     )}
                   >
@@ -1196,52 +1196,59 @@ export default function HrManagementPage() {
                   </TableHead>
                   <TableHead
                     className={cn(
-                      "sticky z-10 min-w-[88px] bg-background",
-                      canEdit ? "left-[152px]" : "left-[112px]",
+                      "sticky z-10 w-[96px] min-w-[96px] max-w-[96px] bg-background",
+                      canEdit ? "left-[160px]" : "left-[120px]",
                     )}
                   >
                     姓名
                   </TableHead>
-                  <TableHead>性别</TableHead>
-                  <TableHead>手机号</TableHead>
-                  <TableHead>劳动合同签署公司</TableHead>
-                  <TableHead>业绩归属单位</TableHead>
-                  <TableHead>职位</TableHead>
-                  <TableHead>用工性质</TableHead>
-                  <TableHead>入职日期</TableHead>
-                  <TableHead>离职日期</TableHead>
-                  <TableHead>司龄</TableHead>
-                  <TableHead>转正日期</TableHead>
-                  <TableHead>合同提醒到期</TableHead>
-                  <TableHead>合同提醒</TableHead>
-                  <TableHead>劳动合同1起</TableHead>
-                  <TableHead>劳动合同1止</TableHead>
-                  <TableHead>劳动合同2起</TableHead>
-                  <TableHead>劳动合同2止</TableHead>
-                  <TableHead>劳动合同3起</TableHead>
-                  <TableHead>劳动合同3止</TableHead>
+                  <TableHead
+                    className={cn(
+                      "sticky z-10 w-[52px] min-w-[52px] bg-background shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)]",
+                      canEdit ? "left-[256px]" : "left-[216px]",
+                    )}
+                  >
+                    性别
+                  </TableHead>
+                  <TableHead className="min-w-[110px]">手机号</TableHead>
+                  <TableHead className="min-w-[140px]">劳动合同签署公司</TableHead>
+                  <TableHead className="min-w-[120px]">业绩归属单位</TableHead>
+                  <TableHead className="min-w-[80px]">职位</TableHead>
+                  <TableHead className="min-w-[80px]">用工性质</TableHead>
+                  <TableHead className="min-w-[110px]">入职日期</TableHead>
+                  <TableHead className="min-w-[110px]">离职日期</TableHead>
+                  <TableHead className="min-w-[64px]">司龄</TableHead>
+                  <TableHead className="min-w-[110px]">转正日期</TableHead>
+                  <TableHead className="min-w-[110px]">合同提醒到期</TableHead>
+                  <TableHead className="min-w-[100px]">合同提醒</TableHead>
+                  <TableHead className="min-w-[110px]">劳动合同1起</TableHead>
+                  <TableHead className="min-w-[110px]">劳动合同1止</TableHead>
+                  <TableHead className="min-w-[110px]">劳动合同2起</TableHead>
+                  <TableHead className="min-w-[110px]">劳动合同2止</TableHead>
+                  <TableHead className="min-w-[110px]">劳动合同3起</TableHead>
+                  <TableHead className="min-w-[110px]">劳动合同3止</TableHead>
                   <TableHead className="min-w-[120px]">签署文档</TableHead>
-                  <TableHead>身份证</TableHead>
-                  <TableHead>出生年月</TableHead>
-                  <TableHead>年龄</TableHead>
-                  <TableHead>民族</TableHead>
-                  <TableHead>婚姻状况</TableHead>
-                  <TableHead>籍贯</TableHead>
-                  <TableHead>户籍</TableHead>
-                  <TableHead>是否党员</TableHead>
-                  <TableHead>学历</TableHead>
-                  <TableHead>毕业院校</TableHead>
-                  <TableHead>毕业时间</TableHead>
-                  <TableHead>专业</TableHead>
-                  <TableHead>企业邮箱</TableHead>
-                  <TableHead>银行卡号</TableHead>
-                  <TableHead>所属银行</TableHead>
-                  <TableHead>开户行</TableHead>
-                  <TableHead>身份证地址</TableHead>
-                  <TableHead>联系地址</TableHead>
-                  <TableHead>紧急联系人</TableHead>
-                  <TableHead>关系</TableHead>
-                  <TableHead>紧急电话</TableHead>
+                  <TableHead className="min-w-[160px]">身份证</TableHead>
+                  <TableHead className="min-w-[110px]">出生年月</TableHead>
+                  <TableHead className="min-w-[52px]">年龄</TableHead>
+                  <TableHead className="min-w-[52px]">民族</TableHead>
+                  <TableHead className="min-w-[80px]">婚姻状况</TableHead>
+                  <TableHead className="min-w-[80px]">籍贯</TableHead>
+                  <TableHead className="min-w-[80px]">户籍</TableHead>
+                  <TableHead className="min-w-[80px]">是否党员</TableHead>
+                  <TableHead className="min-w-[64px]">学历</TableHead>
+                  <TableHead className="min-w-[120px]">毕业院校</TableHead>
+                  <TableHead className="min-w-[110px]">毕业时间</TableHead>
+                  <TableHead className="min-w-[100px]">专业</TableHead>
+                  <TableHead className="min-w-[140px]">企业邮箱</TableHead>
+                  <TableHead className="min-w-[160px]">银行卡号</TableHead>
+                  <TableHead className="min-w-[100px]">所属银行</TableHead>
+                  <TableHead className="min-w-[120px]">开户行</TableHead>
+                  <TableHead className="min-w-[140px]">身份证地址</TableHead>
+                  <TableHead className="min-w-[140px]">联系地址</TableHead>
+                  <TableHead className="min-w-[100px]">紧急联系人</TableHead>
+                  <TableHead className="min-w-[64px]">关系</TableHead>
+                  <TableHead className="min-w-[110px]">紧急电话</TableHead>
                   {canEdit && <TableHead className="min-w-[100px]">操作</TableHead>}
                 </TableRow>
               </TableHeader>
@@ -1282,7 +1289,7 @@ export default function HrManagementPage() {
                       )}
                       <TableCell
                         className={cn(
-                          "sticky z-10 bg-background",
+                          "sticky z-10 w-12 min-w-[48px] bg-background",
                           canEdit ? "left-10" : "left-0",
                         )}
                       >
@@ -1290,7 +1297,7 @@ export default function HrManagementPage() {
                       </TableCell>
                       <TableCell
                         className={cn(
-                          "sticky z-10 bg-background",
+                          "sticky z-10 w-[72px] min-w-[72px] bg-background",
                           canEdit ? "left-[88px]" : "left-12",
                         )}
                       >
@@ -1300,13 +1307,21 @@ export default function HrManagementPage() {
                       </TableCell>
                       <TableCell
                         className={cn(
-                          "sticky z-10 bg-background font-medium",
-                          canEdit ? "left-[152px]" : "left-[112px]",
+                          "sticky z-10 w-[96px] min-w-[96px] max-w-[96px] truncate bg-background font-medium",
+                          canEdit ? "left-[160px]" : "left-[120px]",
                         )}
+                        title={row.name}
                       >
                         {row.name}
                       </TableCell>
-                      <TableCell>{row.gender || "—"}</TableCell>
+                      <TableCell
+                        className={cn(
+                          "sticky z-10 w-[52px] min-w-[52px] bg-background shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)]",
+                          canEdit ? "left-[256px]" : "left-[216px]",
+                        )}
+                      >
+                        {row.gender || "—"}
+                      </TableCell>
                       <TableCell>{row.phone || "—"}</TableCell>
                       <TableCell>
                         {row.laborCompanyName
