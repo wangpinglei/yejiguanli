@@ -130,7 +130,8 @@ export const hrProfilesApi = {
   update: (id: string, data: Partial<import("@/types").HrProfile>) =>
     api.put<import("@/types").HrProfile>(`/hr-profiles/${id}`, data),
   delete: (id: string) => api.delete(`/hr-profiles/${id}`),
-  clearAll: () => api.post<{ deleted: number }>("/hr-profiles/clear-all"),
+  batchDelete: (ids: string[]) =>
+    api.post<{ deleted: number }>("/hr-profiles/batch-delete", { ids }),
   batchCreate: () =>
     api.post<{ created: number; skipped: number; totalPersonnel: number }>(
       "/hr-profiles/batch-create",

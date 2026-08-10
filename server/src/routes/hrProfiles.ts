@@ -69,33 +69,157 @@ function fixExcelLongNumber(v: unknown): string {
   return s;
 }
 
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/** 统一输出 YYYY-MM-DD；无法识别则返回空，避免截断乱码 */
+function ymd(y: number, m: number, d: number): string {
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return "";
+  if (y < 1900 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31) return "";
+  return `${y}-${pad2(m)}-${pad2(d)}`;
+}
+
+function fromExcelSerial(n: number): string {
+  if (!Number.isFinite(n) || n < 1 || n >= 80000) return "";
+  const utc = Date.UTC(1899, 11, 30) + Math.round(n) * 86400000;
+  const dt = new Date(utc);
+  return ymd(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate());
+}
+
+/**
+ * 导入/入库日期统一为 YYYY-MM-DD（年-月-日）
+ * 兼容：Date、Excel 序列、ISO、中文年月日、美式 M/D/Y、年月
+ */
 function normalizeDate(v: unknown): string {
+  if (v === undefined || v === null || v === "") return "";
+
   if (v instanceof Date && !Number.isNaN(v.getTime())) {
-    const y = v.getFullYear();
-    const m = String(v.getMonth() + 1).padStart(2, "0");
-    const d = String(v.getDate()).padStart(2, "0");
-    return `${y}-${m}-${d}`;
+    // 用本地年月日，避免 JSON ISO 时区把「当天 0 点」写成前一天
+    return ymd(v.getFullYear(), v.getMonth() + 1, v.getDate());
   }
-  if (typeof v === "number" && Number.isFinite(v) && v > 20000 && v < 80000) {
-    // Excel 序列日
-    const utc = Date.UTC(1899, 11, 30) + Math.round(v) * 86400000;
-    const dt = new Date(utc);
-    const y = dt.getUTCFullYear();
-    const m = String(dt.getUTCMonth() + 1).padStart(2, "0");
-    const d = String(dt.getUTCDate()).padStart(2, "0");
-    return `${y}-${m}-${d}`;
+
+  if (typeof v === "number" && Number.isFinite(v)) {
+    if (v > 2000 && v < 80000) return fromExcelSerial(v);
+    return "";
   }
+
   const s = text(v);
-  if (!s) return "";
+  if (!s || s === "-" || s === "—" || s === "/" || s === "无") return "";
+
+  // ISO 带时间：按本地日历日（修正 UTC 偏移串日）
+  if (/^\d{4}-\d{2}-\d{2}T/.test(s)) {
+    const dt = new Date(s);
+    if (!Number.isNaN(dt.getTime())) {
+      return ymd(dt.getFullYear(), dt.getMonth() + 1, dt.getDate());
+    }
+  }
+
+  // 纯 YYYY-MM-DD
+  const isoDay = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoDay) return ymd(+isoDay[1], +isoDay[2], +isoDay[3]);
+
+  // 2024年1月15日 / 2024年1月
+  const cn = s.match(/(\d{4})\s*年\s*(\d{1,2})\s*月(?:\s*(\d{1,2})\s*日)?/);
+  if (cn) return ymd(+cn[1], +cn[2], cn[3] ? +cn[3] : 1);
+
+  // 2024/1/15、2024.01.15、2024-1-5
+  const ymdSlash = s.match(/(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
+  if (ymdSlash) return ymd(+ymdSlash[1], +ymdSlash[2], +ymdSlash[3]);
+
+  // 2024/01、2024.1（出生年月）
   const ym = s.match(/^(\d{4})[\/\-.](\d{1,2})$/);
-  if (ym) {
-    return `${ym[1]}-${ym[2].padStart(2, "0")}-01`;
+  if (ym) return ymd(+ym[1], +ym[2], 1);
+
+  // 1/15/2024、01-15-2024（美式）
+  const mdy = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  if (mdy) return ymd(+mdy[3], +mdy[1], +mdy[2]);
+
+  // 1/15/24
+  const mdy2 = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2})$/);
+  if (mdy2) {
+    const yy = Number(mdy2[3]);
+    const y = yy >= 70 ? 1900 + yy : 2000 + yy;
+    return ymd(y, +mdy2[1], +mdy2[2]);
   }
-  const m = s.match(/(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
-  if (m) {
-    return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+
+  // YYYYMMDD
+  const compact = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compact) return ymd(+compact[1], +compact[2], +compact[3]);
+
+  // Excel 序列数字符串
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const n = Number(s);
+    if (n > 2000 && n < 80000) return fromExcelSerial(n);
   }
-  return s.slice(0, 10);
+
+  // 英文日期串等
+  const parsed = Date.parse(s);
+  if (!Number.isNaN(parsed)) {
+    const dt = new Date(parsed);
+    return ymd(dt.getFullYear(), dt.getMonth() + 1, dt.getDate());
+  }
+
+  return "";
+}
+
+/** 解析「起止」合并单元格，如 2020.01.01-2023.12.31 / 2020年1月1日至2023年12月31日 */
+function parseDateRange(v: unknown): { start: string; end: string } {
+  const s = text(v);
+  if (!s) return { start: "", end: "" };
+
+  const byKeyword = s.split(/\s*(?:至|到|~|～|—|–)\s*/).map((p) => p.trim()).filter(Boolean);
+  if (byKeyword.length >= 2) {
+    return {
+      start: normalizeDate(byKeyword[0]),
+      end: normalizeDate(byKeyword[byKeyword.length - 1]),
+    };
+  }
+
+  const tokens = [
+    ...s.matchAll(
+      /(\d{4}\s*年\s*\d{1,2}\s*月(?:\s*\d{1,2}\s*日)?|\d{4}[\/\-.]\d{1,2}[\/\-.]\d{1,2}|\d{4}[\/\-.]\d{1,2}|\d{8})/g,
+    ),
+  ].map((m) => m[1]);
+  if (tokens.length >= 2) {
+    return {
+      start: normalizeDate(tokens[0]),
+      end: normalizeDate(tokens[tokens.length - 1]),
+    };
+  }
+  if (tokens.length === 1) {
+    return { start: normalizeDate(tokens[0]), end: "" };
+  }
+  return { start: normalizeDate(s), end: "" };
+}
+
+function firstNormalizedDate(...vals: unknown[]): string {
+  for (const v of vals) {
+    if (v === undefined || v === null || text(v) === "") continue;
+    const d = normalizeDate(v);
+    if (d) return d;
+  }
+  return "";
+}
+
+/** 优先用独立开始/结束列；否则从「起止」合并列拆分 */
+function resolveStartEndDates(
+  startCandidates: unknown[],
+  endCandidates: unknown[],
+  rangeCandidates: unknown[],
+): { start: string; end: string } {
+  let start = firstNormalizedDate(...startCandidates);
+  let end = firstNormalizedDate(...endCandidates);
+  if (start && end) return { start, end };
+
+  for (const rangeVal of rangeCandidates) {
+    if (rangeVal === undefined || rangeVal === null || text(rangeVal) === "") continue;
+    const range = parseDateRange(rangeVal);
+    if (!start && range.start) start = range.start;
+    if (!end && range.end) end = range.end;
+    if (start && end) break;
+  }
+  return { start, end };
 }
 
 function parseOptionalNumber(v: unknown): number | null {
@@ -433,14 +557,22 @@ router.post("/batch-create", requireModuleEdit("hr_management"), (_req, res) => 
   res.json({ created, skipped, totalPersonnel: people.length });
 });
 
-// POST /api/hr-profiles/clear-all — 一键清空人事档案（不删人员管理）
-router.post("/clear-all", requireModuleEdit("hr_management"), (_req, res) => {
+// POST /api/hr-profiles/batch-delete — 批量删除所选人事档案（不删人员管理）
+router.post("/batch-delete", requireModuleEdit("hr_management"), (req, res) => {
+  const ids = Array.isArray(req.body?.ids)
+    ? (req.body.ids as unknown[]).map((id) => String(id || "").trim()).filter(Boolean)
+    : [];
+  if (ids.length === 0) {
+    return res.status(400).json({ error: "请选择要删除的人事档案" });
+  }
   const db = getDb();
-  const before = (
-    db.prepare("SELECT COUNT(*) AS c FROM hr_profiles").get() as { c: number }
-  ).c;
-  db.prepare("DELETE FROM hr_profiles").run();
-  res.json({ deleted: before });
+  const del = db.prepare("DELETE FROM hr_profiles WHERE id = ?");
+  let deleted = 0;
+  for (const id of ids) {
+    const info = del.run(id);
+    deleted += Number(info.changes || 0);
+  }
+  res.json({ deleted });
 });
 
 // POST /api/hr-profiles — 为已有人员建档
@@ -774,14 +906,35 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
 
       const party = mapPartyMember(pick(row, ["是否党员", "政治面貌", "politicalStatus"]));
 
+      const internship = resolveStartEndDates(
+        [pick(row, ["实习协议开始时间", "实习协议起始", "internshipStartDate"])],
+        [pick(row, ["实习协议到期时间", "实习协议终止", "internshipEndDate"])],
+        [pick(row, ["实习协议起止", "实习协议起止时间", "实习期"])],
+      );
+      const contract1 = resolveStartEndDates(
+        [pick(row, ["劳动合同1开始时间", "劳动合同1起始", "合同1开始"])],
+        [pick(row, ["劳动合同1到期时间", "劳动合同1终止", "合同1到期"])],
+        [pick(row, ["劳动合同1起止", "劳动合同1起止时间", "合同1起止"])],
+      );
+      const contract2 = resolveStartEndDates(
+        [pick(row, ["劳动合同2开始时间", "劳动合同2起始", "合同2开始"])],
+        [pick(row, ["劳动合同2到期时间", "劳动合同2终止", "合同2到期"])],
+        [pick(row, ["劳动合同2起止", "劳动合同2起止时间", "合同2起止"])],
+      );
+      const contract3 = resolveStartEndDates(
+        [pick(row, ["劳动合同3开始时间", "劳动合同3起始", "合同3开始"])],
+        [pick(row, ["劳动合同3到期时间", "劳动合同3终止", "合同3到期"])],
+        [pick(row, ["劳动合同3起止", "劳动合同3起止时间", "合同3起止"])],
+      );
+
       const fields = upsertHrFields({
         gender: pick(row, ["性别", "gender"]),
-        contract1StartDate: pick(row, ["劳动合同1开始时间", "劳动合同1起始"]),
-        contract1EndDate: pick(row, ["劳动合同1到期时间", "劳动合同1终止"]),
-        contract2StartDate: pick(row, ["劳动合同2开始时间", "劳动合同2起始"]),
-        contract2EndDate: pick(row, ["劳动合同2到期时间", "劳动合同2终止"]),
-        contract3StartDate: pick(row, ["劳动合同3开始时间", "劳动合同3起始"]),
-        contract3EndDate: pick(row, ["劳动合同3到期时间", "劳动合同3终止"]),
+        contract1StartDate: contract1.start,
+        contract1EndDate: contract1.end,
+        contract2StartDate: contract2.start,
+        contract2EndDate: contract2.end,
+        contract3StartDate: contract3.start,
+        contract3EndDate: contract3.end,
         contractStartDate: pick(row, [
           "合同起始日期",
           "合同开始日期",
@@ -821,8 +974,8 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
         idAddress: pick(row, ["身份证地址", "idAddress"]),
         graduationDate: pick(row, ["毕业时间", "graduationDate"]),
         emergencyRelation: pick(row, ["与本人关系", "关系", "emergencyRelation"]),
-        internshipStartDate: pick(row, ["实习协议开始时间", "internshipStartDate"]),
-        internshipEndDate: pick(row, ["实习协议到期时间", "internshipEndDate"]),
+        internshipStartDate: internship.start,
+        internshipEndDate: internship.end,
         companyEmail: pick(row, ["企业邮箱", "邮箱", "email", "companyEmail"]),
       });
 

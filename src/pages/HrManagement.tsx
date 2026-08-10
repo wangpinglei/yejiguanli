@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import {
   AlertTriangle,
-  Eraser,
   Zap,
   FileUp,
   Pencil,
@@ -14,6 +13,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -145,6 +145,73 @@ function getAlertClass(alert: ContractAlert): string {
   return "";
 }
 
+function formatLocalYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** 导入单元格：Date / Excel 序列 → YYYY-MM-DD，避免 JSON 时区串日 */
+function normalizeImportCell(headerKey: string, v: unknown): unknown {
+  if (v === undefined || v === null || v === "") return "";
+  const isDateCol = /日期|时间|年月|起止|出生|入职|离职|转正|毕业|合同|实习/.test(
+    headerKey,
+  );
+  if (v instanceof Date && !Number.isNaN(v.getTime())) {
+    return formatLocalYmd(v);
+  }
+  if (
+    isDateCol &&
+    typeof v === "number" &&
+    Number.isFinite(v) &&
+    v > 2000 &&
+    v < 80000
+  ) {
+    const utc = Date.UTC(1899, 11, 30) + Math.round(v) * 86400000;
+    const dt = new Date(utc);
+    return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+  }
+  if (typeof v === "string") {
+    const s = v.trim();
+    if (isDateCol && /^\d{4}-\d{2}-\d{2}T/.test(s)) {
+      const dt = new Date(s);
+      if (!Number.isNaN(dt.getTime())) return formatLocalYmd(dt);
+    }
+  }
+  return v;
+}
+
+/** 列表展示：统一成 YYYY-MM-DD */
+function displayDate(v: string | null | undefined): string {
+  if (!v) return "—";
+  const s = String(v).trim();
+  if (!s) return "—";
+  if (/^\d{4}-\d{2}-\d{2}T/.test(s)) {
+    const dt = new Date(s);
+    if (!Number.isNaN(dt.getTime())) return formatLocalYmd(dt);
+  }
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const cn = s.match(/(\d{4})\s*年\s*(\d{1,2})\s*月(?:\s*(\d{1,2})\s*日)?/);
+  if (cn) {
+    const d = cn[3] ? cn[3].padStart(2, "0") : "01";
+    return `${cn[1]}-${cn[2].padStart(2, "0")}-${d}`;
+  }
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const n = Number(s);
+    if (n > 2000 && n < 80000) {
+      const utc = Date.UTC(1899, 11, 30) + Math.round(n) * 86400000;
+      const dt = new Date(utc);
+      return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+    }
+  }
+  const slash = s.match(/(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
+  if (slash) {
+    return `${slash[1]}-${slash[2].padStart(2, "0")}-${slash[3].padStart(2, "0")}`;
+  }
+  return s;
+}
+
 export default function HrManagementPage() {
   const { personnel, salesUnits, refreshAll } = useData();
   const { canEditHr, canViewHr, isReadOnly } = usePermissions();
@@ -166,7 +233,8 @@ export default function HrManagementPage() {
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
   const [batchCreating, setBatchCreating] = useState(false);
-  const [clearing, setClearing] = useState(false);
+  const [deletingSelected, setDeletingSelected] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [importResult, setImportResult] = useState<string>("");
 
   const unitNameMap = useMemo(() => {
@@ -200,6 +268,7 @@ export default function HrManagementPage() {
       setList(profiles);
       setReminders(rem);
       setLaborCompanies(companies);
+      setSelectedIds([]);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "加载失败";
       alert(msg);
@@ -401,33 +470,62 @@ export default function HrManagementPage() {
     if (!confirm(`确认删除「${row.name}」的人事档案？不会删除人员管理中的人员。`)) return;
     try {
       await hrProfilesApi.delete(row.id);
+      setSelectedIds((prev) => prev.filter((id) => id !== row.id));
       await loadData();
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : "删除失败");
     }
   }
 
-  async function handleClearAll() {
-    if (list.length === 0) {
-      alert("当前没有人事档案可清空");
+  const filteredIds = useMemo(() => filtered.map((r) => r.id), [filtered]);
+  const selectedInFiltered = useMemo(
+    () => selectedIds.filter((id) => filteredIds.includes(id)),
+    [selectedIds, filteredIds],
+  );
+  const isAllFilteredSelected =
+    filteredIds.length > 0 && selectedInFiltered.length === filteredIds.length;
+  const isSomeFilteredSelected =
+    selectedInFiltered.length > 0 && !isAllFilteredSelected;
+
+  function handleToggleSelectAll(checked: boolean | "indeterminate") {
+    if (checked === true) {
+      setSelectedIds((prev) => Array.from(new Set([...prev, ...filteredIds])));
       return;
     }
-    const ok = confirm(
-      `确认清空全部 ${list.length} 条人事档案？\n\n只删除人事档案，不会删除「人员管理」中的人员。此操作不可恢复。`,
-    );
-    if (!ok) return;
-    const ok2 = confirm("再次确认：真的要清空全部人事档案吗？");
-    if (!ok2) return;
-    setClearing(true);
+    setSelectedIds((prev) => prev.filter((id) => !filteredIds.includes(id)));
+  }
+
+  function handleToggleSelectRow(id: string, checked: boolean | "indeterminate") {
+    if (checked === true) {
+      setSelectedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+      return;
+    }
+    setSelectedIds((prev) => prev.filter((x) => x !== id));
+  }
+
+  async function handleDeleteSelected() {
+    if (selectedIds.length === 0) {
+      alert("请先勾选要删除的人事档案");
+      return;
+    }
+    if (
+      !confirm(
+        `确认删除已选 ${selectedIds.length} 条人事档案？\n不会删除「人员管理」中的人员。此操作不可恢复。`,
+      )
+    ) {
+      return;
+    }
+    setDeletingSelected(true);
     setImportResult("");
     try {
-      const result = await hrProfilesApi.clearAll();
-      setImportResult(`已清空人事档案 ${result.deleted} 条（人员管理未改动）`);
+      const result = await hrProfilesApi.batchDelete(selectedIds);
+      setImportResult(`已删除人事档案 ${result.deleted} 条（人员管理未改动）`);
+      setSelectedIds([]);
       await loadData();
     } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : "清空失败");
+      alert(e instanceof Error ? e.message : "删除失败");
     } finally {
-      setClearing(false);
+      setDeletingSelected(false);
     }
   }
 
@@ -436,6 +534,7 @@ export default function HrManagementPage() {
     setImportResult("");
     try {
       const buf = await file.arrayBuffer();
+      // cellDates + raw：拿到 Date/序列数，再规范成 YYYY-MM-DD，避免 locale 串格式
       const wb = XLSX.read(buf, { type: "array", cellDates: true });
       // 优先用含「姓名」列的工作表
       let sheet = wb.Sheets[wb.SheetNames[0]];
@@ -443,7 +542,7 @@ export default function HrManagementPage() {
         const s = wb.Sheets[name];
         const preview = XLSX.utils.sheet_to_json<Record<string, unknown>>(s, {
           defval: "",
-          raw: false,
+          raw: true,
         });
         if (
           preview.some((r) =>
@@ -457,12 +556,13 @@ export default function HrManagementPage() {
       const rows = XLSX.utils
         .sheet_to_json<Record<string, unknown>>(sheet, {
           defval: "",
-          raw: false,
+          raw: true,
         })
         .map((row) => {
           const out: Record<string, unknown> = {};
           for (const [k, v] of Object.entries(row)) {
-            out[String(k).replace(/\s+/g, "").replace(/\u00a0/g, "")] = v;
+            const key = String(k).replace(/\s+/g, "").replace(/\u00a0/g, "");
+            out[key] = normalizeImportCell(key, v);
           }
           return out;
         })
@@ -532,7 +632,7 @@ export default function HrManagementPage() {
                 }}
               />
               <Button
-                disabled={batchCreating || loading || clearing}
+                disabled={batchCreating || loading || deletingSelected}
                 onClick={() => void handleBatchCreate()}
               >
                 <Zap className="mr-2 h-4 w-4" />
@@ -544,7 +644,7 @@ export default function HrManagementPage() {
               </Button>
               <Button
                 variant="outline"
-                disabled={importing || clearing}
+                disabled={importing || deletingSelected}
                 onClick={() => fileInputRef.current?.click()}
               >
                 <FileUp className="mr-2 h-4 w-4" />
@@ -552,11 +652,15 @@ export default function HrManagementPage() {
               </Button>
               <Button
                 variant="destructive"
-                disabled={clearing || loading || list.length === 0}
-                onClick={() => void handleClearAll()}
+                disabled={deletingSelected || loading || selectedIds.length === 0}
+                onClick={() => void handleDeleteSelected()}
               >
-                <Eraser className="mr-2 h-4 w-4" />
-                {clearing ? "清空中…" : "清空人事档案"}
+                <Trash2 className="mr-2 h-4 w-4" />
+                {deletingSelected
+                  ? "删除中…"
+                  : selectedIds.length > 0
+                    ? `删除所选（${selectedIds.length}）`
+                    : "删除所选"}
               </Button>
             </div>
           ) : undefined
@@ -653,9 +757,44 @@ export default function HrManagementPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="sticky left-0 z-10 min-w-[48px] bg-background">序号</TableHead>
-                  <TableHead className="sticky left-12 z-10 min-w-[64px] bg-background">状态</TableHead>
-                  <TableHead className="sticky left-[112px] z-10 min-w-[88px] bg-background">
+                  {canEdit && (
+                    <TableHead className="sticky left-0 z-10 w-10 bg-background px-2">
+                      <Checkbox
+                        checked={
+                          isAllFilteredSelected
+                            ? true
+                            : isSomeFilteredSelected
+                              ? "indeterminate"
+                              : false
+                        }
+                        onCheckedChange={handleToggleSelectAll}
+                        aria-label="全选当前列表"
+                        disabled={filtered.length === 0 || deletingSelected}
+                      />
+                    </TableHead>
+                  )}
+                  <TableHead
+                    className={cn(
+                      "sticky z-10 min-w-[48px] bg-background",
+                      canEdit ? "left-10" : "left-0",
+                    )}
+                  >
+                    序号
+                  </TableHead>
+                  <TableHead
+                    className={cn(
+                      "sticky z-10 min-w-[64px] bg-background",
+                      canEdit ? "left-[88px]" : "left-12",
+                    )}
+                  >
+                    状态
+                  </TableHead>
+                  <TableHead
+                    className={cn(
+                      "sticky z-10 min-w-[88px] bg-background",
+                      canEdit ? "left-[152px]" : "left-[112px]",
+                    )}
+                  >
                     姓名
                   </TableHead>
                   <TableHead>性别</TableHead>
@@ -703,26 +842,62 @@ export default function HrManagementPage() {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={42} className="py-10 text-center text-muted-foreground">
+                    <TableCell
+                      colSpan={canEdit ? 44 : 42}
+                      className="py-10 text-center text-muted-foreground"
+                    >
                       加载中…
                     </TableCell>
                   </TableRow>
                 ) : filtered.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={42} className="py-10 text-center text-muted-foreground">
+                    <TableCell
+                      colSpan={canEdit ? 44 : 42}
+                      className="py-10 text-center text-muted-foreground"
+                    >
                       暂无人事档案。可点「一键建档」或「批量导入表格」（匹配不到人会自动建挂靠人员）。
                     </TableCell>
                   </TableRow>
                 ) : (
                   filtered.map((row, index) => (
-                    <TableRow key={row.id}>
-                      <TableCell className="sticky left-0 z-10 bg-background">{index + 1}</TableCell>
-                      <TableCell className="sticky left-12 z-10 bg-background">
+                    <TableRow
+                      key={row.id}
+                      data-state={selectedIds.includes(row.id) ? "selected" : undefined}
+                    >
+                      {canEdit && (
+                        <TableCell className="sticky left-0 z-10 bg-background px-2">
+                          <Checkbox
+                            checked={selectedIds.includes(row.id)}
+                            onCheckedChange={(checked) => handleToggleSelectRow(row.id, checked)}
+                            aria-label={`选择 ${row.name}`}
+                            disabled={deletingSelected}
+                          />
+                        </TableCell>
+                      )}
+                      <TableCell
+                        className={cn(
+                          "sticky z-10 bg-background",
+                          canEdit ? "left-10" : "left-0",
+                        )}
+                      >
+                        {index + 1}
+                      </TableCell>
+                      <TableCell
+                        className={cn(
+                          "sticky z-10 bg-background",
+                          canEdit ? "left-[88px]" : "left-12",
+                        )}
+                      >
                         <Badge variant={row.status === "active" ? "default" : "secondary"}>
                           {row.status === "active" ? "在职" : "离职"}
                         </Badge>
                       </TableCell>
-                      <TableCell className="sticky left-[112px] z-10 bg-background font-medium">
+                      <TableCell
+                        className={cn(
+                          "sticky z-10 bg-background font-medium",
+                          canEdit ? "left-[152px]" : "left-[112px]",
+                        )}
+                      >
                         {row.name}
                       </TableCell>
                       <TableCell>{row.gender || "—"}</TableCell>
@@ -737,19 +912,22 @@ export default function HrManagementPage() {
                       </TableCell>
                       <TableCell>{row.position || "—"}</TableCell>
                       <TableCell>{row.employmentType || "—"}</TableCell>
-                      <TableCell>{row.hireDate || "—"}</TableCell>
-                      <TableCell>{row.resignDate || "—"}</TableCell>
+                      <TableCell className="tabular-nums">{displayDate(row.hireDate)}</TableCell>
+                      <TableCell className="tabular-nums">{displayDate(row.resignDate)}</TableCell>
                       <TableCell>{row.companyTenure || "—"}</TableCell>
-                      <TableCell>{row.regularizationDate || "—"}</TableCell>
+                      <TableCell className="tabular-nums">
+                        {displayDate(row.regularizationDate)}
+                      </TableCell>
                       <TableCell
                         className={cn(
+                          "tabular-nums",
                           row.contractAlert === "due60" || row.contractAlert === "due30"
                             ? "bg-amber-100"
                             : "",
                           row.contractAlert === "expired" ? "bg-red-100" : "",
                         )}
                       >
-                        {row.contractEndDate || "—"}
+                        {displayDate(row.contractEndDate)}
                       </TableCell>
                       <TableCell>
                         {row.contractAlert !== "ok" && row.contractAlert !== "empty" ? (
@@ -765,14 +943,26 @@ export default function HrManagementPage() {
                           "—"
                         )}
                       </TableCell>
-                      <TableCell>{row.contract1StartDate || "—"}</TableCell>
-                      <TableCell>{row.contract1EndDate || "—"}</TableCell>
-                      <TableCell>{row.contract2StartDate || "—"}</TableCell>
-                      <TableCell>{row.contract2EndDate || "—"}</TableCell>
-                      <TableCell>{row.contract3StartDate || "—"}</TableCell>
-                      <TableCell>{row.contract3EndDate || "—"}</TableCell>
+                      <TableCell className="tabular-nums">
+                        {displayDate(row.contract1StartDate)}
+                      </TableCell>
+                      <TableCell className="tabular-nums">
+                        {displayDate(row.contract1EndDate)}
+                      </TableCell>
+                      <TableCell className="tabular-nums">
+                        {displayDate(row.contract2StartDate)}
+                      </TableCell>
+                      <TableCell className="tabular-nums">
+                        {displayDate(row.contract2EndDate)}
+                      </TableCell>
+                      <TableCell className="tabular-nums">
+                        {displayDate(row.contract3StartDate)}
+                      </TableCell>
+                      <TableCell className="tabular-nums">
+                        {displayDate(row.contract3EndDate)}
+                      </TableCell>
                       <TableCell className="whitespace-nowrap">{row.idNumber || "—"}</TableCell>
-                      <TableCell>{row.birthDate || "—"}</TableCell>
+                      <TableCell className="tabular-nums">{displayDate(row.birthDate)}</TableCell>
                       <TableCell>{row.age ?? "—"}</TableCell>
                       <TableCell>{row.ethnicity || "—"}</TableCell>
                       <TableCell>{row.maritalStatus || "—"}</TableCell>
@@ -781,7 +971,9 @@ export default function HrManagementPage() {
                       <TableCell>{row.politicalStatus || "—"}</TableCell>
                       <TableCell>{row.education || "—"}</TableCell>
                       <TableCell>{row.school || "—"}</TableCell>
-                      <TableCell>{row.graduationDate || "—"}</TableCell>
+                      <TableCell className="tabular-nums">
+                        {displayDate(row.graduationDate)}
+                      </TableCell>
                       <TableCell>{row.major || "—"}</TableCell>
                       <TableCell>{row.companyEmail || "—"}</TableCell>
                       <TableCell className="whitespace-nowrap">{row.bankAccount || "—"}</TableCell>
