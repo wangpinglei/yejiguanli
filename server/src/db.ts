@@ -136,6 +136,7 @@ function initSchema() {
       contract3_end_date TEXT DEFAULT '',
       bank_belong TEXT DEFAULT '',
       company_email TEXT DEFAULT '',
+      signed_documents TEXT DEFAULT '[]',
       updated_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (personnel_id) REFERENCES personnel(id) ON DELETE CASCADE
     );
@@ -434,12 +435,68 @@ function initSchema() {
     { name: "contract3_end_date", ddl: "contract3_end_date TEXT DEFAULT ''" },
     { name: "bank_belong", ddl: "bank_belong TEXT DEFAULT ''" },
     { name: "company_email", ddl: "company_email TEXT DEFAULT ''" },
+    { name: "signed_documents", ddl: "signed_documents TEXT DEFAULT '[]'" },
   ]);
 
   // 将误挂在销售单位上的 labor_company_id 迁移为独立签署公司字典
   migrateLaborCompanyIdsFromSalesUnits();
   // 迁移产生的「同名销售单位」签署公司会误导展示，清空后由人事重新维护真实签署公司
   clearSalesUnitNamedLaborCompanies();
+  // 清理人事导入曾自动创建的「人事挂靠」人员（人事档案一并删）；手动录入的人员管理数据保留
+  cleanupHrAffiliateAutoCreated();
+}
+
+/**
+ * 清理「人事挂靠」自动建人残留：
+ * - 删除该单位下的人员（人事档案随 personnel_id 一并删）
+ * - 不碰其他销售单位下手动录入的人员管理数据
+ * - 最后删除空的「人事挂靠」销售单位
+ */
+function cleanupHrAffiliateAutoCreated() {
+  const AFFILIATE_NAME = "人事挂靠";
+  const unit = db
+    .prepare("SELECT id FROM sales_units WHERE name = ? COLLATE NOCASE")
+    .get(AFFILIATE_NAME) as { id: string } | undefined;
+  if (!unit) return;
+
+  const people = db
+    .prepare("SELECT id FROM personnel WHERE sales_unit_id = ?")
+    .all(unit.id) as Array<{ id: string }>;
+
+  const delHr = db.prepare("DELETE FROM hr_profiles WHERE personnel_id = ?");
+  const delPpc = db.prepare("DELETE FROM product_person_commissions WHERE personnel_id = ?");
+  const delAdj = db.prepare("DELETE FROM monthly_adjustments WHERE personnel_id = ?");
+  const delPerson = db.prepare("DELETE FROM personnel WHERE id = ?");
+
+  for (const p of people) {
+    delHr.run(p.id);
+    try {
+      delPpc.run(p.id);
+    } catch {
+      /* 表可能不存在于极旧库 */
+    }
+    try {
+      delAdj.run(p.id);
+    } catch {
+      /* ignore */
+    }
+    // 销售记录保留金额，仅断开人员关联，避免误删业绩
+    try {
+      db.prepare(
+        "UPDATE sales_records SET personnel_id = '' WHERE personnel_id = ?",
+      ).run(p.id);
+    } catch {
+      /* ignore */
+    }
+    delPerson.run(p.id);
+  }
+
+  const remain = db
+    .prepare("SELECT COUNT(*) AS c FROM personnel WHERE sales_unit_id = ?")
+    .get(unit.id) as { c: number };
+  if (!remain?.c) {
+    db.prepare("DELETE FROM sales_units WHERE id = ?").run(unit.id);
+  }
 }
 
 /**
@@ -604,6 +661,34 @@ export function rowToPersonnel(row: any) {
 
 export type ContractAlert = "expired" | "due30" | "due60" | "ok" | "empty";
 
+export interface SignedDocument {
+  id: string;
+  fileName: string;
+  storedName: string;
+  mimeType: string;
+  size: number;
+  uploadedAt: string;
+}
+
+export function parseSignedDocuments(raw: unknown): SignedDocument[] {
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw || "[]") : raw;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item) => item && typeof item === "object" && item.id && item.fileName)
+      .map((item) => ({
+        id: String(item.id),
+        fileName: String(item.fileName),
+        storedName: String(item.storedName || item.fileName),
+        mimeType: String(item.mimeType || "application/octet-stream"),
+        size: Number(item.size) || 0,
+        uploadedAt: String(item.uploadedAt || ""),
+      }));
+  } catch {
+    return [];
+  }
+}
+
 export function getContractAlert(endDate: string | null | undefined, today = new Date()): {
   contractAlert: ContractAlert;
   contractDaysLeft: number | null;
@@ -683,6 +768,7 @@ export function rowToHrProfile(row: any) {
     contract3EndDate: row.contract3_end_date || "",
     bankBelong: row.bank_belong || "",
     companyEmail: row.company_email || "",
+    signedDocuments: parseSignedDocuments(row.signed_documents),
     updatedAt: row.updated_at || "",
     // 联动人员管理
     name: row.name || "",

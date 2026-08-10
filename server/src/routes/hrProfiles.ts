@@ -1,10 +1,14 @@
 import { Router } from "express";
+import fs from "fs";
+import path from "path";
 import {
   getDb,
   generateId,
   rowToHrProfile,
   calcAgeFromIdOrBirth,
   getContractAlert,
+  parseSignedDocuments,
+  type SignedDocument,
 } from "../db";
 import { authMiddleware } from "../auth";
 import {
@@ -13,9 +17,19 @@ import {
 } from "../middleware";
 
 const router = Router();
+const HR_DOCS_DIR = path.join(__dirname, "..", "data", "hr-docs");
+const MAX_DOC_BYTES = 12 * 1024 * 1024;
 
-/** 导入找不到对应销售单位时，人员挂到此单位（自动创建） */
-const HR_AFFILIATE_UNIT_NAME = "人事挂靠";
+function ensureHrDocsDir() {
+  if (!fs.existsSync(HR_DOCS_DIR)) {
+    fs.mkdirSync(HR_DOCS_DIR, { recursive: true });
+  }
+}
+
+function sanitizeFileName(name: string): string {
+  const base = path.basename(name || "document").replace(/[\\/:*?"<>|]+/g, "_");
+  return base.slice(0, 120) || "document";
+}
 
 router.use(authMiddleware);
 router.use(requireModuleView("hr_management"));
@@ -424,60 +438,6 @@ function resolveUnitIdByName(db: ReturnType<typeof getDb>, name: string): string
   return "";
 }
 
-/** 获取或创建「人事挂靠」销售单位 */
-function getOrCreateAffiliateUnitId(db: ReturnType<typeof getDb>): string {
-  const existing = db
-    .prepare("SELECT id FROM sales_units WHERE name = ? COLLATE NOCASE")
-    .get(HR_AFFILIATE_UNIT_NAME) as { id: string } | undefined;
-  if (existing) return existing.id;
-  const id = generateId("su");
-  db.prepare(`
-    INSERT INTO sales_units (id, name, type, description)
-    VALUES (?, ?, 'company', ?)
-  `).run(id, HR_AFFILIATE_UNIT_NAME, "人事导入自动创建，用于挂靠非本销售体系人员");
-  return id;
-}
-
-/** 导入单位列：能匹配到销售单位则用；否则落到「人事挂靠」 */
-function resolveImportUnitId(db: ReturnType<typeof getDb>, unitName: string): string {
-  if (unitName.trim()) {
-    const id = resolveUnitIdByName(db, unitName);
-    if (id) return id;
-  }
-  return getOrCreateAffiliateUnitId(db);
-}
-
-function createPersonnelStub(
-  db: ReturnType<typeof getDb>,
-  options: {
-    name: string;
-    salesUnitId: string;
-    phone?: string;
-    position?: string;
-    hireDate?: string;
-    resignDate?: string | null;
-    status?: string;
-  },
-): any {
-  const id = generateId("p");
-  db.prepare(`
-    INSERT INTO personnel (
-      id, name, sales_unit_id, position, phone, email, salary,
-      social_insurance, housing_fund, hire_date, resign_date, status
-    ) VALUES (?, ?, ?, ?, ?, '', '{}', 0, 0, ?, ?, ?)
-  `).run(
-    id,
-    options.name.trim(),
-    options.salesUnitId,
-    options.position || "",
-    options.phone || "",
-    options.hireDate || "",
-    options.resignDate ?? null,
-    options.status || "active",
-  );
-  return db.prepare("SELECT * FROM personnel WHERE id = ?").get(id);
-}
-
 /** 劳动签署公司：按名称查找或自动创建字典项（labor_companies） */
 function resolveOrCreateLaborCompanyId(
   db: ReturnType<typeof getDb>,
@@ -496,6 +456,39 @@ function resolveOrCreateLaborCompanyId(
     "",
   );
   return id;
+}
+
+function findLaborCompanyId(
+  db: ReturnType<typeof getDb>,
+  name: string,
+): string {
+  const n = name.trim();
+  if (!n) return "";
+  const existing = db
+    .prepare("SELECT id FROM labor_companies WHERE name = ? COLLATE NOCASE")
+    .get(n) as { id: string } | undefined;
+  return existing?.id || "";
+}
+
+function getProfileSignedDocs(
+  db: ReturnType<typeof getDb>,
+  profileId: string,
+): { row: any; docs: SignedDocument[] } | null {
+  const row = db.prepare("SELECT * FROM hr_profiles WHERE id = ?").get(profileId) as
+    | any
+    | undefined;
+  if (!row) return null;
+  return { row, docs: parseSignedDocuments(row.signed_documents) };
+}
+
+function saveProfileSignedDocs(
+  db: ReturnType<typeof getDb>,
+  profileId: string,
+  docs: SignedDocument[],
+) {
+  db.prepare(
+    "UPDATE hr_profiles SET signed_documents = ?, updated_at = datetime('now') WHERE id = ?",
+  ).run(JSON.stringify(docs), profileId);
 }
 
 // GET /api/hr-profiles（有人事权限即可看全量，不按销售单位过滤）
@@ -557,7 +550,7 @@ router.post("/batch-create", requireModuleEdit("hr_management"), (_req, res) => 
   res.json({ created, skipped, totalPersonnel: people.length });
 });
 
-// POST /api/hr-profiles/batch-delete — 批量删除所选人事档案（不删人员管理）
+// POST /api/hr-profiles/batch-delete — 批量删除所选人事档案（保留人员管理手动录入数据）
 router.post("/batch-delete", requireModuleEdit("hr_management"), (req, res) => {
   const ids = Array.isArray(req.body?.ids)
     ? (req.body.ids as unknown[]).map((id) => String(id || "").trim()).filter(Boolean)
@@ -718,8 +711,8 @@ function pick(row: ImportRow, keys: string[]): unknown {
 }
 
 /**
- * 按姓名（+可选单位）匹配人员。
- * needCreate=true 时由导入自动建挂靠人员；同名多人仍报错。
+ * 按姓名（+可选单位）匹配人员管理中的已有人员。
+ * 不再自动新建人员：人事与人员管理关联但不互相造人。
  */
 function findPersonnel(
   db: ReturnType<typeof getDb>,
@@ -729,11 +722,9 @@ function findPersonnel(
   const all = db.prepare("SELECT * FROM personnel").all() as any[];
   const nameTrim = name.trim();
   const candidates = all.filter((p) => String(p.name || "").trim() === nameTrim);
-  const resolvedUnitId = resolveImportUnitId(db, unitName);
+  const exactUnitId = unitName.trim() ? resolveUnitIdByName(db, unitName) : "";
 
   if (unitName.trim()) {
-    const exactUnitId = resolveUnitIdByName(db, unitName);
-    const filterUnitId = exactUnitId || resolvedUnitId;
     const matched = exactUnitId
       ? candidates.filter((p) => p.sales_unit_id === exactUnitId)
       : candidates;
@@ -741,24 +732,29 @@ function findPersonnel(
       return {
         person: matched[0],
         reason: null as string | null,
-        unitId: matched[0].sales_unit_id || filterUnitId,
-        needCreate: false,
+        unitId: matched[0].sales_unit_id || exactUnitId,
       };
     }
     if (matched.length > 1) {
       return {
         person: null,
         reason: `姓名「${name}」在单位「${unitName}」下匹配到多人`,
-        unitId: filterUnitId,
-        needCreate: false,
+        unitId: exactUnitId,
       };
     }
-    // 无人：可自动建挂靠人（单位能匹配则用该单位，否则人事挂靠）
+    if (candidates.length === 0) {
+      return {
+        person: null,
+        reason: `人员管理中不存在「${name}」，请先在人员管理添加后再导入`,
+        unitId: exactUnitId,
+      };
+    }
     return {
       person: null,
-      reason: null as string | null,
-      unitId: filterUnitId,
-      needCreate: true,
+      reason: exactUnitId
+        ? `人员管理中「${name}」不在单位「${unitName}」下`
+        : `未找到销售单位「${unitName}」，且姓名「${name}」无法唯一匹配`,
+      unitId: "",
     };
   }
 
@@ -766,23 +762,20 @@ function findPersonnel(
     return {
       person: candidates[0],
       reason: null as string | null,
-      unitId: candidates[0].sales_unit_id || resolvedUnitId,
-      needCreate: false,
+      unitId: candidates[0].sales_unit_id || "",
     };
   }
   if (candidates.length === 0) {
     return {
       person: null,
-      reason: null as string | null,
-      unitId: resolvedUnitId,
-      needCreate: true,
+      reason: `人员管理中不存在「${name}」，请先在人员管理添加后再导入`,
+      unitId: "",
     };
   }
   return {
     person: null,
     reason: `姓名「${name}」匹配到多人，请补充「部门/销售单位公司」列`,
-    unitId: resolvedUnitId,
-    needCreate: false,
+    unitId: "",
   };
 }
 
@@ -792,6 +785,98 @@ function isImportRowEmpty(row: ImportRow): boolean {
     (v) => v === undefined || v === null || String(v).trim() === "",
   );
 }
+
+// POST /api/hr-profiles/:id/documents — 上传签署文档（base64）
+router.post("/:id/documents", requireModuleEdit("hr_management"), (req, res) => {
+  const { id } = req.params;
+  const fileName = sanitizeFileName(text(req.body?.fileName));
+  const mimeType = text(req.body?.mimeType, "application/octet-stream");
+  const contentBase64 = text(req.body?.contentBase64);
+  if (!contentBase64) {
+    return res.status(400).json({ error: "缺少文件内容" });
+  }
+
+  const db = getDb();
+  const profile = getProfileSignedDocs(db, id);
+  if (!profile) return res.status(404).json({ error: "人事档案不存在" });
+
+  let buffer: Buffer;
+  try {
+    const raw = contentBase64.includes(",")
+      ? contentBase64.split(",").pop() || ""
+      : contentBase64;
+    buffer = Buffer.from(raw, "base64");
+  } catch {
+    return res.status(400).json({ error: "文件内容无效" });
+  }
+  if (!buffer.length) return res.status(400).json({ error: "文件为空" });
+  if (buffer.length > MAX_DOC_BYTES) {
+    return res.status(400).json({ error: "单个文件不能超过 12MB" });
+  }
+
+  ensureHrDocsDir();
+  const docId = generateId("hrdoc");
+  const ext = path.extname(fileName) || "";
+  const storedName = `${id}_${docId}${ext}`;
+  fs.writeFileSync(path.join(HR_DOCS_DIR, storedName), buffer);
+
+  const doc: SignedDocument = {
+    id: docId,
+    fileName,
+    storedName,
+    mimeType,
+    size: buffer.length,
+    uploadedAt: new Date().toISOString(),
+  };
+  const next = [...profile.docs, doc];
+  saveProfileSignedDocs(db, id, next);
+
+  const row = db.prepare(`${HR_SELECT} WHERE h.id = ?`).get(id);
+  res.json(rowToHrProfile(row));
+});
+
+// GET /api/hr-profiles/:id/documents/:docId — 下载签署文档（需登录）
+router.get("/:id/documents/:docId", (req, res) => {
+  const { id, docId } = req.params;
+  const db = getDb();
+  const profile = getProfileSignedDocs(db, id);
+  if (!profile) return res.status(404).json({ error: "人事档案不存在" });
+  const doc = profile.docs.find((d) => d.id === docId);
+  if (!doc) return res.status(404).json({ error: "文档不存在" });
+
+  const filePath = path.join(HR_DOCS_DIR, doc.storedName);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: "文件已丢失，请重新上传" });
+  }
+  res.setHeader("Content-Type", doc.mimeType || "application/octet-stream");
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename*=UTF-8''${encodeURIComponent(doc.fileName)}`,
+  );
+  fs.createReadStream(filePath).pipe(res);
+});
+
+// DELETE /api/hr-profiles/:id/documents/:docId
+router.delete("/:id/documents/:docId", requireModuleEdit("hr_management"), (req, res) => {
+  const { id, docId } = req.params;
+  const db = getDb();
+  const profile = getProfileSignedDocs(db, id);
+  if (!profile) return res.status(404).json({ error: "人事档案不存在" });
+  const doc = profile.docs.find((d) => d.id === docId);
+  if (!doc) return res.status(404).json({ error: "文档不存在" });
+
+  const next = profile.docs.filter((d) => d.id !== docId);
+  saveProfileSignedDocs(db, id, next);
+  const filePath = path.join(HR_DOCS_DIR, doc.storedName);
+  try {
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  } catch {
+    // 忽略磁盘删除失败，元数据已更新
+  }
+
+  const row = db.prepare(`${HR_SELECT} WHERE h.id = ?`).get(id);
+  res.json(rowToHrProfile(row));
+});
 
 // POST /api/hr-profiles/import
 router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
@@ -806,11 +891,52 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
       });
     }
 
+    const options = (req.body?.options && typeof req.body.options === "object"
+      ? req.body.options
+      : {}) as {
+      laborCompanyId?: string;
+      laborCompanyName?: string;
+      preferSelectedLaborCompany?: boolean;
+      autoCreateLaborCompany?: boolean;
+      forceStatus?: "active" | "inactive" | "";
+    };
+    const preferSelected = Boolean(options.preferSelectedLaborCompany);
+    const autoCreateLabor =
+      options.autoCreateLaborCompany === undefined
+        ? true
+        : Boolean(options.autoCreateLaborCompany);
+    const forceStatus =
+      options.forceStatus === "active" || options.forceStatus === "inactive"
+        ? options.forceStatus
+        : "";
+
     const db = getDb();
+    let defaultLaborCompanyId = text(options.laborCompanyId);
+    const selectedLaborName = text(options.laborCompanyName);
+    if (!defaultLaborCompanyId && selectedLaborName) {
+      defaultLaborCompanyId = autoCreateLabor
+        ? resolveOrCreateLaborCompanyId(db, selectedLaborName)
+        : findLaborCompanyId(db, selectedLaborName);
+      if (!defaultLaborCompanyId && selectedLaborName) {
+        return res.status(400).json({
+          error: autoCreateLabor
+            ? "无法创建签署公司"
+            : `签署公司「${selectedLaborName}」不存在，请先创建或勾选自动创建`,
+        });
+      }
+    }
+    if (defaultLaborCompanyId) {
+      const exists = db
+        .prepare("SELECT id FROM labor_companies WHERE id = ?")
+        .get(defaultLaborCompanyId);
+      if (!exists) {
+        return res.status(400).json({ error: "所选签署公司不存在" });
+      }
+    }
+
     const result = {
       success: 0,
       failed: 0,
-      createdPersonnel: 0,
       errors: [] as Array<{ row: number; name: string; reason: string }>,
     };
 
@@ -859,30 +985,23 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
           : normalizeDate(resignDateRaw);
       const statusRaw = text(pick(row, ["状态", "status"]));
       let status = "active";
-      if (statusRaw.includes("离")) status = "inactive";
-      else if (statusRaw.includes("在") || statusRaw.includes("职")) status = "active";
-      else if (resignDate) status = "inactive";
-
-      let { person, reason, unitId, needCreate } = findPersonnel(db, name, unitName);
-      if (!person && needCreate) {
-        person = createPersonnelStub(db, {
-          name,
-          salesUnitId: unitId || getOrCreateAffiliateUnitId(db),
-          phone,
-          position: text(pick(row, ["职位", "岗位", "position"])),
-          hireDate,
-          resignDate: resignDate ?? null,
-          status,
-        });
-        unitId = person.sales_unit_id || unitId;
-        result.createdPersonnel += 1;
+      if (forceStatus) {
+        status = forceStatus;
+      } else if (statusRaw.includes("离")) {
+        status = "inactive";
+      } else if (statusRaw.includes("在") || statusRaw.includes("职")) {
+        status = "active";
+      } else if (resignDate) {
+        status = "inactive";
       }
+
+      const { person, reason, unitId } = findPersonnel(db, name, unitName);
       if (!person) {
         result.failed += 1;
         result.errors.push({
           row: excelRow,
           name,
-          reason: reason || "匹配失败",
+          reason: reason || "人员管理中不存在，请先在人员管理添加后再导入",
         });
         continue;
       }
@@ -896,9 +1015,25 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
         "laborCompany",
       ]));
       const salesCompanyId = unitId || person.sales_unit_id || "";
-      const laborCompanyId = laborName
-        ? resolveOrCreateLaborCompanyId(db, laborName)
-        : "";
+      let laborCompanyId = "";
+      if (preferSelected && defaultLaborCompanyId) {
+        laborCompanyId = defaultLaborCompanyId;
+      } else if (laborName) {
+        laborCompanyId = autoCreateLabor
+          ? resolveOrCreateLaborCompanyId(db, laborName)
+          : findLaborCompanyId(db, laborName);
+        if (!laborCompanyId && laborName && !autoCreateLabor) {
+          result.failed += 1;
+          result.errors.push({
+            row: excelRow,
+            name,
+            reason: `签署公司「${laborName}」不在字典中`,
+          });
+          continue;
+        }
+      } else if (defaultLaborCompanyId) {
+        laborCompanyId = defaultLaborCompanyId;
+      }
 
       const bankBelong = text(pick(row, ["所属银行", "bankBelong"]));
       const bankBranch = text(pick(row, ["开户行信息", "开户行", "bankName"]));
@@ -990,10 +1125,28 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
         }
 
         let personnelStatus = person.status || status;
-        if (statusRaw.includes("离")) personnelStatus = "inactive";
-        else if (statusRaw.includes("在") || statusRaw.includes("职")) personnelStatus = "active";
-        else if (resignDate) personnelStatus = "inactive";
-        else if (statusRaw) personnelStatus = status;
+        let nextResign: string | null | undefined = resignDate;
+        let touchResign = resignDate !== undefined ? 1 : 0;
+
+        if (forceStatus === "active") {
+          personnelStatus = "active";
+          nextResign = "";
+          touchResign = 1;
+        } else if (forceStatus === "inactive") {
+          personnelStatus = "inactive";
+          if (resignDate !== undefined) {
+            nextResign = resignDate;
+            touchResign = 1;
+          }
+        } else if (statusRaw.includes("离")) {
+          personnelStatus = "inactive";
+        } else if (statusRaw.includes("在") || statusRaw.includes("职")) {
+          personnelStatus = "active";
+        } else if (resignDate) {
+          personnelStatus = "inactive";
+        } else if (statusRaw) {
+          personnelStatus = status;
+        }
 
         const personPosition = text(pick(row, ["职位", "岗位", "position"]));
         db.prepare(`
@@ -1007,8 +1160,8 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
           WHERE id = ?
         `).run(
           hireDate,
-          resignDate !== undefined ? 1 : 0,
-          resignDate ?? null,
+          touchResign,
+          nextResign ?? null,
           personnelStatus,
           personPosition,
           personPosition,

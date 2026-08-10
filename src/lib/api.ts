@@ -148,13 +148,29 @@ export const hrProfilesApi = {
     api.post<{ created: number; skipped: number; totalPersonnel: number }>(
       "/hr-profiles/batch-create",
     ),
-  importRows: (rows: Record<string, unknown>[]) =>
+  importRows: (
+    rows: Record<string, unknown>[],
+    options?: {
+      laborCompanyId?: string;
+      laborCompanyName?: string;
+      preferSelectedLaborCompany?: boolean;
+      autoCreateLaborCompany?: boolean;
+      forceStatus?: "active" | "inactive" | "";
+    },
+  ) =>
     api.post<{
       success: number;
       failed: number;
-      createdPersonnel?: number;
       errors: Array<{ row: number; name: string; reason: string }>;
-    }>("/hr-profiles/import", { rows }),
+    }>("/hr-profiles/import", { rows, options }),
+  uploadDocument: (
+    id: string,
+    data: { fileName: string; contentBase64: string; mimeType?: string },
+  ) => api.post<import("@/types").HrProfile>(`/hr-profiles/${id}/documents`, data),
+  deleteDocument: (id: string, docId: string) =>
+    api.delete<import("@/types").HrProfile>(`/hr-profiles/${id}/documents/${docId}`),
+  downloadDocumentUrl: (id: string, docId: string) =>
+    `${API_BASE}/hr-profiles/${id}/documents/${docId}`,
 };
 
 export const laborCompaniesApi = {

@@ -107,6 +107,16 @@ export interface LaborCompany {
 
 export type ContractAlert = "expired" | "due30" | "due60" | "ok" | "empty";
 
+/** 人事档案签署文档（劳动合同扫描件等） */
+export interface SignedDocument {
+  id: string;
+  fileName: string;
+  storedName: string;
+  mimeType: string;
+  size: number;
+  uploadedAt: string;
+}
+
 /** 人事档案（机密字段 + 联动人员管理字段） */
 export interface HrProfile {
   id: string;
@@ -151,6 +161,7 @@ export interface HrProfile {
   contract3EndDate: string;
   bankBelong: string;
   companyEmail: string;
+  signedDocuments: SignedDocument[];
   updatedAt?: string;
   // 联动人员管理（只读展示；改单位请到人员管理）
   name: string;

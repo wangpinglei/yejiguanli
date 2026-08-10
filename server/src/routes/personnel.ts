@@ -284,14 +284,36 @@ router.put("/:id", requireEditPermission, (req, res) => {
   res.json(rowToPersonnel(row));
 });
 
-// DELETE /api/personnel/:id - 删除人员
+// DELETE /api/personnel/:id - 删除人员（同步删除人事档案；人员管理手动数据由调用方确认）
 router.delete("/:id", requireEditPermission, (req, res) => {
   const { id } = req.params;
   const db = getDb();
-  const result = db.prepare("DELETE FROM personnel WHERE id = ?").run(id);
-  if (result.changes === 0) {
+  const existing = db.prepare("SELECT id FROM personnel WHERE id = ?").get(id);
+  if (!existing) {
     return res.status(404).json({ error: "人员不存在" });
   }
+
+  // 显式删除人事档案（与 FK CASCADE 双保险），不保留孤立人事记录
+  db.prepare("DELETE FROM hr_profiles WHERE personnel_id = ?").run(id);
+  try {
+    db.prepare("DELETE FROM product_person_commissions WHERE personnel_id = ?").run(id);
+  } catch {
+    /* ignore */
+  }
+  try {
+    db.prepare("DELETE FROM monthly_adjustments WHERE personnel_id = ?").run(id);
+  } catch {
+    /* ignore */
+  }
+  try {
+    db.prepare(
+      "UPDATE sales_records SET personnel_id = '' WHERE personnel_id = ?",
+    ).run(id);
+  } catch {
+    /* ignore */
+  }
+
+  db.prepare("DELETE FROM personnel WHERE id = ?").run(id);
   res.json({ message: "删除成功" });
 });
 

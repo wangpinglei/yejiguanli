@@ -2,11 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import {
   AlertTriangle,
-  Zap,
+  Download,
   FileUp,
+  Paperclip,
   Pencil,
   Search,
   Trash2,
+  Upload,
+  Zap,
 } from "lucide-react";
 
 import { PageHeader } from "@/components/PageHeader";
@@ -40,11 +43,26 @@ import {
 } from "@/components/ui/table";
 import { useData } from "@/context/DataContext";
 import { usePermissions } from "@/hooks/usePermissions";
-import { hrProfilesApi, laborCompaniesApi } from "@/lib/api";
+import { hrProfilesApi, laborCompaniesApi, getToken } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import type { ContractAlert, HrProfile, HrReminders, LaborCompany } from "@/types";
+import type {
+  ContractAlert,
+  HrProfile,
+  HrReminders,
+  LaborCompany,
+  SignedDocument,
+} from "@/types";
 
 type ContractFilter = "all" | "due60" | "due30" | "expired" | "empty";
+type ImportForceStatus = "table" | "active" | "inactive";
+
+type ImportOptionsForm = {
+  laborCompanyId: string;
+  laborCompanyName: string;
+  preferSelectedLaborCompany: boolean;
+  autoCreateLaborCompany: boolean;
+  forceStatus: ImportForceStatus;
+};
 
 type HrForm = {
   personnelId: string;
@@ -233,10 +251,20 @@ export default function HrManagementPage() {
   const [newLaborName, setNewLaborName] = useState("");
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importOptions, setImportOptions] = useState<ImportOptionsForm>({
+    laborCompanyId: "",
+    laborCompanyName: "",
+    preferSelectedLaborCompany: true,
+    autoCreateLaborCompany: true,
+    forceStatus: "table",
+  });
   const [batchCreating, setBatchCreating] = useState(false);
   const [deletingSelected, setDeletingSelected] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [importResult, setImportResult] = useState<string>("");
+  const [docUploading, setDocUploading] = useState(false);
+  const docInputRef = useRef<HTMLInputElement>(null);
 
   const unitNameMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -526,7 +554,7 @@ export default function HrManagementPage() {
     }
     if (
       !confirm(
-        `确认删除已选 ${selectedIds.length} 条人事档案？\n不会删除「人员管理」中的人员。此操作不可恢复。`,
+        `确认删除已选 ${selectedIds.length} 条人事档案？\n人员管理中手动录入的人员数据会保留。此操作不可恢复。`,
       )
     ) {
       return;
@@ -535,7 +563,7 @@ export default function HrManagementPage() {
     setImportResult("");
     try {
       const result = await hrProfilesApi.batchDelete(selectedIds);
-      setImportResult(`已删除人事档案 ${result.deleted} 条（人员管理未改动）`);
+      setImportResult(`已删除人事档案 ${result.deleted} 条（人员管理手动数据已保留）`);
       setSelectedIds([]);
       await loadData();
     } catch (e: unknown) {
@@ -588,13 +616,21 @@ export default function HrManagementPage() {
         alert("表格无数据，请确认第一行是表头（含「姓名」列）");
         return;
       }
-      const result = await hrProfilesApi.importRows(rows);
-      const createdPart =
-        (result as { createdPersonnel?: number }).createdPersonnel
-          ? `，自动新建人员 ${(result as { createdPersonnel?: number }).createdPersonnel} 人`
-          : "";
+
+      const selectedName =
+        importOptions.laborCompanyName.trim()
+        || laborCompanies.find((c) => c.id === importOptions.laborCompanyId)?.name
+        || "";
+      const result = await hrProfilesApi.importRows(rows, {
+        laborCompanyId: importOptions.laborCompanyId || undefined,
+        laborCompanyName: selectedName || undefined,
+        preferSelectedLaborCompany: importOptions.preferSelectedLaborCompany,
+        autoCreateLaborCompany: importOptions.autoCreateLaborCompany,
+        forceStatus:
+          importOptions.forceStatus === "table" ? "" : importOptions.forceStatus,
+      });
       setImportResult(
-        `成功 ${result.success} 条，失败 ${result.failed} 条${createdPart}` +
+        `成功 ${result.success} 条，失败 ${result.failed} 条` +
           (result.errors.length
             ? `。失败明细：${result.errors
                 .slice(0, 10)
@@ -602,6 +638,9 @@ export default function HrManagementPage() {
                 .join("；")}${result.errors.length > 10 ? "…" : ""}`
             : ""),
       );
+      setImportDialogOpen(false);
+      const companies = await laborCompaniesApi.list();
+      setLaborCompanies(companies);
       await loadData();
       await refreshAll();
     } catch (e: unknown) {
@@ -611,6 +650,96 @@ export default function HrManagementPage() {
     } finally {
       setImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  function openImportDialog() {
+    setImportOptions((prev) => ({
+      ...prev,
+      laborCompanyId: laborCompanyFilter !== "all" && laborCompanyFilter !== "empty"
+        ? laborCompanyFilter
+        : prev.laborCompanyId,
+      laborCompanyName:
+        laborCompanyFilter !== "all" && laborCompanyFilter !== "empty"
+          ? (laborCompanies.find((c) => c.id === laborCompanyFilter)?.name || "")
+          : prev.laborCompanyName,
+      forceStatus:
+        statusFilter === "active" || statusFilter === "inactive"
+          ? statusFilter
+          : prev.forceStatus,
+    }));
+    setImportDialogOpen(true);
+  }
+
+  function patchListProfile(updated: HrProfile) {
+    setList((prev) => prev.map((row) => (row.id === updated.id ? updated : row)));
+    setEditing((prev) => (prev && prev.id === updated.id ? updated : prev));
+  }
+
+  async function handleUploadDocument(file: File) {
+    if (!editing) return;
+    if (file.size > 12 * 1024 * 1024) {
+      alert("单个文件不能超过 12MB");
+      return;
+    }
+    setDocUploading(true);
+    try {
+      const contentBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(new Error("读取文件失败"));
+        reader.readAsDataURL(file);
+      });
+      const updated = await hrProfilesApi.uploadDocument(editing.id, {
+        fileName: file.name,
+        contentBase64,
+        mimeType: file.type || "application/octet-stream",
+      });
+      patchListProfile(updated);
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "上传失败");
+    } finally {
+      setDocUploading(false);
+      if (docInputRef.current) docInputRef.current.value = "";
+    }
+  }
+
+  async function handleDeleteDocument(doc: SignedDocument) {
+    if (!editing) return;
+    if (!confirm(`确认删除文档「${doc.fileName}」？`)) return;
+    try {
+      const updated = await hrProfilesApi.deleteDocument(editing.id, doc.id);
+      patchListProfile(updated);
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "删除失败");
+    }
+  }
+
+  async function handleDownloadDocument(profileId: string, doc: SignedDocument) {
+    try {
+      const token = getToken();
+      const res = await fetch(hrProfilesApi.downloadDocumentUrl(profileId, doc.id), {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      if (!res.ok) {
+        const raw = await res.text();
+        let msg = "下载失败";
+        try {
+          msg = JSON.parse(raw)?.error || msg;
+        } catch {
+          /* ignore */
+        }
+        throw new Error(msg);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = doc.fileName;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "下载失败");
     }
   }
 
@@ -633,7 +762,7 @@ export default function HrManagementPage() {
     <div className="space-y-4 p-6">
       <PageHeader
         title="人事管理"
-        description="劳动合同签署公司与销售单位是两套概念。入离职以人事为准并同步人员管理；薪酬与提成在人员管理。"
+        description="人事档案与人员管理关联但不互相造人：入离职可同步到已关联人员（停成本）；分销与提成只在人员管理设置。签署公司≠销售单位。"
         action={
           canEdit ? (
             <div className="flex flex-wrap gap-2">
@@ -661,7 +790,7 @@ export default function HrManagementPage() {
               <Button
                 variant="outline"
                 disabled={importing || deletingSelected}
-                onClick={() => fileInputRef.current?.click()}
+                onClick={openImportDialog}
               >
                 <FileUp className="mr-2 h-4 w-4" />
                 {importing ? "导入中…" : "批量导入表格"}
@@ -845,6 +974,7 @@ export default function HrManagementPage() {
                   <TableHead>劳动合同2止</TableHead>
                   <TableHead>劳动合同3起</TableHead>
                   <TableHead>劳动合同3止</TableHead>
+                  <TableHead className="min-w-[120px]">签署文档</TableHead>
                   <TableHead>身份证</TableHead>
                   <TableHead>出生年月</TableHead>
                   <TableHead>年龄</TableHead>
@@ -873,7 +1003,7 @@ export default function HrManagementPage() {
                 {loading ? (
                   <TableRow>
                     <TableCell
-                      colSpan={canEdit ? 44 : 42}
+                      colSpan={canEdit ? 45 : 43}
                       className="py-10 text-center text-muted-foreground"
                     >
                       加载中…
@@ -882,10 +1012,10 @@ export default function HrManagementPage() {
                 ) : filtered.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={canEdit ? 44 : 42}
+                      colSpan={canEdit ? 45 : 43}
                       className="py-10 text-center text-muted-foreground"
                     >
-                      暂无人事档案。可点「一键建档」或「批量导入表格」（匹配不到人会自动建挂靠人员）。
+                      暂无人事档案。可点「一键建档」（仅针对人员管理已有人员）或「批量导入表格」（须先在人员管理存在同名人员）。
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -990,6 +1120,31 @@ export default function HrManagementPage() {
                       </TableCell>
                       <TableCell className="tabular-nums">
                         {displayDate(row.contract3EndDate)}
+                      </TableCell>
+                      <TableCell>
+                        {(row.signedDocuments || []).length > 0 ? (
+                          <div className="flex flex-col gap-1">
+                            {(row.signedDocuments || []).slice(0, 3).map((doc) => (
+                              <button
+                                key={doc.id}
+                                type="button"
+                                className="flex max-w-[160px] items-center gap-1 truncate text-left text-xs text-primary hover:underline"
+                                onClick={() => void handleDownloadDocument(row.id, doc)}
+                                title={doc.fileName}
+                              >
+                                <Paperclip className="h-3 w-3 shrink-0" />
+                                <span className="truncate">{doc.fileName}</span>
+                              </button>
+                            ))}
+                            {(row.signedDocuments || []).length > 3 && (
+                              <span className="text-xs text-muted-foreground">
+                                +{(row.signedDocuments || []).length - 3} 个
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
                       </TableCell>
                       <TableCell className="whitespace-nowrap">{row.idNumber || "—"}</TableCell>
                       <TableCell className="tabular-nums">{displayDate(row.birthDate)}</TableCell>
@@ -1111,7 +1266,7 @@ export default function HrManagementPage() {
                 onChange={(e) => setForm({ ...form, resignDate: e.target.value })}
               />
               <p className="text-xs text-muted-foreground">
-                清空表示在职。保存后同步到人员管理，并用于盈亏/成本页按月计人力成本。
+                清空表示在职。若已关联人员管理，保存后同步入离职并用于成本计停；分销与提成请在人员管理设置。
               </p>
             </div>
             {(
@@ -1169,6 +1324,75 @@ export default function HrManagementPage() {
                 onChange={(e) => setForm({ ...form, address: e.target.value })}
               />
             </div>
+            {editing && (
+              <div className="sm:col-span-2 space-y-2 rounded-md border p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Label className="flex items-center gap-1">
+                    <Paperclip className="h-4 w-4" />
+                    签署文档
+                  </Label>
+                  <div>
+                    <input
+                      ref={docInputRef}
+                      type="file"
+                      accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.zip"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) void handleUploadDocument(f);
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={docUploading}
+                      onClick={() => docInputRef.current?.click()}
+                    >
+                      <Upload className="mr-1 h-3.5 w-3.5" />
+                      {docUploading ? "上传中…" : "上传文档"}
+                    </Button>
+                  </div>
+                </div>
+                {(editing.signedDocuments || []).length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    尚未上传。支持 PDF / Word / 图片，单文件 ≤ 12MB。
+                  </p>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {(editing.signedDocuments || []).map((doc) => (
+                      <li
+                        key={doc.id}
+                        className="flex items-center justify-between gap-2 rounded border px-2 py-1.5 text-sm"
+                      >
+                        <span className="truncate" title={doc.fileName}>
+                          {doc.fileName}
+                        </span>
+                        <div className="flex shrink-0 gap-1">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => void handleDownloadDocument(editing.id, doc)}
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="text-destructive"
+                            onClick={() => void handleDeleteDocument(doc)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </div>
           <p className="text-xs text-muted-foreground">
             批量导入支持档案表头（姓名、入职时间、合同主体、劳动合同1~3、身份证等）。
@@ -1180,6 +1404,136 @@ export default function HrManagementPage() {
             </Button>
             <Button disabled={saving} onClick={() => void handleSave()}>
               {saving ? "保存中…" : "保存"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>批量导入设置</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>劳动合同签署公司</Label>
+              <Select
+                value={importOptions.laborCompanyId || "__none__"}
+                onValueChange={(v) => {
+                  if (v === "__none__") {
+                    setImportOptions((prev) => ({
+                      ...prev,
+                      laborCompanyId: "",
+                      laborCompanyName: "",
+                    }));
+                    return;
+                  }
+                  const company = laborCompanies.find((c) => c.id === v);
+                  setImportOptions((prev) => ({
+                    ...prev,
+                    laborCompanyId: v,
+                    laborCompanyName: company?.name || "",
+                  }));
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="选择签署公司" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">不预设（按表格「合同主体」）</SelectItem>
+                  {laborCompanies.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input
+                className="mt-2"
+                placeholder="或输入新公司名（可自动创建到字典）"
+                value={importOptions.laborCompanyName}
+                onChange={(e) => {
+                  const name = e.target.value;
+                  const matched = laborCompanies.find(
+                    (c) => c.name.trim().toLowerCase() === name.trim().toLowerCase(),
+                  );
+                  setImportOptions((prev) => ({
+                    ...prev,
+                    laborCompanyName: name,
+                    laborCompanyId: matched?.id || "",
+                  }));
+                }}
+              />
+            </div>
+            <label className="flex items-start gap-2 text-sm">
+              <Checkbox
+                checked={importOptions.preferSelectedLaborCompany}
+                onCheckedChange={(v) =>
+                  setImportOptions((prev) => ({
+                    ...prev,
+                    preferSelectedLaborCompany: Boolean(v),
+                  }))
+                }
+              />
+              <span>
+                优先使用上方所选/填写的签署公司
+                <span className="block text-xs text-muted-foreground">
+                  勾选后覆盖表格中的「合同主体」列；不勾选则表格有值用表格，否则用所选。
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-sm">
+              <Checkbox
+                checked={importOptions.autoCreateLaborCompany}
+                onCheckedChange={(v) =>
+                  setImportOptions((prev) => ({
+                    ...prev,
+                    autoCreateLaborCompany: Boolean(v),
+                  }))
+                }
+              />
+              <span>
+                自动创建/匹配签署公司名字
+                <span className="block text-xs text-muted-foreground">
+                  表格或输入的公司名若不在字典中，自动写入「劳动合同签署公司」字典。
+                </span>
+              </span>
+            </label>
+            <div className="space-y-1.5">
+              <Label>在职 / 离职（整批）</Label>
+              <Select
+                value={importOptions.forceStatus}
+                onValueChange={(v) =>
+                  setImportOptions((prev) => ({
+                    ...prev,
+                    forceStatus: v as ImportForceStatus,
+                  }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="table">按表格状态/离职日期</SelectItem>
+                  <SelectItem value="active">全部按在职导入（清空离职日）</SelectItem>
+                  <SelectItem value="inactive">全部按离职导入</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                导入离职表选「离职」，导入在职表选「在职」，可保证档案状态与人员管理一致。
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImportDialogOpen(false)}>
+              取消
+            </Button>
+            <Button
+              disabled={importing}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <FileUp className="mr-2 h-4 w-4" />
+              {importing ? "导入中…" : "选择表格并导入"}
             </Button>
           </DialogFooter>
         </DialogContent>
