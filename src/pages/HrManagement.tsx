@@ -445,7 +445,10 @@ export default function HrManagementPage() {
     return map;
   }, [laborCompanies]);
 
-  const profiledIds = useMemo(() => new Set(list.map((x) => x.personnelId)), [list]);
+  const profiledIds = useMemo(
+    () => new Set(list.map((x) => x.personnelId).filter(Boolean)),
+    [list],
+  );
 
   const unprofiledPersonnel = useMemo(
     () => personnel.filter((p) => !profiledIds.has(p.id)),
@@ -786,11 +789,12 @@ export default function HrManagementPage() {
             (p) => String(p.name || "").trim() === name,
           );
           if (candidates.length === 0) {
-            matchHint = "人员管理中不存在";
+            matchOk = true;
+            matchHint = "将写入人事（不同步人员管理）";
           } else if (!unitName) {
             if (candidates.length === 1) {
               matchOk = true;
-              matchHint = "可匹配";
+              matchHint = "可匹配人员管理";
             } else {
               matchHint = `同名 ${candidates.length} 人，请补充部门`;
             }
@@ -798,16 +802,18 @@ export default function HrManagementPage() {
             const unitId = unitIdByName.get(unitName.trim().toLowerCase()) || "";
             const matched = unitId
               ? candidates.filter((p) => p.salesUnitId === unitId)
-              : candidates;
+              : [];
             if (matched.length === 1) {
               matchOk = true;
-              matchHint = "可匹配";
+              matchHint = "可匹配人员管理";
             } else if (matched.length > 1) {
               matchHint = "同单位下匹配到多人";
-            } else if (!unitId) {
-              matchHint = `未找到销售单位「${unitName}」`;
+            } else if (candidates.length === 1) {
+              matchOk = true;
+              matchHint = "可匹配人员管理";
             } else {
-              matchHint = `不在单位「${unitName}」下`;
+              matchOk = true;
+              matchHint = "将写入人事（不同步人员管理）";
             }
           }
         }
@@ -1001,7 +1007,7 @@ export default function HrManagementPage() {
     <div className="space-y-4 p-6">
       <PageHeader
         title="人事管理"
-        description="人事档案与人员管理关联但不互相造人：入离职可同步到已关联人员（停成本）；分销与提成只在人员管理设置。签署公司≠销售单位。"
+        description="可独立导入人事档案：匹配到人员管理则关联并同步入离职；匹配不到只建人事档、不同步人员。业绩归属单位仅关联人员时显示。签署公司≠销售单位。"
         action={
           canEdit ? (
             <div className="flex flex-wrap gap-2">
@@ -1329,7 +1335,7 @@ export default function HrManagementPage() {
                           || "未设置"}
                       </TableCell>
                       <TableCell>
-                        {unitNameMap.get(row.salesUnitId) || "未分配"}
+                        {unitNameMap.get(row.salesUnitId) || "—"}
                       </TableCell>
                       <TableCell>{row.position || "—"}</TableCell>
                       <TableCell>{row.employmentType || "—"}</TableCell>
@@ -1502,13 +1508,13 @@ export default function HrManagementPage() {
               <Input
                 disabled
                 value={
-                  editing
-                    ? (unitNameMap.get(editing.salesUnitId) || "未分配")
-                    : ""
+                  editing?.salesUnitId
+                    ? (unitNameMap.get(editing.salesUnitId) || "—")
+                    : "—"
                 }
               />
               <p className="text-xs text-muted-foreground">
-                只读，来自人员管理的销售单位，不是劳动合同签署公司。
+                只读：已关联人员管理时显示其销售单位；未关联则为空白。
               </p>
             </div>
             <div className="space-y-1.5">

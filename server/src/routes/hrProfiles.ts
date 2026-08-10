@@ -36,11 +36,20 @@ router.use(requireModuleView("hr_management"));
 
 const HR_SELECT = `
   SELECT h.*,
-    p.name, p.sales_unit_id, p.position, p.phone, p.hire_date, p.resign_date,
-    p.status, p.salary, p.social_insurance, p.housing_fund,
+    COALESCE(NULLIF(TRIM(p.name), ''), h.name) AS name,
+    CASE WHEN p.id IS NOT NULL THEN IFNULL(p.sales_unit_id, '') ELSE '' END AS sales_unit_id,
+    COALESCE(NULLIF(TRIM(p.position), ''), h.position) AS position,
+    COALESCE(NULLIF(TRIM(p.phone), ''), h.phone) AS phone,
+    COALESCE(NULLIF(TRIM(p.hire_date), ''), h.hire_date) AS hire_date,
+    CASE
+      WHEN p.id IS NOT NULL THEN p.resign_date
+      ELSE h.resign_date
+    END AS resign_date,
+    COALESCE(NULLIF(TRIM(p.status), ''), NULLIF(TRIM(h.status), ''), 'active') AS status,
+    p.salary, p.social_insurance, p.housing_fund,
     lc.name AS labor_company_name
   FROM hr_profiles h
-  INNER JOIN personnel p ON p.id = h.personnel_id
+  LEFT JOIN personnel p ON p.id = h.personnel_id
   LEFT JOIN labor_companies lc ON lc.id = h.labor_company_id
 `;
 
@@ -494,7 +503,10 @@ function saveProfileSignedDocs(
 // GET /api/hr-profiles（有人事权限即可看全量，不按销售单位过滤）
 router.get("/", (_req, res) => {
   const db = getDb();
-  const rows = db.prepare(`${HR_SELECT} ORDER BY p.name`).all() as any[];
+  const rows = db.prepare(`
+    ${HR_SELECT}
+    ORDER BY COALESCE(NULLIF(TRIM(p.name), ''), h.name)
+  `).all() as any[];
   res.json(rows.map(rowToHrProfile));
 });
 
@@ -525,14 +537,18 @@ router.post("/batch-create", requireModuleEdit("hr_management"), (_req, res) => 
   const people = db.prepare("SELECT * FROM personnel ORDER BY name").all() as any[];
 
   const existingIds = new Set(
-    (db.prepare("SELECT personnel_id FROM hr_profiles").all() as Array<{ personnel_id: string }>)
+    (db.prepare(`
+      SELECT personnel_id FROM hr_profiles
+      WHERE personnel_id IS NOT NULL AND TRIM(personnel_id) != ''
+    `).all() as Array<{ personnel_id: string }>)
       .map((r) => r.personnel_id),
   );
 
   const insertStmt = db.prepare(`
     INSERT INTO hr_profiles (
-      id, personnel_id, ${HR_FIELD_COLUMNS}, updated_at
-    ) VALUES (?, ?, ${HR_FIELD_COLUMNS.split(",").map(() => "?").join(", ")}, datetime('now'))
+      id, personnel_id, name, phone, position, hire_date, resign_date, status,
+      ${HR_FIELD_COLUMNS}, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ${HR_FIELD_COLUMNS.split(",").map(() => "?").join(", ")}, datetime('now'))
   `);
 
   let created = 0;
@@ -543,7 +559,17 @@ router.post("/batch-create", requireModuleEdit("hr_management"), (_req, res) => 
       continue;
     }
     const empty = upsertHrFields({}, { salesCompanyId: person.sales_unit_id || "" });
-    insertStmt.run(generateId("hr"), person.id, ...hrFieldValues(empty));
+    insertStmt.run(
+      generateId("hr"),
+      person.id,
+      person.name || "",
+      person.phone || "",
+      person.position || "",
+      person.hire_date || "",
+      person.resign_date || "",
+      person.status || "active",
+      ...hrFieldValues(empty),
+    );
     created += 1;
   }
 
@@ -592,9 +618,20 @@ router.post("/", requireModuleEdit("hr_management"), (req, res) => {
   const id = generateId("hr");
   db.prepare(`
     INSERT INTO hr_profiles (
-      id, personnel_id, ${HR_FIELD_COLUMNS}, updated_at
-    ) VALUES (?, ?, ${HR_FIELD_COLUMNS.split(",").map(() => "?").join(", ")}, datetime('now'))
-  `).run(id, personnelId, ...hrFieldValues(fields));
+      id, personnel_id, name, phone, position, hire_date, resign_date, status,
+      ${HR_FIELD_COLUMNS}, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ${HR_FIELD_COLUMNS.split(",").map(() => "?").join(", ")}, datetime('now'))
+  `).run(
+    id,
+    personnelId,
+    person.name || "",
+    person.phone || "",
+    person.position || "",
+    person.hire_date || "",
+    person.resign_date || "",
+    person.status || "active",
+    ...hrFieldValues(fields),
+  );
 
   const row = db.prepare(`${HR_SELECT} WHERE h.id = ?`).get(id);
   res.json(rowToHrProfile(row));
@@ -625,7 +662,10 @@ router.put("/:id", requireModuleEdit("hr_management"), (req, res) => {
     emergencyContact: req.body.emergencyContact ?? existing.emergency_contact,
     emergencyPhone: req.body.emergencyPhone ?? existing.emergency_phone,
     laborCompanyId: req.body.laborCompanyId ?? existing.labor_company_id,
-    salesCompanyId: req.body.salesCompanyId ?? existing.sales_company_id,
+    // 业绩归属单位：未关联人员时强制留空；已关联则保留/沿用人员单位镜像
+    salesCompanyId: existing.personnel_id
+      ? (req.body.salesCompanyId ?? existing.sales_company_id || existing.sales_unit_id || "")
+      : "",
     companyTenure: req.body.companyTenure ?? existing.company_tenure,
     regularizationDate: req.body.regularizationDate ?? existing.regularization_date,
     employmentType: req.body.employmentType ?? existing.employment_type,
@@ -654,7 +694,7 @@ router.put("/:id", requireModuleEdit("hr_management"), (req, res) => {
     UPDATE hr_profiles SET ${setClause}, updated_at=datetime('now') WHERE id=?
   `).run(...hrFieldValues(fields), id);
 
-  // 同步入离职到人员管理（盈亏/成本按此时间段实时计人力成本；不改提成、不改 sales_unit_id）
+  // 同步入离职：有关联人员则写人员管理；无关联只写档案镜像
   if (req.body.hireDate !== undefined || req.body.resignDate !== undefined) {
     const nextHire =
       req.body.hireDate !== undefined
@@ -675,9 +715,14 @@ router.put("/:id", requireModuleEdit("hr_management"), (req, res) => {
       const today = new Date().toISOString().slice(0, 10);
       status = nextResign < today ? "inactive" : "active";
     }
+    if (existing.personnel_id) {
+      db.prepare(
+        "UPDATE personnel SET hire_date=?, resign_date=?, status=? WHERE id=?",
+      ).run(nextHire || "", nextResign, status, existing.personnel_id);
+    }
     db.prepare(
-      "UPDATE personnel SET hire_date=?, resign_date=?, status=? WHERE id=?",
-    ).run(nextHire || "", nextResign, status, existing.personnel_id);
+      "UPDATE hr_profiles SET hire_date=?, resign_date=?, status=?, updated_at=datetime('now') WHERE id=?",
+    ).run(nextHire || "", nextResign || "", status, id);
   }
 
   const row = db.prepare(`${HR_SELECT} WHERE h.id = ?`).get(id);
@@ -712,7 +757,8 @@ function pick(row: ImportRow, keys: string[]): unknown {
 
 /**
  * 按姓名（+可选单位）匹配人员管理中的已有人员。
- * 不再自动新建人员：人事与人员管理关联但不互相造人。
+ * 不匹配时返回 person=null 且 reason=null，由导入侧改为只建人事档（不同步人员管理）。
+ * 同名多人无法唯一确定时返回 reason，导入失败。
  */
 function findPersonnel(
   db: ReturnType<typeof getDb>,
@@ -724,10 +770,26 @@ function findPersonnel(
   const candidates = all.filter((p) => String(p.name || "").trim() === nameTrim);
   const exactUnitId = unitName.trim() ? resolveUnitIdByName(db, unitName) : "";
 
+  if (candidates.length === 1) {
+    return {
+      person: candidates[0],
+      reason: null as string | null,
+      unitId: candidates[0].sales_unit_id || exactUnitId || "",
+    };
+  }
+
+  if (candidates.length === 0) {
+    return {
+      person: null,
+      reason: null as string | null,
+      unitId: "",
+    };
+  }
+
   if (unitName.trim()) {
     const matched = exactUnitId
       ? candidates.filter((p) => p.sales_unit_id === exactUnitId)
-      : candidates;
+      : [];
     if (matched.length === 1) {
       return {
         person: matched[0],
@@ -742,36 +804,14 @@ function findPersonnel(
         unitId: exactUnitId,
       };
     }
-    if (candidates.length === 0) {
-      return {
-        person: null,
-        reason: `人员管理中不存在「${name}」，请先在人员管理添加后再导入`,
-        unitId: exactUnitId,
-      };
-    }
+    // 单位对不上：不强制挂错人，按未匹配走独立人事档
     return {
       person: null,
-      reason: exactUnitId
-        ? `人员管理中「${name}」不在单位「${unitName}」下`
-        : `未找到销售单位「${unitName}」，且姓名「${name}」无法唯一匹配`,
+      reason: null as string | null,
       unitId: "",
     };
   }
 
-  if (candidates.length === 1) {
-    return {
-      person: candidates[0],
-      reason: null as string | null,
-      unitId: candidates[0].sales_unit_id || "",
-    };
-  }
-  if (candidates.length === 0) {
-    return {
-      person: null,
-      reason: `人员管理中不存在「${name}」，请先在人员管理添加后再导入`,
-      unitId: "",
-    };
-  }
   return {
     person: null,
     reason: `姓名「${name}」匹配到多人，请补充「部门/销售单位公司」列`,
@@ -942,14 +982,23 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
 
     const insertStmt = db.prepare(`
       INSERT INTO hr_profiles (
-        id, personnel_id, ${HR_FIELD_COLUMNS}, updated_at
-      ) VALUES (?, ?, ${HR_FIELD_COLUMNS.split(",").map(() => "?").join(", ")}, datetime('now'))
+        id, personnel_id, name, phone, position, hire_date, resign_date, status,
+        ${HR_FIELD_COLUMNS}, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ${HR_FIELD_COLUMNS.split(",").map(() => "?").join(", ")}, datetime('now'))
     `);
-    const updateStmt = db.prepare(`
+    const updateByPersonnelStmt = db.prepare(`
       UPDATE hr_profiles SET
+        name=?, phone=?, position=?, hire_date=?, resign_date=?, status=?,
         ${HR_FIELD_COLUMNS.split(", ").map((c) => `${c}=?`).join(", ")},
         updated_at=datetime('now')
       WHERE personnel_id=?
+    `);
+    const updateByIdStmt = db.prepare(`
+      UPDATE hr_profiles SET
+        name=?, phone=?, position=?, hire_date=?, resign_date=?, status=?,
+        ${HR_FIELD_COLUMNS.split(", ").map((c) => `${c}=?`).join(", ")},
+        updated_at=datetime('now')
+      WHERE id=?
     `);
 
     for (let i = 0; i < rows.length; i++) {
@@ -976,7 +1025,6 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
       const phone = text(
         fixExcelLongNumber(pick(row, ["手机号码", "手机号", "手机", "电话", "phone"])),
       );
-      const position = text(pick(row, ["职位", "岗位", "用工性质", "position"]));
       const hireDate = normalizeDate(pick(row, ["入职时间", "入职日期", "hireDate"]));
       const resignDateRaw = pick(row, ["离职日期", "resignDate"]);
       const resignDate =
@@ -995,13 +1043,13 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
         status = "inactive";
       }
 
-      const { person, reason, unitId } = findPersonnel(db, name, unitName);
-      if (!person) {
+      const { person, reason } = findPersonnel(db, name, unitName);
+      if (!person && reason) {
         result.failed += 1;
         result.errors.push({
           row: excelRow,
           name,
-          reason: reason || "人员管理中不存在，请先在人员管理添加后再导入",
+          reason,
         });
         continue;
       }
@@ -1014,7 +1062,8 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
         "签署公司",
         "laborCompany",
       ]));
-      const salesCompanyId = unitId || person.sales_unit_id || "";
+      // 业绩归属单位：仅已匹配人员管理时取人员所属单位；未匹配则留空
+      const salesCompanyId = person ? (person.sales_unit_id || "") : "";
       let laborCompanyId = "";
       if (preferSelected && defaultLaborCompanyId) {
         laborCompanyId = defaultLaborCompanyId;
@@ -1114,63 +1163,130 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
         companyEmail: pick(row, ["企业邮箱", "邮箱", "email", "companyEmail"]),
       });
 
+      const personPosition = text(pick(row, ["职位", "岗位", "position"]));
+      let profileStatus = status;
+      let profileResign = resignDate ?? "";
+      if (forceStatus === "active") {
+        profileStatus = "active";
+        profileResign = "";
+      } else if (forceStatus === "inactive") {
+        profileStatus = "inactive";
+      }
+
       try {
-        const existed = db
-          .prepare("SELECT id FROM hr_profiles WHERE personnel_id = ?")
-          .get(person.id) as { id: string } | undefined;
-        if (existed) {
-          updateStmt.run(...hrFieldValues(fields), person.id);
-        } else {
-          insertStmt.run(generateId("hr"), person.id, ...hrFieldValues(fields));
-        }
-
-        let personnelStatus = person.status || status;
-        let nextResign: string | null | undefined = resignDate;
-        let touchResign = resignDate !== undefined ? 1 : 0;
-
-        if (forceStatus === "active") {
-          personnelStatus = "active";
-          nextResign = "";
-          touchResign = 1;
-        } else if (forceStatus === "inactive") {
-          personnelStatus = "inactive";
-          if (resignDate !== undefined) {
-            nextResign = resignDate;
-            touchResign = 1;
+        if (person) {
+          const mirrorName = String(person.name || name);
+          const mirrorPhone = phone || String(person.phone || "");
+          const mirrorPosition = personPosition || String(person.position || "");
+          const mirrorHire = hireDate || String(person.hire_date || "");
+          const existed = db
+            .prepare("SELECT id FROM hr_profiles WHERE personnel_id = ?")
+            .get(person.id) as { id: string } | undefined;
+          if (existed) {
+            updateByPersonnelStmt.run(
+              mirrorName,
+              mirrorPhone,
+              mirrorPosition,
+              mirrorHire,
+              profileResign || person.resign_date || "",
+              profileStatus,
+              ...hrFieldValues(fields),
+              person.id,
+            );
+          } else {
+            insertStmt.run(
+              generateId("hr"),
+              person.id,
+              mirrorName,
+              mirrorPhone,
+              mirrorPosition,
+              mirrorHire,
+              profileResign || person.resign_date || "",
+              profileStatus,
+              ...hrFieldValues(fields),
+            );
           }
-        } else if (statusRaw.includes("离")) {
-          personnelStatus = "inactive";
-        } else if (statusRaw.includes("在") || statusRaw.includes("职")) {
-          personnelStatus = "active";
-        } else if (resignDate) {
-          personnelStatus = "inactive";
-        } else if (statusRaw) {
-          personnelStatus = status;
-        }
 
-        const personPosition = text(pick(row, ["职位", "岗位", "position"]));
-        db.prepare(`
-          UPDATE personnel SET
-            hire_date = COALESCE(NULLIF(?, ''), hire_date),
-            resign_date = CASE WHEN ? = 1 THEN ? ELSE resign_date END,
-            status = ?,
-            position = CASE WHEN ? != '' THEN ? ELSE position END,
-            phone = CASE WHEN ? != '' THEN ? ELSE phone END,
-            email = CASE WHEN ? != '' THEN ? ELSE email END
-          WHERE id = ?
-        `).run(
-          hireDate,
-          touchResign,
-          nextResign ?? null,
-          personnelStatus,
-          personPosition,
-          personPosition,
-          phone,
-          phone,
-          fields.companyEmail,
-          fields.companyEmail,
-          person.id,
-        );
+          let personnelStatus = person.status || status;
+          let nextResign: string | null | undefined = resignDate;
+          let touchResign = resignDate !== undefined ? 1 : 0;
+
+          if (forceStatus === "active") {
+            personnelStatus = "active";
+            nextResign = "";
+            touchResign = 1;
+          } else if (forceStatus === "inactive") {
+            personnelStatus = "inactive";
+            if (resignDate !== undefined) {
+              nextResign = resignDate;
+              touchResign = 1;
+            }
+          } else if (statusRaw.includes("离")) {
+            personnelStatus = "inactive";
+          } else if (statusRaw.includes("在") || statusRaw.includes("职")) {
+            personnelStatus = "active";
+          } else if (resignDate) {
+            personnelStatus = "inactive";
+          } else if (statusRaw) {
+            personnelStatus = status;
+          }
+
+          db.prepare(`
+            UPDATE personnel SET
+              hire_date = COALESCE(NULLIF(?, ''), hire_date),
+              resign_date = CASE WHEN ? = 1 THEN ? ELSE resign_date END,
+              status = ?,
+              position = CASE WHEN ? != '' THEN ? ELSE position END,
+              phone = CASE WHEN ? != '' THEN ? ELSE phone END,
+              email = CASE WHEN ? != '' THEN ? ELSE email END
+            WHERE id = ?
+          `).run(
+            hireDate,
+            touchResign,
+            nextResign ?? null,
+            personnelStatus,
+            personPosition,
+            personPosition,
+            phone,
+            phone,
+            fields.companyEmail,
+            fields.companyEmail,
+            person.id,
+          );
+        } else {
+          // 未匹配人员管理：只写人事档案，不同步/不新建人员
+          const existed = db
+            .prepare(`
+              SELECT id FROM hr_profiles
+              WHERE personnel_id IS NULL AND TRIM(name) = ?
+              LIMIT 1
+            `)
+            .get(name) as { id: string } | undefined;
+          if (existed) {
+            updateByIdStmt.run(
+              name,
+              phone,
+              personPosition,
+              hireDate,
+              profileResign,
+              profileStatus,
+              ...hrFieldValues(fields),
+              existed.id,
+            );
+          } else {
+            insertStmt.run(
+              generateId("hr"),
+              null,
+              name,
+              phone,
+              personPosition,
+              hireDate,
+              profileResign,
+              profileStatus,
+              ...hrFieldValues(fields),
+            );
+          }
+        }
 
         result.success += 1;
       } catch (e: unknown) {

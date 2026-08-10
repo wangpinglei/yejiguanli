@@ -98,7 +98,13 @@ function initSchema() {
 
     CREATE TABLE IF NOT EXISTS hr_profiles (
       id TEXT PRIMARY KEY,
-      personnel_id TEXT NOT NULL UNIQUE,
+      personnel_id TEXT UNIQUE,
+      name TEXT DEFAULT '',
+      phone TEXT DEFAULT '',
+      position TEXT DEFAULT '',
+      hire_date TEXT DEFAULT '',
+      resign_date TEXT DEFAULT '',
+      status TEXT DEFAULT 'active',
       gender TEXT DEFAULT '',
       contract_start_date TEXT DEFAULT '',
       contract_end_date TEXT DEFAULT '',
@@ -436,7 +442,16 @@ function initSchema() {
     { name: "bank_belong", ddl: "bank_belong TEXT DEFAULT ''" },
     { name: "company_email", ddl: "company_email TEXT DEFAULT ''" },
     { name: "signed_documents", ddl: "signed_documents TEXT DEFAULT '[]'" },
+    { name: "name", ddl: "name TEXT DEFAULT ''" },
+    { name: "phone", ddl: "phone TEXT DEFAULT ''" },
+    { name: "position", ddl: "position TEXT DEFAULT ''" },
+    { name: "hire_date", ddl: "hire_date TEXT DEFAULT ''" },
+    { name: "resign_date", ddl: "resign_date TEXT DEFAULT ''" },
+    { name: "status", ddl: "status TEXT DEFAULT 'active'" },
   ]);
+
+  // 允许人事档案不关联人员管理（personnel_id 可空）
+  migrateHrProfilesNullablePersonnel();
 
   // 将误挂在销售单位上的 labor_company_id 迁移为独立签署公司字典
   migrateLaborCompanyIdsFromSalesUnits();
@@ -444,6 +459,158 @@ function initSchema() {
   clearSalesUnitNamedLaborCompanies();
   // 清理人事导入曾自动创建的「人事挂靠」人员（人事档案一并删）；手动录入的人员管理数据保留
   cleanupHrAffiliateAutoCreated();
+}
+
+/**
+ * 将 hr_profiles.personnel_id 改为可空，并补齐档案侧姓名等镜像字段，
+ * 以便导入时匹配不到人员管理仍可只建人事档。
+ */
+function migrateHrProfilesNullablePersonnel() {
+  const cols = db.prepare("PRAGMA table_info(hr_profiles)").all() as Array<{
+    name: string;
+    notnull: number;
+  }>;
+  if (cols.length === 0) return;
+  const pid = cols.find((c) => c.name === "personnel_id");
+  if (pid && pid.notnull === 0) return;
+
+  db.exec(`
+    CREATE TABLE hr_profiles_nullable (
+      id TEXT PRIMARY KEY,
+      personnel_id TEXT UNIQUE,
+      name TEXT DEFAULT '',
+      phone TEXT DEFAULT '',
+      position TEXT DEFAULT '',
+      hire_date TEXT DEFAULT '',
+      resign_date TEXT DEFAULT '',
+      status TEXT DEFAULT 'active',
+      gender TEXT DEFAULT '',
+      contract_start_date TEXT DEFAULT '',
+      contract_end_date TEXT DEFAULT '',
+      id_number TEXT DEFAULT '',
+      birth_date TEXT DEFAULT '',
+      age INTEGER,
+      ethnicity TEXT DEFAULT '',
+      political_status TEXT DEFAULT '',
+      education TEXT DEFAULT '',
+      school TEXT DEFAULT '',
+      major TEXT DEFAULT '',
+      bank_account TEXT DEFAULT '',
+      bank_name TEXT DEFAULT '',
+      address TEXT DEFAULT '',
+      emergency_contact TEXT DEFAULT '',
+      emergency_phone TEXT DEFAULT '',
+      labor_company_id TEXT DEFAULT '',
+      sales_company_id TEXT DEFAULT '',
+      company_tenure TEXT DEFAULT '',
+      regularization_date TEXT DEFAULT '',
+      employment_type TEXT DEFAULT '',
+      marital_status TEXT DEFAULT '',
+      native_place TEXT DEFAULT '',
+      household_register TEXT DEFAULT '',
+      id_address TEXT DEFAULT '',
+      graduation_date TEXT DEFAULT '',
+      emergency_relation TEXT DEFAULT '',
+      internship_start_date TEXT DEFAULT '',
+      internship_end_date TEXT DEFAULT '',
+      contract1_start_date TEXT DEFAULT '',
+      contract1_end_date TEXT DEFAULT '',
+      contract2_start_date TEXT DEFAULT '',
+      contract2_end_date TEXT DEFAULT '',
+      contract3_start_date TEXT DEFAULT '',
+      contract3_end_date TEXT DEFAULT '',
+      bank_belong TEXT DEFAULT '',
+      company_email TEXT DEFAULT '',
+      signed_documents TEXT DEFAULT '[]',
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (personnel_id) REFERENCES personnel(id) ON DELETE CASCADE
+    );
+  `);
+
+  const oldCols = new Set(cols.map((c) => c.name));
+  const insertCols = [
+    "id",
+    "personnel_id",
+    "name",
+    "phone",
+    "position",
+    "hire_date",
+    "resign_date",
+    "status",
+    "gender",
+    "contract_start_date",
+    "contract_end_date",
+    "id_number",
+    "birth_date",
+    "age",
+    "ethnicity",
+    "political_status",
+    "education",
+    "school",
+    "major",
+    "bank_account",
+    "bank_name",
+    "address",
+    "emergency_contact",
+    "emergency_phone",
+    "labor_company_id",
+    "sales_company_id",
+    "company_tenure",
+    "regularization_date",
+    "employment_type",
+    "marital_status",
+    "native_place",
+    "household_register",
+    "id_address",
+    "graduation_date",
+    "emergency_relation",
+    "internship_start_date",
+    "internship_end_date",
+    "contract1_start_date",
+    "contract1_end_date",
+    "contract2_start_date",
+    "contract2_end_date",
+    "contract3_start_date",
+    "contract3_end_date",
+    "bank_belong",
+    "company_email",
+    "signed_documents",
+    "updated_at",
+  ];
+  const selectExprs = insertCols.map((c) => {
+    if (c === "personnel_id") {
+      return "NULLIF(personnel_id, '')";
+    }
+    if (!oldCols.has(c)) {
+      if (c === "status") return "'active'";
+      if (c === "signed_documents") return "'[]'";
+      if (c === "updated_at") return "datetime('now')";
+      return "''";
+    }
+    return c;
+  });
+
+  db.exec(`
+    INSERT INTO hr_profiles_nullable (${insertCols.join(", ")})
+    SELECT ${selectExprs.join(", ")} FROM hr_profiles
+  `);
+  // 用人员管理姓名回填档案镜像（仅已关联）
+  db.exec(`
+    UPDATE hr_profiles_nullable
+    SET
+      name = COALESCE((SELECT name FROM personnel WHERE personnel.id = hr_profiles_nullable.personnel_id), name),
+      phone = COALESCE((SELECT phone FROM personnel WHERE personnel.id = hr_profiles_nullable.personnel_id), phone),
+      position = COALESCE((SELECT position FROM personnel WHERE personnel.id = hr_profiles_nullable.personnel_id), position),
+      hire_date = COALESCE((SELECT hire_date FROM personnel WHERE personnel.id = hr_profiles_nullable.personnel_id), hire_date),
+      resign_date = COALESCE((SELECT resign_date FROM personnel WHERE personnel.id = hr_profiles_nullable.personnel_id), resign_date),
+      status = COALESCE((SELECT status FROM personnel WHERE personnel.id = hr_profiles_nullable.personnel_id), status)
+    WHERE personnel_id IS NOT NULL
+  `);
+  db.exec("DROP TABLE hr_profiles");
+  db.exec("ALTER TABLE hr_profiles_nullable RENAME TO hr_profiles");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_hr_profiles_personnel ON hr_profiles(personnel_id)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_hr_profiles_contract_end ON hr_profiles(contract_end_date)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_hr_profiles_name ON hr_profiles(name)");
 }
 
 /**
@@ -727,9 +894,10 @@ export function rowToHrProfile(row: any) {
     row.age != null && row.age !== ""
       ? Number(row.age)
       : calcAgeFromIdOrBirth(row.id_number, row.birth_date);
+  const linked = Boolean(row.personnel_id);
   return {
     id: row.id,
-    personnelId: row.personnel_id,
+    personnelId: row.personnel_id || "",
     gender: row.gender || "",
     contractStartDate: row.contract_start_date || "",
     contractEndDate: row.contract_end_date || "",
@@ -748,7 +916,7 @@ export function rowToHrProfile(row: any) {
     emergencyPhone: row.emergency_phone || "",
     laborCompanyId: row.labor_company_id || "",
     laborCompanyName: row.labor_company_name || "",
-    salesCompanyId: row.sales_company_id || "",
+    salesCompanyId: linked ? (row.sales_company_id || row.sales_unit_id || "") : "",
     companyTenure: row.company_tenure || "",
     regularizationDate: row.regularization_date || "",
     employmentType: row.employment_type || "",
@@ -770,14 +938,14 @@ export function rowToHrProfile(row: any) {
     companyEmail: row.company_email || "",
     signedDocuments: parseSignedDocuments(row.signed_documents),
     updatedAt: row.updated_at || "",
-    // 联动人员管理
+    // 联动人员管理：未关联时用档案镜像；业绩归属单位仅在关联人员时显示
     name: row.name || "",
-    salesUnitId: row.sales_unit_id || "",
+    salesUnitId: linked ? (row.sales_unit_id || "") : "",
     position: row.position || "",
     phone: row.phone || "",
     hireDate: row.hire_date || "",
     resignDate: row.resign_date || undefined,
-    status: row.status || "active",
+    status: (row.status || "active") as "active" | "inactive",
     salary: typeof row.salary === "string" ? JSON.parse(row.salary || "{}") : (row.salary || {}),
     socialInsurance: row.social_insurance || 0,
     housingFund: row.housing_fund || 0,
