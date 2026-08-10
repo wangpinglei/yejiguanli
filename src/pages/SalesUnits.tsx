@@ -4,7 +4,10 @@ import { useData } from "@/context/DataContext";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/PageHeader";
-import { formatCurrency } from "@/lib/format";
+import { formatCurrency, getYearMonth } from "@/lib/format";
+import { filterByMonth, getTotalSalaryCost } from "@/lib/salary";
+import { calcSaleSettlementIncome } from "@/lib/settlement";
+import { matchesRecurringYearMonth } from "@/utils/recurringRecord";
 import type { SalesUnit } from "@/types";
 import {
   Plus,
@@ -17,6 +20,7 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  CalendarDays,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +28,13 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -76,12 +87,33 @@ function RoleNameInput({
 
 export default function SalesUnits() {
   const navigate = useNavigate();
-  const { addSalesUnit, updateSalesUnit, deleteSalesUnit } = useData();
+  const {
+    addSalesUnit,
+    updateSalesUnit,
+    deleteSalesUnit,
+    products,
+    monthlyAdjustments,
+    productPersonCommissions,
+    teamMgmtCommissionRules,
+    performanceTargets,
+  } = useData();
   const { users } = useAuth();
-  const { canEditUnit, visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleSalesRecords: salesRecords, visibleCostRecords: costRecords } = usePermissions();
+  const {
+    canEditUnit,
+    visibleSalesUnits: salesUnits,
+    visiblePersonnel: personnel,
+    visibleSalesRecords: salesRecords,
+    visibleCostRecords: costRecords,
+    visibleIncomeRecords: incomeRecords,
+    visibleUnitProductSettlements,
+  } = usePermissions();
   const [search, setSearch] = useState("");
   /** none | desc | asc — 利润排序 */
   const [profitSortOrder, setProfitSortOrder] = useState<"none" | "desc" | "asc">("none");
+  /** 与盈亏分析同口径：按月看净利润 */
+  const [selectedMonth, setSelectedMonth] = useState(
+    () => new Date().toISOString().slice(0, 7),
+  );
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingUnit, setEditingUnit] = useState<SalesUnit | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -125,35 +157,111 @@ export default function SalesUnits() {
     );
   }, [salesUnits, search]);
 
+  const teamMgmtContext = useMemo(
+    () => ({
+      rules: teamMgmtCommissionRules,
+      targets: performanceTargets,
+      upsList: visibleUnitProductSettlements,
+    }),
+    [teamMgmtCommissionRules, performanceTargets, visibleUnitProductSettlements],
+  )
+
+  const monthOptions = useMemo(() => {
+    const options: { value: string; label: string }[] = []
+    const now = new Date()
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      options.push({ value, label: `${d.getFullYear()}年${d.getMonth() + 1}月` })
+    }
+    return options
+  }, [])
+
+  /** 与「盈亏分析」同口径：净利润 = 结算收入 + 其他收入 -（录入成本 + 人力成本） */
   const unitStatsById = useMemo(() => {
     const map: Record<
       string,
-      { personnelCount: number; revenue: number; cost: number; profit: number }
+      {
+        personnelCount: number
+        settlementIncome: number
+        otherIncome: number
+        manualCost: number
+        salaryCost: number
+        profit: number
+      }
     > = {}
+    const monthSales = filterByMonth(salesRecords, selectedMonth)
+    const monthNum = parseInt(selectedMonth.slice(5, 7), 10)
+
     for (const u of salesUnits) {
       const unitPersonnel = personnel.filter((p) => p.salesUnitId === u.id)
-      const revenue = salesRecords
-        .filter((s) => s.salesUnitId === u.id)
-        .reduce((sum, s) => sum + s.totalAmount, 0)
-      const cost = costRecords
-        .filter((c) => c.salesUnitId === u.id)
+      const unitSales = monthSales.filter((s) => s.salesUnitId === u.id)
+      const settlementIncome = unitSales.reduce(
+        (sum, s) => sum + calcSaleSettlementIncome(s, visibleUnitProductSettlements),
+        0,
+      )
+      const otherIncome = incomeRecords
+        .filter((r) => {
+          if (r.salesUnitId !== u.id) return false
+          if (r.isRecurring) {
+            const months = r.recurringMonths || [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+            if (!months.includes(monthNum)) return false
+            if (r.recurringStartDate && selectedMonth < r.recurringStartDate.slice(0, 7)) {
+              return false
+            }
+            if (r.recurringEndDate && selectedMonth > r.recurringEndDate.slice(0, 7)) {
+              return false
+            }
+            return true
+          }
+          return getYearMonth(r.date) === selectedMonth
+        })
+        .reduce((sum, r) => sum + (r.totalAmount || 0), 0)
+      const manualCost = costRecords
+        .filter((c) => c.salesUnitId === u.id && matchesRecurringYearMonth(c, selectedMonth))
         .reduce((sum, c) => sum + c.totalCost, 0)
+      const salaryCost = getTotalSalaryCost(
+        [u.id],
+        personnel,
+        salesRecords,
+        products,
+        selectedMonth,
+        monthlyAdjustments,
+        productPersonCommissions,
+        teamMgmtContext,
+      ).grandTotal
       map[u.id] = {
         personnelCount: unitPersonnel.length,
-        revenue,
-        cost,
-        profit: revenue - cost,
+        settlementIncome,
+        otherIncome,
+        manualCost,
+        salaryCost,
+        profit: settlementIncome + otherIncome - manualCost - salaryCost,
       }
     }
     return map
-  }, [salesUnits, personnel, salesRecords, costRecords])
+  }, [
+    salesUnits,
+    personnel,
+    salesRecords,
+    costRecords,
+    incomeRecords,
+    products,
+    selectedMonth,
+    monthlyAdjustments,
+    productPersonCommissions,
+    visibleUnitProductSettlements,
+    teamMgmtContext,
+  ])
 
   function getUnitStats(unitId: string) {
     return (
       unitStatsById[unitId] || {
         personnelCount: 0,
-        revenue: 0,
-        cost: 0,
+        settlementIncome: 0,
+        otherIncome: 0,
+        manualCost: 0,
+        salaryCost: 0,
         profit: 0,
       }
     )
@@ -268,9 +376,9 @@ export default function SalesUnits() {
         }
       />
 
-      {/* Search */}
-      <div className="mb-4 flex items-center gap-3">
-        <div className="relative flex-1 max-w-sm">
+      {/* Search + 月份 */}
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 max-w-sm min-w-[200px]">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="搜索单位名称..."
@@ -279,8 +387,26 @@ export default function SalesUnits() {
             className="pl-10"
           />
         </div>
+        <div className="flex items-center gap-2">
+          <CalendarDays className="h-4 w-4 text-muted-foreground" />
+          <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+            <SelectTrigger className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {monthOptions.map((m) => (
+                <SelectItem key={m.value} value={m.value}>
+                  {m.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         <Badge variant="secondary">共 {filteredUnits.length} 个单位</Badge>
       </div>
+      <p className="mb-4 text-xs text-muted-foreground">
+        利润与「盈亏分析」同口径：结算收入 + 其他收入 −（录入成本 + 人力成本，含提成），按所选月份计算。
+      </p>
 
       {/* Table */}
       <Card>
@@ -300,9 +426,9 @@ export default function SalesUnits() {
                       type="button"
                       className="ml-auto inline-flex items-center gap-1 rounded px-1 py-0.5 font-medium hover:bg-muted/80"
                       onClick={handleToggleProfitSort}
-                      title="点击按利润排序"
+                      title="点击按本月利润排序（与盈亏分析同口径）"
                     >
-                      利润
+                      本月利润
                       {profitSortOrder === "desc" ? (
                         <ArrowDown className="h-3.5 w-3.5 text-emerald-600" />
                       ) : profitSortOrder === "asc" ? (
@@ -346,7 +472,14 @@ export default function SalesUnits() {
                           {stats.personnelCount}
                         </span>
                       </TableCell>
-                      <TableCell className="text-right font-semibold text-emerald-600">{formatCurrency(stats.profit)}</TableCell>
+                      <TableCell
+                        className={`text-right font-semibold ${
+                          stats.profit >= 0 ? 'text-emerald-600' : 'text-red-600'
+                        }`}
+                        title={`结算 ${formatCurrency(stats.settlementIncome)} + 其他 ${formatCurrency(stats.otherIncome)} - 录入成本 ${formatCurrency(stats.manualCost)} - 人力 ${formatCurrency(stats.salaryCost)}`}
+                      >
+                        {formatCurrency(stats.profit)}
+                      </TableCell>
                       <TableCell className="text-right">
                         {canEditUnit ? (
                           <div className="flex justify-end gap-1">
