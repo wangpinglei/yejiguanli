@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getDb, rowToPersonnel, generateId } from "../db";
+import { getDb, rowToPersonnel, rowToProductPersonCommission, generateId } from "../db";
 import { authMiddleware } from "../auth";
 import { getVisibleUnitIds, requireEditPermission, isOrgDept, isReadOnly } from "../middleware";
 
@@ -17,6 +17,19 @@ function resolveOptionalText(
   return String(incoming);
 }
 
+function parseSalary(raw: unknown): Record<string, unknown> {
+  if (!raw) return {};
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw || "{}");
+    } catch {
+      return {};
+    }
+  }
+  if (typeof raw === "object") return raw as Record<string, unknown>;
+  return {};
+}
+
 router.use(authMiddleware);
 
 // GET /api/personnel - 获取人员列表（按权限过滤）
@@ -24,7 +37,6 @@ router.get("/", (req, res) => {
   const db = getDb();
   let rows = db.prepare("SELECT * FROM personnel ORDER BY name").all();
 
-  // 按权限过滤
   const visibleIds = getVisibleUnitIds(req.user!);
   if (visibleIds !== null) {
     const idSet = new Set(visibleIds);
@@ -39,6 +51,7 @@ router.post("/", requireEditPermission, (req, res) => {
   const {
     name, salesUnitId, position, phone, email, salary,
     socialInsurance, housingFund, hireDate, resignDate, status,
+    highCommissionFrom, regularCompensation,
   } = req.body;
   if (!name || !salesUnitId) {
     return res.status(400).json({ error: "姓名和销售单位不能为空" });
@@ -47,12 +60,14 @@ router.post("/", requireEditPermission, (req, res) => {
   const id = generateId("p");
   const db = getDb();
   const salaryJson = JSON.stringify(salary || {});
+  const regularJson = regularCompensation ? JSON.stringify(regularCompensation) : "";
   db.prepare(`
     INSERT INTO personnel (
       id, name, sales_unit_id, position, phone, email, salary,
-      social_insurance, housing_fund, hire_date, resign_date, status
+      social_insurance, housing_fund, hire_date, resign_date, status,
+      high_commission_from, regular_compensation
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     name,
@@ -66,10 +81,135 @@ router.post("/", requireEditPermission, (req, res) => {
     hireDate || "",
     resignDate || null,
     status || "active",
+    highCommissionFrom || "",
+    regularJson,
   );
 
   const row = db.prepare("SELECT * FROM personnel WHERE id = ?").get(id);
   res.json(rowToPersonnel(row));
+});
+
+/**
+ * POST /api/personnel/:id/enable-distribution
+ * 启用分销：快照常规薪酬+产品提成，清零固定成本，手填高提成生效日，可选统一改产品提成比例
+ */
+router.post("/:id/enable-distribution", requireEditPermission, (req, res) => {
+  if (isOrgDept(req.user!.role) || isReadOnly(req.user!)) {
+    return res.status(403).json({ error: "当前角色无权启用分销" });
+  }
+
+  const { id } = req.params;
+  const highCommissionFrom = String(req.body.highCommissionFrom || "").trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(highCommissionFrom)) {
+    return res.status(400).json({ error: "请填写高提成/分销生效日（年-月-日）" });
+  }
+
+  const resignDateRaw = req.body.resignDate;
+  const distributionRate =
+    req.body.distributionPersonalRate === undefined || req.body.distributionPersonalRate === null
+      ? null
+      : Number(req.body.distributionPersonalRate);
+
+  const db = getDb();
+  const existing: any = db.prepare("SELECT * FROM personnel WHERE id = ?").get(id);
+  if (!existing) return res.status(404).json({ error: "人员不存在" });
+
+  const person = rowToPersonnel(existing) as any;
+  const ppcRows = db
+    .prepare("SELECT * FROM product_person_commissions WHERE personnel_id = ?")
+    .all(id)
+    .map(rowToProductPersonCommission);
+
+  // 已有快照则保留（避免二次启用覆盖历史）；否则新建快照
+  let regularCompensation = person.regularCompensation;
+  if (!regularCompensation?.salary) {
+    regularCompensation = {
+      salary: person.salary || {},
+      socialInsurance: person.socialInsurance || 0,
+      housingFund: person.housingFund || 0,
+      productCommissions: ppcRows.map((x: any) => ({
+        salesUnitId: x.salesUnitId,
+        productId: x.productId,
+        personnelId: x.personnelId,
+        managementCommissionRate: x.managementCommissionRate || 0,
+        managementCommissionThreshold: x.managementCommissionThreshold || 0,
+        managementCommissionCondition: x.managementCommissionCondition || "",
+        personalCommissionType: x.personalCommissionType || "percentage",
+        personalCommissionRate: x.personalCommissionRate || 0,
+        personalCommissionAmount: x.personalCommissionAmount || 0,
+        personalCommissionThreshold: x.personalCommissionThreshold || 0,
+        personalCommissionCondition: x.personalCommissionCondition || "",
+        rewardAmount: x.rewardAmount || 0,
+        rewardFrom: x.rewardFrom || "",
+        rewardTo: x.rewardTo || "",
+      })),
+    };
+  }
+
+  const oldSalary = parseSalary(existing.salary);
+  const newSalary = {
+    ...oldSalary,
+    baseSalary: 0,
+    performance: 0,
+    positionAllowance: 0,
+    personalCommissionRate:
+      distributionRate != null && Number.isFinite(distributionRate)
+        ? distributionRate
+        : (oldSalary.personalCommissionRate || 0),
+    personalCommissionThreshold: 0,
+    personalCommissionCondition: "分销高提成",
+  };
+
+  let nextResign = existing.resign_date;
+  if (resignDateRaw !== undefined) {
+    nextResign = resolveOptionalText(resignDateRaw, existing.resign_date);
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  const resignStr = (nextResign || "").slice(0, 10);
+  const nextStatus = resignStr && resignStr < today ? "inactive" : (existing.status || "active");
+
+  db.prepare(`
+    UPDATE personnel SET
+      salary = ?,
+      social_insurance = 0,
+      housing_fund = 0,
+      resign_date = ?,
+      status = ?,
+      high_commission_from = ?,
+      regular_compensation = ?
+    WHERE id = ?
+  `).run(
+    JSON.stringify(newSalary),
+    nextResign,
+    nextStatus,
+    highCommissionFrom,
+    JSON.stringify(regularCompensation),
+    id,
+  );
+
+  // 可选：把当前产品提成统一改成分销比例（历史已在快照中）
+  if (distributionRate != null && Number.isFinite(distributionRate)) {
+    const now = new Date().toISOString();
+    db.prepare(`
+      UPDATE product_person_commissions SET
+        personal_commission_type = 'percentage',
+        personal_commission_rate = ?,
+        personal_commission_amount = 0,
+        personal_commission_threshold = 0,
+        personal_commission_condition = ?,
+        updated_at = ?
+      WHERE personnel_id = ?
+    `).run(distributionRate, `分销高提成（自 ${highCommissionFrom}）`, now, id);
+  }
+
+  const row = db.prepare("SELECT * FROM personnel WHERE id = ?").get(id);
+  res.json({
+    personnel: rowToPersonnel(row),
+    productPersonCommissions: db
+      .prepare("SELECT * FROM product_person_commissions WHERE personnel_id = ?")
+      .all(id)
+      .map(rowToProductPersonCommission),
+  });
 });
 
 // PUT /api/personnel/:id - 更新人员
@@ -83,7 +223,6 @@ router.put("/:id", requireEditPermission, (req, res) => {
 
   const role = req.user!.role;
 
-  // 组织部只能编辑入离职时间
   if (isOrgDept(role)) {
     const { hireDate, resignDate, status } = req.body;
     db.prepare(
@@ -98,23 +237,31 @@ router.put("/:id", requireEditPermission, (req, res) => {
     return res.json(rowToPersonnel(row));
   }
 
-  // 军工干部只读（已被 requireEditPermission 拦截，这里做双重保险）
   if (isReadOnly(req.user!)) {
     return res.status(403).json({ error: "只读角色无编辑权限" });
   }
 
-  // 其他有权限角色可编辑全部
   const {
     name, salesUnitId, position, phone, email, salary,
     socialInsurance, housingFund, hireDate, resignDate, status,
+    highCommissionFrom, regularCompensation,
   } = req.body;
   const salaryJson = salary ? JSON.stringify(salary) : existing.salary;
+  const regularJson =
+    regularCompensation !== undefined
+      ? (regularCompensation ? JSON.stringify(regularCompensation) : "")
+      : (existing.regular_compensation || "");
+  const highFrom =
+    highCommissionFrom !== undefined
+      ? (highCommissionFrom || "")
+      : (existing.high_commission_from || "");
 
   db.prepare(`
     UPDATE personnel SET
       name = ?, sales_unit_id = ?, position = ?, phone = ?, email = ?,
       salary = ?, social_insurance = ?, housing_fund = ?,
-      hire_date = ?, resign_date = ?, status = ?
+      hire_date = ?, resign_date = ?, status = ?,
+      high_commission_from = ?, regular_compensation = ?
     WHERE id = ?
   `).run(
     name ?? existing.name,
@@ -128,6 +275,8 @@ router.put("/:id", requireEditPermission, (req, res) => {
     resolveOptionalText(hireDate, existing.hire_date) ?? "",
     resolveOptionalText(resignDate, existing.resign_date),
     status ?? existing.status,
+    highFrom,
+    regularJson,
     id,
   );
 

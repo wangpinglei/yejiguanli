@@ -1,4 +1,9 @@
 import { calcSaleCommissionReward } from "@/lib/commissionReward";
+import {
+  isDistributionDay,
+  resolvePayForMonth,
+  resolvePpcListForSaleDate,
+} from "@/lib/compensation";
 import { getPersonTeamMgmtCommission } from "@/lib/teamMgmtCommission";
 import type {
   SalaryStructure,
@@ -277,7 +282,8 @@ export function calcManagementCommissionByProduct(
 
 /**
  * 按产品逐个计算个人提成（优先使用产品级配置，fallback 到默认薪资）
- * - percentage: max(0, 销售额 - 门槛) × 比例%
+ * - 若人员启用了分销分段：按每笔成交日选择「常规快照」或「当前分销」提成配置
+ * - percentage: max(0, 销售额 - 门槛) × 比例%（同一方案内按月汇总门槛）
  * - fixed: 销售数量 × 每件提成金额
  * - 另加：特殊时段按件奖励（rewardAmount × 数量，按销售日匹配区间）
  */
@@ -287,28 +293,74 @@ export function calcPersonalCommissionByProduct(
   _products: Product[],
   ppcList: ProductPersonCommission[]
 ): number {
-  const s = person.salary || EMPTY_SALARY;
+  const personRecords = monthlyRecords.filter((r) => r.personnelId === person.id);
+  if (personRecords.length === 0) return 0;
+
+  // 按「常规 / 分销」拆开，各自汇总门槛，避免跨段混算
+  const regularRecords: SalesRecord[] = [];
+  const distributionRecords: SalesRecord[] = [];
+  for (const r of personRecords) {
+    if (isDistributionDay(person, r.saleDate || "")) distributionRecords.push(r);
+    else regularRecords.push(r);
+  }
+
+  let total = 0;
+  if (regularRecords.length > 0) {
+    total += calcPersonalCommissionForRecords(
+      person,
+      regularRecords,
+      resolvePpcListForSaleDate(
+        person,
+        regularRecords[0]?.saleDate || "1900-01-01",
+        ppcList,
+      ),
+      true,
+    );
+  }
+  if (distributionRecords.length > 0) {
+    total += calcPersonalCommissionForRecords(
+      person,
+      distributionRecords,
+      resolvePpcListForSaleDate(
+        person,
+        distributionRecords[0]?.saleDate || "9999-12-31",
+        ppcList,
+      ),
+      false,
+    );
+  }
+  return total;
+}
+
+function calcPersonalCommissionForRecords(
+  person: Personnel,
+  personRecords: SalesRecord[],
+  personPpcList: ProductPersonCommission[],
+  useRegularSalaryFallback: boolean,
+): number {
+  if (personRecords.length === 0) return 0;
+
+  const s = useRegularSalaryFallback
+    ? (person.regularCompensation?.salary || person.salary || EMPTY_SALARY)
+    : (person.salary || EMPTY_SALARY);
+
   let totalPersonal = 0;
 
-  // 找出该人员本月销售的各产品：金额与数量
   const productSalesMap = new Map<string, number>();
   const productQtyMap = new Map<string, number>();
-  const personRecords = monthlyRecords.filter((r) => r.personnelId === person.id);
   personRecords.forEach((r) => {
     productSalesMap.set(r.productId, (productSalesMap.get(r.productId) || 0) + r.totalAmount);
     productQtyMap.set(r.productId, (productQtyMap.get(r.productId) || 0) + (r.quantity || 0));
   });
 
   const configuredProducts = new Set<string>();
-  // 优先按销售记录上的单位匹配提成配置（避免人员调岗后对不上）
   const saleUnitIds = new Set(personRecords.map((r) => r.salesUnitId).filter(Boolean));
-  const personPpcList = ppcList.filter(
+  const scopedPpc = personPpcList.filter(
     (ppc) =>
       ppc.personnelId === person.id &&
       (ppc.salesUnitId === person.salesUnitId || saleUnitIds.has(ppc.salesUnitId)),
   );
 
-  // 按产品汇总时，取该产品对应销售单位上的配置（同一产品多单位时分别算）
   const productUnitKeys = new Map<string, Set<string>>();
   personRecords.forEach((r) => {
     if (!r.productId) return;
@@ -318,9 +370,9 @@ export function calcPersonalCommissionByProduct(
 
   productUnitKeys.forEach((unitIds, productId) => {
     unitIds.forEach((unitId) => {
-      const ppc = personPpcList.find(
+      const ppc = scopedPpc.find(
         (x) => x.productId === productId && x.salesUnitId === unitId,
-      ) || personPpcList.find(
+      ) || scopedPpc.find(
         (x) => x.productId === productId && x.salesUnitId === person.salesUnitId,
       );
       if (!ppc) return;
@@ -343,7 +395,6 @@ export function calcPersonalCommissionByProduct(
     });
   });
 
-  // 未配置的产品用默认值（仍为比例）
   let unconfiguredSales = 0;
   productSalesMap.forEach((sales, pid) => {
     if (!configuredProducts.has(pid)) unconfiguredSales += sales;
@@ -352,11 +403,10 @@ export function calcPersonalCommissionByProduct(
     totalPersonal += (unconfiguredSales - s.personalCommissionThreshold) * (s.personalCommissionRate / 100);
   }
 
-  // 特殊时段按件奖励（按销售日匹配）
   for (const r of personRecords) {
-    const ppc = personPpcList.find(
+    const ppc = scopedPpc.find(
       (x) => x.productId === r.productId && x.salesUnitId === r.salesUnitId,
-    ) || personPpcList.find((x) => x.productId === r.productId);
+    ) || scopedPpc.find((x) => x.productId === r.productId);
     totalPersonal += calcSaleCommissionReward(r, ppc);
   }
 
@@ -400,14 +450,27 @@ export function calculateMonthlySalary(
   otherBonus: number;
   otherDeduction: number;
   total: number;
+  socialInsurance: number;
+  housingFund: number;
+  fixedRatio: number;
 } {
   // 按月过滤销售记录
   const monthlyRecords = filterByMonth(salesRecords, yearMonth);
 
-  const s = person.salary || EMPTY_SALARY;
+  const pay = yearMonth
+    ? resolvePayForMonth(person, yearMonth)
+    : {
+        salary: person.salary || EMPTY_SALARY,
+        socialInsurance: person.socialInsurance || 0,
+        housingFund: person.housingFund || 0,
+        isDistribution: false,
+        fixedRatio: 1,
+      };
+  const s = pay.salary;
+  const fixedRatio = pay.fixedRatio;
   const personalSales = getPersonalSales(person.id, monthlyRecords, person.name);
 
-  // 个人提成：优先产品×单位×人员配置
+  // 个人提成：优先产品×单位×人员配置（按成交日分段）
   const usePpc = productPersonCommissions !== undefined;
   const personalCommission = usePpc
     ? calcPersonalCommissionByProduct(person, monthlyRecords, products, productPersonCommissions)
@@ -429,6 +492,10 @@ export function calculateMonthlySalary(
   // 旧产品级提成已废弃
   const productCommission = 0;
 
+  const baseSalary = (s.baseSalary || 0) * fixedRatio;
+  const performance = (s.performance || 0) * fixedRatio;
+  const positionAllowance = (s.positionAllowance || 0) * fixedRatio;
+
   const leaveDeduction = adjustment
     ? calcLeaveDeduction(s.baseSalary, adjustment.leaveDays || 0)
     : 0;
@@ -436,9 +503,9 @@ export function calculateMonthlySalary(
   const otherDeduction = adjustment?.otherDeduction || 0;
 
   const total =
-    s.baseSalary +
-    s.performance +
-    s.positionAllowance +
+    baseSalary +
+    performance +
+    positionAllowance +
     managementCommission +
     personalCommission -
     leaveDeduction +
@@ -446,9 +513,9 @@ export function calculateMonthlySalary(
     otherDeduction;
 
   return {
-    baseSalary: s.baseSalary,
-    performance: s.performance,
-    positionAllowance: s.positionAllowance,
+    baseSalary,
+    performance,
+    positionAllowance,
     managementCommission,
     personalCommission,
     productCommission,
@@ -456,6 +523,9 @@ export function calculateMonthlySalary(
     otherBonus,
     otherDeduction,
     total,
+    socialInsurance: (pay.socialInsurance || 0) * fixedRatio,
+    housingFund: (pay.housingFund || 0) * fixedRatio,
+    fixedRatio,
   };
 }
 
@@ -548,8 +618,8 @@ export function getUnitSalaryCost(
       productPersonCommissions,
       teamMgmtContext,
     );
-    const socialInsurance = p.socialInsurance || 0;
-    const housingFund = p.housingFund || 0;
+    const socialInsurance = calc.socialInsurance;
+    const housingFund = calc.housingFund;
     const total = calc.total + socialInsurance + housingFund;
     return {
       personId: p.id,

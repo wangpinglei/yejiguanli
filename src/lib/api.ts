@@ -120,6 +120,18 @@ export const personnelApi = {
   create: (data: any) => api.post<any>("/personnel", data),
   update: (id: string, data: any) => api.put<any>(`/personnel/${id}`, data),
   delete: (id: string) => api.delete(`/personnel/${id}`),
+  enableDistribution: (
+    id: string,
+    data: {
+      highCommissionFrom: string
+      resignDate?: string | null
+      distributionPersonalRate?: number | null
+    },
+  ) =>
+    api.post<{
+      personnel: import("@/types").Personnel
+      productPersonCommissions: import("@/types").ProductPersonCommission[]
+    }>(`/personnel/${id}/enable-distribution`, data),
 };
 
 export const hrProfilesApi = {

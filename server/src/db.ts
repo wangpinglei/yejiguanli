@@ -350,6 +350,11 @@ function initSchema() {
     { name: "permissions", ddl: "permissions TEXT DEFAULT '{}'" },
   ]);
 
+  ensureColumns("personnel", [
+    { name: "high_commission_from", ddl: "high_commission_from TEXT DEFAULT ''" },
+    { name: "regular_compensation", ddl: "regular_compensation TEXT DEFAULT ''" },
+  ]);
+
   ensureColumns("products", [
     { name: "sales_unit_id", ddl: "sales_unit_id TEXT" },
     { name: "cost_type", ddl: "cost_type TEXT DEFAULT 'fixed'" },
@@ -569,6 +574,16 @@ export function rowToSalesUnit(row: any) {
 }
 
 export function rowToPersonnel(row: any) {
+  let regularCompensation: any = undefined;
+  const rawMeta = row.regular_compensation;
+  if (rawMeta) {
+    try {
+      regularCompensation =
+        typeof rawMeta === "string" ? JSON.parse(rawMeta || "null") : rawMeta;
+    } catch {
+      regularCompensation = undefined;
+    }
+  }
   return {
     id: row.id,
     name: row.name,
@@ -582,6 +597,8 @@ export function rowToPersonnel(row: any) {
     hireDate: row.hire_date || "",
     resignDate: row.resign_date || undefined,
     status: row.status || "active",
+    highCommissionFrom: row.high_commission_from || undefined,
+    regularCompensation: regularCompensation || undefined,
   };
 }
 

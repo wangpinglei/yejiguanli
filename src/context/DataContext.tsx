@@ -109,6 +109,14 @@ interface DataContextType {
   addPersonnel: (p: Omit<Personnel, "id">) => Promise<Personnel>;
   updatePersonnel: (id: string, p: Partial<Personnel>) => Promise<void>;
   deletePersonnel: (id: string) => Promise<void>;
+  enablePersonnelDistribution: (
+    id: string,
+    data: {
+      highCommissionFrom: string
+      resignDate?: string | null
+      distributionPersonalRate?: number | null
+    },
+  ) => Promise<void>;
   ensurePersonnelByName: (
     name: string,
     salesUnitId: string,
@@ -364,6 +372,24 @@ export function DataProvider({ children }: { children: ReactNode }) {
     await personnelApi.delete(id);
     setPersonnel((prev) => prev.filter((x) => x.id !== id));
   }, []);
+  const enablePersonnelDistribution = useCallback(
+    async (
+      id: string,
+      data: {
+        highCommissionFrom: string
+        resignDate?: string | null
+        distributionPersonalRate?: number | null
+      },
+    ) => {
+      const result = await personnelApi.enableDistribution(id, data);
+      setPersonnel((prev) => prev.map((x) => (x.id === id ? result.personnel : x)));
+      setProductPersonCommissions((prev) => {
+        const others = prev.filter((c) => c.personnelId !== id);
+        return [...others, ...result.productPersonCommissions];
+      });
+    },
+    [],
+  );
   /** 按姓名+单位确保人员存在；不存在则自动创建（用于销售导入） */
   const ensurePersonnelByName = useCallback(
     async (
@@ -752,7 +778,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     teamMgmtCommissionRules,
     costChangeLogs, notifications, monthlyAdjustments, loading,
     addSalesUnit, updateSalesUnit, deleteSalesUnit,
-    addPersonnel, updatePersonnel, deletePersonnel, ensurePersonnelByName,
+    addPersonnel, updatePersonnel, deletePersonnel, enablePersonnelDistribution, ensurePersonnelByName,
     addProduct, updateProduct, deleteProduct, ensureProductByName,
     addSalesRecord, updateSalesRecord, deleteSalesRecord,
     addCostRecord, updateCostRecord, deleteCostRecord,

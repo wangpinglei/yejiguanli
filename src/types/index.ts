@@ -59,12 +59,43 @@ export interface Personnel {
   position: string;
   phone: string;
   email: string;
-  salary: SalaryStructure; // 薪资结构
+  salary: SalaryStructure; // 薪资结构（启用分销后为分销段当前值，固定项多为 0）
   socialInsurance: number; // 社保（企业承担部分，月度 ¥）
   housingFund: number; // 公积金（企业承担部分，月度 ¥）
   hireDate: string; // 入职日期
   resignDate?: string; // 离职日期
   status: "active" | "inactive";
+  /**
+   * 分销/高提成生效日（含当天）。成交日 ≥ 此日用当前提成；此前用 regularCompensation 快照。
+   * 空 = 未启用分销分段。
+   */
+  highCommissionFrom?: string;
+  /** 分销生效前的固定薪酬 + 产品提成快照 */
+  regularCompensation?: PersonnelRegularCompensation;
+}
+
+/** 分销切换前快照：保证历史成交仍按原底薪/原产品提成计算 */
+export interface PersonnelRegularCompensation {
+  salary: SalaryStructure;
+  socialInsurance: number;
+  housingFund: number;
+  /** 切换瞬间的产品×人提成副本（无 id） */
+  productCommissions: Array<{
+    salesUnitId: string;
+    productId: string;
+    personnelId: string;
+    managementCommissionRate: number;
+    managementCommissionThreshold: number;
+    managementCommissionCondition: string;
+    personalCommissionType?: "percentage" | "fixed";
+    personalCommissionRate: number;
+    personalCommissionAmount?: number;
+    personalCommissionThreshold: number;
+    personalCommissionCondition: string;
+    rewardAmount?: number;
+    rewardFrom?: string;
+    rewardTo?: string;
+  }>;
 }
 
 export interface LaborCompany {
