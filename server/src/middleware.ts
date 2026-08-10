@@ -60,7 +60,10 @@ export function getVisibleUnitIds(user: JwtPayload): string[] | null {
 
 export function isReadOnly(user: JwtPayload): boolean {
   if (user.role === "superadmin") return false;
-  if (user.role === "military_cadre") return true;
+  // 军工干部默认只读；若权限分配已勾选任意模块「编辑」，则尊重手工授权
+  if (user.role === "military_cadre" && !hasAnyEdit(user.permissions, user.role)) {
+    return true;
+  }
   return !hasAnyEdit(user.permissions, user.role);
 }
 
