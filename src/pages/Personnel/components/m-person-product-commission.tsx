@@ -148,8 +148,9 @@ export default function MPersonProductCommission({
         return { product, ppc }
       })
       .sort((a, b) => {
-        const aCfg = a.ppc ? 0 : 1
-        const bCfg = b.ppc ? 0 : 1
+        // 未配置的排前面，方便从清单点进来立刻看到缺项
+        const aCfg = a.ppc ? 1 : 0
+        const bCfg = b.ppc ? 1 : 0
         if (aCfg !== bCfg) return aCfg - bCfg
         return a.product.name.localeCompare(b.product.name, 'zh')
       })

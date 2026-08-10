@@ -3,7 +3,7 @@ import { useData } from "@/context/DataContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, formatDate } from "@/lib/format";
-import { EMPTY_SALARY, calculateMonthlySalary, getFixedSalary, filterByMonth, MONTHLY_WORK_DAYS } from "@/lib/salary";
+import { EMPTY_SALARY, calculateMonthlySalary, getFixedSalary, filterByMonth, MONTHLY_WORK_DAYS, isSalesBattlePosition } from "@/lib/salary";
 import type { Personnel, SalaryStructure } from "@/types";
 import {
   Plus,
@@ -13,6 +13,7 @@ import {
   Eye,
   CalendarRange,
   Percent,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -124,6 +125,8 @@ export default function PersonnelPage() {
   const { visiblePersonnel: personnel, visibleSalesUnits: salesUnits, visibleSalesRecords: salesRecords, canEditPersonnel, isReadOnly, role, canEditCost } = usePermissions();
   const [search, setSearch] = useState("");
   const [filterUnit, setFilterUnit] = useState("all");
+  /** all | missing — 缺产品提成配置筛选 */
+  const [filterCommission, setFilterCommission] = useState<"all" | "missing">("all");
   const [salesRange, setSalesRange] = useState<SalesRange>("year");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
@@ -140,15 +143,87 @@ export default function PersonnelPage() {
   const isOrgDept = role === "org_department";
   const datesOnly = isOrgDept && !canEditPersonnel;
 
+  /** 每人：已售产品数 / 已配提成数 / 缺少提成的产品数与名称 */
+  const commissionStatusByPersonId = useMemo(() => {
+    const map: Record<
+      string,
+      {
+        soldCount: number
+        configuredCount: number
+        missingCount: number
+        missingNames: string[]
+        missingProductIds: string[]
+      }
+    > = {};
+
+    const productNameById = new Map(products.map((p) => [p.id, p.name || '']));
+
+    for (const person of personnel) {
+      const soldIds = new Set<string>();
+      for (const s of salesRecords) {
+        const hitPerson =
+          s.personnelId === person.id ||
+          (!s.personnelId && (s.salesPersonName || '').trim() === person.name);
+        if (!hitPerson) continue;
+        if (s.productId) soldIds.add(s.productId);
+      }
+      // 已配置的产品也计入「相关产品」
+      for (const ppc of productPersonCommissions) {
+        if (ppc.personnelId === person.id) soldIds.add(ppc.productId);
+      }
+
+      const missingPairs: { id: string; name: string }[] = []
+      let configuredCount = 0
+      for (const productId of soldIds) {
+        const hasPpc = productPersonCommissions.some(
+          (x) =>
+            x.personnelId === person.id &&
+            x.productId === productId &&
+            x.salesUnitId === person.salesUnitId,
+        )
+        if (hasPpc) {
+          configuredCount += 1
+        } else {
+          missingPairs.push({
+            id: productId,
+            name: productNameById.get(productId) || productId,
+          })
+        }
+      }
+      missingPairs.sort((a, b) => a.name.localeCompare(b.name, 'zh'))
+      map[person.id] = {
+        soldCount: soldIds.size,
+        configuredCount,
+        missingCount: missingPairs.length,
+        missingNames: missingPairs.map((x) => x.name),
+        missingProductIds: missingPairs.map((x) => x.id),
+      }
+    }
+    return map;
+  }, [personnel, salesRecords, productPersonCommissions, products]);
+
+  const missingCommissionPersonCount = useMemo(() => {
+    return personnel.filter((p) => (commissionStatusByPersonId[p.id]?.missingCount || 0) > 0).length
+  }, [personnel, commissionStatusByPersonId])
+
+  const missingCommissionProductCount = useMemo(() => {
+    return personnel.reduce(
+      (sum, p) => sum + (commissionStatusByPersonId[p.id]?.missingCount || 0),
+      0,
+    )
+  }, [personnel, commissionStatusByPersonId])
+
   const filteredPersonnel = useMemo(() => {
     return personnel.filter((p) => {
       const matchSearch =
         p.name.toLowerCase().includes(search.toLowerCase()) ||
         p.position.toLowerCase().includes(search.toLowerCase());
       const matchUnit = filterUnit === "all" || p.salesUnitId === filterUnit;
-      return matchSearch && matchUnit;
+      const missing = commissionStatusByPersonId[p.id]?.missingCount || 0;
+      const matchCommission = filterCommission === "all" || missing > 0;
+      return matchSearch && matchUnit && matchCommission;
     });
-  }, [personnel, search, filterUnit]);
+  }, [personnel, search, filterUnit, filterCommission, commissionStatusByPersonId]);
 
   const getUnitName = (id: string) => salesUnits.find((u) => u.id === id)?.name || "-";
 
@@ -313,6 +388,24 @@ export default function PersonnelPage() {
             ))}
           </SelectContent>
         </Select>
+        <Button
+          type="button"
+          variant={filterCommission === "missing" ? "default" : "outline"}
+          size="sm"
+          className={
+            filterCommission === "missing"
+              ? "h-9 border-amber-500 bg-amber-500 hover:bg-amber-600"
+              : "h-9 border-amber-400 text-amber-900 hover:bg-amber-50"
+          }
+          onClick={() =>
+            setFilterCommission((prev) => (prev === "missing" ? "all" : "missing"))
+          }
+        >
+          <AlertTriangle className="mr-1 h-3.5 w-3.5" />
+          {filterCommission === "missing"
+            ? "显示全部人员"
+            : `未配提成清单${missingCommissionPersonCount > 0 ? `（${missingCommissionPersonCount}人）` : ""}`}
+        </Button>
         <div className="flex items-center gap-1.5">
           <CalendarRange className="h-4 w-4 text-muted-foreground" />
           <Select value={salesRange} onValueChange={(v) => setSalesRange(v as SalesRange)}>
@@ -348,16 +441,108 @@ export default function PersonnelPage() {
         <Badge variant="secondary">共 {filteredPersonnel.length} 人</Badge>
       </div>
 
-      <div className="mb-4 rounded-lg border border-violet-200 bg-violet-50/70 px-3 py-2 text-sm text-violet-900">
-        <span className="font-medium">个人提成怎么配：</span>
-        在表格「个人提成」列点击
-        <span className="mx-1 inline-flex items-center rounded bg-violet-100 px-1.5 py-0.5 text-xs font-medium text-violet-800">
-          提成配置
-        </span>
-        ，按「人员 × 产品」设置销售个人提成（支持多选一键配置）。团队管理提成请到成本管理。
-      </div>
+      {filterCommission === "missing" ? (
+        <Card className="mb-4 border-amber-300 bg-amber-50/50">
+          <CardContent className="p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-amber-950">
+                <AlertTriangle className="h-4 w-4 text-amber-600" />
+                <span className="font-medium">未配提成清单</span>
+                <span className="text-sm text-amber-800/80">
+                  {filteredPersonnel.length} 人 · {filteredPersonnel.reduce(
+                    (n, p) => n + (commissionStatusByPersonId[p.id]?.missingCount || 0),
+                    0,
+                  )} 个产品待配
+                </span>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8"
+                onClick={() => setFilterCommission("all")}
+              >
+                返回全部人员
+              </Button>
+            </div>
+            {filteredPersonnel.length === 0 ? (
+              <div className="rounded-md border border-dashed border-amber-200 bg-white/70 px-3 py-6 text-center text-sm text-muted-foreground">
+                当前单位/搜索条件下，没有未配提成的人
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {filteredPersonnel.map((person) => {
+                  const st = commissionStatusByPersonId[person.id]
+                  const names = st?.missingNames || []
+                  return (
+                    <div
+                      key={person.id}
+                      className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-white p-3 sm:flex-row sm:items-center"
+                    >
+                      <div className="min-w-[140px] shrink-0">
+                        <div className="font-medium text-foreground">{person.name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {getUnitName(person.salesUnitId)} · {person.position || "-"}
+                        </div>
+                      </div>
+                      <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">
+                        <span className="mr-1 self-center text-xs text-muted-foreground">未配产品：</span>
+                        {names.map((name) => (
+                          <Badge
+                            key={`${person.id}-${name}`}
+                            className="border border-red-200 bg-red-50 font-normal text-red-700 hover:bg-red-50"
+                          >
+                            {name}
+                          </Badge>
+                        ))}
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="h-8 shrink-0 bg-amber-500 hover:bg-amber-600"
+                        onClick={() => setCommissionPerson(person)}
+                      >
+                        <Percent className="mr-1 h-3.5 w-3.5" />
+                        去配置
+                      </Button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          {missingCommissionPersonCount > 0 && (
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+              <span>
+                有 <strong>{missingCommissionPersonCount}</strong> 人、共{" "}
+                <strong>{missingCommissionProductCount}</strong>{" "}
+                个「人员×产品」未配个人提成
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 border-amber-400 text-amber-900 hover:bg-amber-100"
+                onClick={() => setFilterCommission("missing")}
+              >
+                一键查看清单
+              </Button>
+            </div>
+          )}
+          <div className="mb-4 rounded-lg border border-violet-200 bg-violet-50/70 px-3 py-2 text-sm text-violet-900">
+            <span className="font-medium">个人提成怎么配：</span>
+            点「一键筛选未配提成」可直接看到每人缺哪些产品；再到「提成配置」按产品设置。
+            团队管理提成请到成本管理。
+          </div>
+        </>
+      )}
 
-      {/* Table */}
+      {/* Table：清单模式下隐藏，避免和未配清单重复 */}
+      {filterCommission !== "missing" && (
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
@@ -383,7 +568,7 @@ export default function PersonnelPage() {
                   <TableHead>状态</TableHead>
                   <TableHead>入职日期</TableHead>
                   <TableHead>离职日期</TableHead>
-                  <TableHead className="text-center min-w-[96px]">个人提成</TableHead>
+                  <TableHead className="min-w-[220px]">个人提成（未配产品）</TableHead>
                   <TableHead className="text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
@@ -415,16 +600,64 @@ export default function PersonnelPage() {
                       </TableCell>
                       <TableCell className="text-muted-foreground">{formatDate(person.hireDate)}</TableCell>
                       <TableCell className="text-muted-foreground">{person.resignDate ? formatDate(person.resignDate) : "-"}</TableCell>
-                      <TableCell className="text-center">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 border-violet-300 text-violet-700 hover:bg-violet-50"
-                          onClick={() => setCommissionPerson(person)}
-                        >
-                          <Percent className="mr-1 h-3.5 w-3.5" />
-                          提成配置
-                        </Button>
+                      <TableCell className="min-w-[220px]">
+                        {(() => {
+                          const st = commissionStatusByPersonId[person.id] || {
+                            soldCount: 0,
+                            configuredCount: 0,
+                            missingCount: 0,
+                            missingNames: [] as string[],
+                            missingProductIds: [] as string[],
+                          }
+                          const needWarn = st.missingCount > 0
+                          return (
+                            <div className="flex flex-col items-start gap-1.5">
+                              {needWarn ? (
+                                <div className="flex max-w-[280px] flex-wrap gap-1">
+                                  {st.missingNames.slice(0, 6).map((name) => (
+                                    <Badge
+                                      key={name}
+                                      className="border border-red-200 bg-red-50 font-normal text-red-700 hover:bg-red-50"
+                                    >
+                                      {name}
+                                    </Badge>
+                                  ))}
+                                  {st.missingNames.length > 6 ? (
+                                    <Badge
+                                      variant="secondary"
+                                      className="font-normal"
+                                    >
+                                      +{st.missingNames.length - 6}
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                              ) : st.soldCount > 0 ? (
+                                <span className="text-xs text-emerald-700">
+                                  已配齐 {st.configuredCount} 个产品
+                                </span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">
+                                  {isSalesBattlePosition(person.position)
+                                    ? "暂无关联产品"
+                                    : "非销售岗"}
+                                </span>
+                              )}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className={
+                                  needWarn
+                                    ? "h-8 border-amber-400 text-amber-800 hover:bg-amber-50"
+                                    : "h-8 border-violet-300 text-violet-700 hover:bg-violet-50"
+                                }
+                                onClick={() => setCommissionPerson(person)}
+                              >
+                                <Percent className="mr-1 h-3.5 w-3.5" />
+                                {needWarn ? "去配置" : "提成配置"}
+                              </Button>
+                            </div>
+                          )
+                        })()}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
@@ -460,6 +693,7 @@ export default function PersonnelPage() {
           </div>
         </CardContent>
       </Card>
+      )}
 
       <MPersonProductCommission
         person={commissionPerson}
