@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import {
   AlertTriangle,
+  Clock,
   Download,
   FileUp,
+  History,
   Paperclip,
   Pencil,
   Search,
@@ -44,15 +46,27 @@ import {
 import { useData } from "@/context/DataContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { hrProfilesApi, laborCompaniesApi, getToken } from "@/lib/api";
+import { formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type {
   ContractAlert,
   HrProfile,
+  HrProfileLog,
   HrReminders,
   LaborCompany,
   SignedDocument,
 } from "@/types";
 
+const HR_LOG_ACTION_LABELS: Record<string, { label: string; color: string }> = {
+  create: { label: "新建", color: "bg-emerald-100 text-emerald-800" },
+  update: { label: "修改", color: "bg-blue-100 text-blue-800" },
+  delete: { label: "删除", color: "bg-red-100 text-red-800" },
+  import: { label: "导入", color: "bg-violet-100 text-violet-800" },
+  batch_create: { label: "一键建档", color: "bg-teal-100 text-teal-800" },
+  batch_delete: { label: "批量删除", color: "bg-orange-100 text-orange-800" },
+  upload_document: { label: "上传文档", color: "bg-sky-100 text-sky-800" },
+  delete_document: { label: "删除文档", color: "bg-rose-100 text-rose-800" },
+};
 type ContractFilter = "all" | "due60" | "due30" | "expired" | "empty";
 type ImportForceStatus = "table" | "active" | "inactive";
 
@@ -432,6 +446,11 @@ export default function HrManagementPage() {
   );
   const [docUploading, setDocUploading] = useState(false);
   const docInputRef = useRef<HTMLInputElement>(null);
+  const [profileLogs, setProfileLogs] = useState<HrProfileLog[]>([]);
+  const [profileLogsLoading, setProfileLogsLoading] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [allLogs, setAllLogs] = useState<HrProfileLog[]>([]);
+  const [allLogsLoading, setAllLogsLoading] = useState(false);
 
   const unitNameMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -564,7 +583,35 @@ export default function HrManagementPage() {
       companyEmail: row.companyEmail || "",
     });
     setNewLaborName("");
+    setProfileLogs([]);
     setDialogOpen(true);
+    void loadProfileLogs(row.id);
+  }
+
+  async function loadProfileLogs(profileId: string) {
+    setProfileLogsLoading(true);
+    try {
+      const logs = await hrProfilesApi.profileLogs(profileId);
+      setProfileLogs(logs);
+    } catch {
+      setProfileLogs([]);
+    } finally {
+      setProfileLogsLoading(false);
+    }
+  }
+
+  async function openHistoryDialog() {
+    setHistoryOpen(true);
+    setAllLogsLoading(true);
+    try {
+      const logs = await hrProfilesApi.logs(200);
+      setAllLogs(logs);
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "加载操作记录失败");
+      setAllLogs([]);
+    } finally {
+      setAllLogsLoading(false);
+    }
   }
 
   function getDutyStatusFromResign(resignDate: string): "active" | "inactive" {
@@ -941,6 +988,7 @@ export default function HrManagementPage() {
         mimeType: file.type || "application/octet-stream",
       });
       patchListProfile(updated);
+      void loadProfileLogs(editing.id);
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : "上传失败");
     } finally {
@@ -955,6 +1003,7 @@ export default function HrManagementPage() {
     try {
       const updated = await hrProfilesApi.deleteDocument(editing.id, doc.id);
       patchListProfile(updated);
+      void loadProfileLogs(editing.id);
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : "删除失败");
     }
@@ -1009,58 +1058,68 @@ export default function HrManagementPage() {
         title="人事管理"
         description="可独立导入人事档案：匹配到人员管理则关联并同步入离职；匹配不到只建人事档、不同步人员。业绩归属单位仅关联人员时显示。签署公司≠销售单位。"
         action={
-          canEdit ? (
-            <div className="flex flex-wrap gap-2">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void handleSelectImportFile(f);
-                }}
-              />
-              <Button
-                disabled={batchCreating || loading || deletingSelected}
-                onClick={() => void handleBatchCreate()}
-              >
-                <Zap className="mr-2 h-4 w-4" />
-                {batchCreating
-                  ? "建档中…"
-                  : unprofiledPersonnel.length > 0
-                    ? `一键建档（${unprofiledPersonnel.length}）`
-                    : "一键建档"}
-              </Button>
-              <Button
-                variant="outline"
-                disabled={importing || deletingSelected}
-                onClick={openImportDialog}
-              >
-                <FileUp className="mr-2 h-4 w-4" />
-                {importing ? "导入中…" : "批量导入表格"}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={downloadImportSampleTemplate}
-              >
-                <Download className="mr-2 h-4 w-4" />
-                下载导入样表
-              </Button>
-              <Button
-                variant="destructive"
-                disabled={deletingSelected || loading || selectedIds.length === 0}
-                onClick={() => void handleDeleteSelected()}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                {deletingSelected
-                  ? "删除中…"
-                  : selectedIds.length > 0
-                    ? `删除所选（${selectedIds.length}）`
-                    : "删除所选"}
-              </Button>
-            </div>
-          ) : undefined
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              disabled={loading}
+              onClick={() => void openHistoryDialog()}
+            >
+              <History className="mr-2 h-4 w-4" />
+              操作记录
+            </Button>
+            {canEdit ? (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void handleSelectImportFile(f);
+                  }}
+                />
+                <Button
+                  disabled={batchCreating || loading || deletingSelected}
+                  onClick={() => void handleBatchCreate()}
+                >
+                  <Zap className="mr-2 h-4 w-4" />
+                  {batchCreating
+                    ? "建档中…"
+                    : unprofiledPersonnel.length > 0
+                      ? `一键建档（${unprofiledPersonnel.length}）`
+                      : "一键建档"}
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={importing || deletingSelected}
+                  onClick={openImportDialog}
+                >
+                  <FileUp className="mr-2 h-4 w-4" />
+                  {importing ? "导入中…" : "批量导入表格"}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={downloadImportSampleTemplate}
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  下载导入样表
+                </Button>
+                <Button
+                  variant="destructive"
+                  disabled={deletingSelected || loading || selectedIds.length === 0}
+                  onClick={() => void handleDeleteSelected()}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  {deletingSelected
+                    ? "删除中…"
+                    : selectedIds.length > 0
+                      ? `删除所选（${selectedIds.length}）`
+                      : "删除所选"}
+                </Button>
+              </>
+            ) : null}
+          </div>
         }
       />
 
@@ -1255,6 +1314,7 @@ export default function HrManagementPage() {
                   <TableHead className="min-w-[100px]">紧急联系人</TableHead>
                   <TableHead className="min-w-[64px]">关系</TableHead>
                   <TableHead className="min-w-[110px]">紧急电话</TableHead>
+                  <TableHead className="min-w-[100px]">最近操作</TableHead>
                   {canEdit && <TableHead className="min-w-[100px]">操作</TableHead>}
                 </TableRow>
               </TableHeader>
@@ -1262,7 +1322,7 @@ export default function HrManagementPage() {
                 {loading ? (
                   <TableRow>
                     <TableCell
-                      colSpan={canEdit ? 45 : 43}
+                      colSpan={canEdit ? 46 : 44}
                       className="py-10 text-center text-muted-foreground"
                     >
                       加载中…
@@ -1271,7 +1331,7 @@ export default function HrManagementPage() {
                 ) : filtered.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={canEdit ? 45 : 43}
+                      colSpan={canEdit ? 46 : 44}
                       className="py-10 text-center text-muted-foreground"
                     >
                       暂无人事档案。可点「一键建档」（仅针对人员管理已有人员）或「批量导入表格」（须先在人员管理存在同名人员）。
@@ -1440,6 +1500,20 @@ export default function HrManagementPage() {
                       <TableCell>{row.emergencyContact || "—"}</TableCell>
                       <TableCell>{row.emergencyRelation || "—"}</TableCell>
                       <TableCell>{row.emergencyPhone || "—"}</TableCell>
+                      <TableCell className="min-w-[100px]">
+                        {row.lastOperator ? (
+                          <div className="space-y-0.5">
+                            <div className="text-sm font-medium">{row.lastOperator}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {row.lastOperatedAt
+                                ? formatDateTime(row.lastOperatedAt)
+                                : "—"}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
                       {canEdit && (
                         <TableCell>
                           <div className="flex gap-1">
@@ -1661,6 +1735,54 @@ export default function HrManagementPage() {
               </div>
             )}
           </div>
+          {editing && (
+            <div className="space-y-2 rounded-md border p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Label className="flex items-center gap-1">
+                  <History className="h-4 w-4" />
+                  操作记录
+                </Label>
+                <span className="text-xs text-muted-foreground">
+                  {editing.lastOperator
+                    ? `最近：${editing.lastOperator}${
+                        editing.lastOperatedAt
+                          ? ` · ${formatDateTime(editing.lastOperatedAt)}`
+                          : ""
+                      }`
+                    : "暂无操作人"}
+                </span>
+              </div>
+              {profileLogsLoading ? (
+                <p className="text-xs text-muted-foreground">加载中…</p>
+              ) : profileLogs.length === 0 ? (
+                <p className="text-xs text-muted-foreground">暂无记录（保存后开始记录）</p>
+              ) : (
+                <div className="max-h-48 space-y-2 overflow-y-auto">
+                  {profileLogs.map((log) => {
+                    const cfg = HR_LOG_ACTION_LABELS[log.action] || {
+                      label: log.action,
+                      color: "bg-gray-100 text-gray-700",
+                    };
+                    return (
+                      <div key={log.id} className="rounded border px-2 py-1.5 text-sm">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge className={cfg.color}>{cfg.label}</Badge>
+                          <span className="font-medium">{log.operator || "未知"}</span>
+                          <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
+                            <Clock className="h-3 w-3" />
+                            {formatDateTime(log.createdAt)}
+                          </span>
+                        </div>
+                        <p className="mt-1 whitespace-pre-wrap break-words text-xs text-muted-foreground">
+                          {log.summary}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
           <p className="text-xs text-muted-foreground">
             批量导入按档案表头：姓名、入职时间、司龄、转正日期、用工性质、合同主体、性别…企业邮箱。可先下载样表，选择文件后预览再确认导入。
             合同提醒取已填期次中到期最晚的一期。签署公司≠销售单位。
@@ -1912,6 +2034,62 @@ export default function HrManagementPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+        <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <History className="h-5 w-5" />
+              人事档案操作记录
+              <Badge variant="secondary">{allLogs.length} 条</Badge>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="max-h-[60vh] space-y-2 overflow-y-auto py-2">
+            {allLogsLoading ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">加载中…</p>
+            ) : allLogs.length === 0 ? (
+              <div className="py-12 text-center text-muted-foreground">
+                <History className="mx-auto mb-3 h-10 w-10 opacity-30" />
+                <p>暂无操作记录</p>
+              </div>
+            ) : (
+              allLogs.map((log) => {
+                const cfg = HR_LOG_ACTION_LABELS[log.action] || {
+                  label: log.action,
+                  color: "bg-gray-100 text-gray-700",
+                };
+                return (
+                  <div key={log.id} className="space-y-1 rounded-lg border p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge className={cfg.color}>{cfg.label}</Badge>
+                      {log.profileName ? (
+                        <span className="text-sm font-medium">{log.profileName}</span>
+                      ) : null}
+                      <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
+                        <Clock className="h-3 w-3" />
+                        {formatDateTime(log.createdAt)}
+                      </span>
+                    </div>
+                    <div className="text-sm">
+                      <span className="text-muted-foreground">操作人：</span>
+                      <span className="font-medium">{log.operator || "未知"}</span>
+                    </div>
+                    <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">
+                      {log.summary}
+                    </p>
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setHistoryOpen(false)}>
+              关闭
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }

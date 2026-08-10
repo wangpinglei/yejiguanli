@@ -137,6 +137,10 @@ export const personnelApi = {
 export const hrProfilesApi = {
   list: () => api.get<import("@/types").HrProfile[]>("/hr-profiles"),
   reminders: () => api.get<import("@/types").HrReminders>("/hr-profiles/reminders"),
+  logs: (limit = 100) =>
+    api.get<import("@/types").HrProfileLog[]>(`/hr-profiles/logs?limit=${limit}`),
+  profileLogs: (id: string) =>
+    api.get<import("@/types").HrProfileLog[]>(`/hr-profiles/${id}/logs`),
   create: (data: Partial<import("@/types").HrProfile> & { personnelId: string }) =>
     api.post<import("@/types").HrProfile>("/hr-profiles", data),
   update: (id: string, data: Partial<import("@/types").HrProfile>) =>

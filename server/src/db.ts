@@ -283,6 +283,18 @@ function initSchema() {
       cost_record_remark TEXT DEFAULT ''
     );
 
+    CREATE TABLE IF NOT EXISTS hr_profile_logs (
+      id TEXT PRIMARY KEY,
+      profile_id TEXT NOT NULL DEFAULT '',
+      profile_name TEXT DEFAULT '',
+      action TEXT NOT NULL,
+      operator TEXT DEFAULT '',
+      operator_id TEXT DEFAULT '',
+      summary TEXT DEFAULT '',
+      detail TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS notifications (
       id TEXT PRIMARY KEY,
       type TEXT DEFAULT 'cost_change',
@@ -339,6 +351,8 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_personnel_unit ON personnel(sales_unit_id);
     CREATE INDEX IF NOT EXISTS idx_hr_profiles_personnel ON hr_profiles(personnel_id);
     CREATE INDEX IF NOT EXISTS idx_hr_profiles_contract_end ON hr_profiles(contract_end_date);
+    CREATE INDEX IF NOT EXISTS idx_hr_profile_logs_profile ON hr_profile_logs(profile_id);
+    CREATE INDEX IF NOT EXISTS idx_hr_profile_logs_created ON hr_profile_logs(created_at);
     CREATE INDEX IF NOT EXISTS idx_labor_companies_name ON labor_companies(name);
     CREATE INDEX IF NOT EXISTS idx_sales_unit ON sales_records(sales_unit_id);
     CREATE INDEX IF NOT EXISTS idx_sales_personnel ON sales_records(personnel_id);
@@ -448,6 +462,9 @@ function initSchema() {
     { name: "hire_date", ddl: "hire_date TEXT DEFAULT ''" },
     { name: "resign_date", ddl: "resign_date TEXT DEFAULT ''" },
     { name: "status", ddl: "status TEXT DEFAULT 'active'" },
+    { name: "last_operator", ddl: "last_operator TEXT DEFAULT ''" },
+    { name: "last_operator_id", ddl: "last_operator_id TEXT DEFAULT ''" },
+    { name: "last_operated_at", ddl: "last_operated_at TEXT DEFAULT ''" },
   ]);
 
   // 允许人事档案不关联人员管理（personnel_id 可空）
@@ -999,6 +1016,9 @@ export function rowToHrProfile(row: any) {
     companyEmail: row.company_email || "",
     signedDocuments: parseSignedDocuments(row.signed_documents),
     updatedAt: row.updated_at || "",
+    lastOperator: row.last_operator || "",
+    lastOperatorId: row.last_operator_id || "",
+    lastOperatedAt: row.last_operated_at || "",
     // 联动人员管理：未关联时用档案镜像；业绩归属单位仅在关联人员时显示
     name: row.name || "",
     salesUnitId: linked ? (row.sales_unit_id || "") : "",

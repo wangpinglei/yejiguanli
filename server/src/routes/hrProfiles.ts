@@ -34,6 +34,164 @@ function sanitizeFileName(name: string): string {
 router.use(authMiddleware);
 router.use(requireModuleView("hr_management"));
 
+function text(v: unknown, fallback = ""): string {
+  if (v === undefined || v === null) return fallback;
+  return String(v).trim();
+}
+
+type HrLogAction =
+  | "create"
+  | "update"
+  | "delete"
+  | "import"
+  | "batch_create"
+  | "batch_delete"
+  | "upload_document"
+  | "delete_document";
+
+function getOperator(req: { user?: { id?: string; name?: string; username?: string } }) {
+  const name = text(req.user?.name) || text(req.user?.username) || "未知用户";
+  const id = text(req.user?.id);
+  return { name, id };
+}
+
+function touchHrOperator(
+  db: ReturnType<typeof getDb>,
+  profileId: string,
+  operator: { name: string; id: string },
+) {
+  db.prepare(`
+    UPDATE hr_profiles SET
+      last_operator = ?,
+      last_operator_id = ?,
+      last_operated_at = datetime('now'),
+      updated_at = datetime('now')
+    WHERE id = ?
+  `).run(operator.name, operator.id, profileId);
+}
+
+function writeHrProfileLog(
+  db: ReturnType<typeof getDb>,
+  opts: {
+    profileId: string;
+    profileName: string;
+    action: HrLogAction;
+    operator: { name: string; id: string };
+    summary: string;
+    detail?: unknown;
+  },
+) {
+  db.prepare(`
+    INSERT INTO hr_profile_logs (
+      id, profile_id, profile_name, action, operator, operator_id, summary, detail, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+  `).run(
+    generateId("hrlog"),
+    opts.profileId || "",
+    opts.profileName || "",
+    opts.action,
+    opts.operator.name,
+    opts.operator.id,
+    opts.summary || "",
+    opts.detail == null || opts.detail === ""
+      ? ""
+      : typeof opts.detail === "string"
+        ? opts.detail
+        : JSON.stringify(opts.detail),
+  );
+}
+
+function rowToHrProfileLog(row: any) {
+  let detail: unknown = row.detail || "";
+  if (typeof detail === "string" && detail.trim().startsWith("{")) {
+    try {
+      detail = JSON.parse(detail);
+    } catch {
+      /* keep string */
+    }
+  } else if (typeof detail === "string" && detail.trim().startsWith("[")) {
+    try {
+      detail = JSON.parse(detail);
+    } catch {
+      /* keep string */
+    }
+  }
+  return {
+    id: row.id,
+    profileId: row.profile_id || "",
+    profileName: row.profile_name || "",
+    action: row.action || "",
+    operator: row.operator || "",
+    operatorId: row.operator_id || "",
+    summary: row.summary || "",
+    detail,
+    createdAt: row.created_at || "",
+  };
+}
+
+const HR_AUDIT_FIELD_LABELS: Record<string, string> = {
+  gender: "性别",
+  contractStartDate: "合同起始",
+  contractEndDate: "合同终止",
+  idNumber: "身份证",
+  birthDate: "出生年月",
+  ethnicity: "民族",
+  politicalStatus: "是否党员",
+  education: "学历",
+  school: "毕业院校",
+  major: "专业",
+  bankAccount: "银行卡号",
+  bankName: "开户行",
+  address: "联系地址",
+  emergencyContact: "紧急联系人",
+  emergencyPhone: "紧急电话",
+  laborCompanyId: "签署公司",
+  employmentType: "用工性质",
+  maritalStatus: "婚姻状况",
+  nativePlace: "籍贯",
+  householdRegister: "户籍",
+  idAddress: "身份证地址",
+  graduationDate: "毕业时间",
+  emergencyRelation: "与本人关系",
+  companyTenure: "司龄",
+  regularizationDate: "转正日期",
+  internshipStartDate: "实习开始",
+  internshipEndDate: "实习到期",
+  contract1StartDate: "劳动合同1起",
+  contract1EndDate: "劳动合同1止",
+  contract2StartDate: "劳动合同2起",
+  contract2EndDate: "劳动合同2止",
+  contract3StartDate: "劳动合同3起",
+  contract3EndDate: "劳动合同3止",
+  bankBelong: "所属银行",
+  companyEmail: "企业邮箱",
+  hireDate: "入职日期",
+  resignDate: "离职日期",
+  status: "状态",
+};
+
+function buildHrUpdateDiff(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): { summary: string; changes: Array<{ field: string; label: string; from: string; to: string }> } {
+  const changes: Array<{ field: string; label: string; from: string; to: string }> = [];
+  for (const [field, label] of Object.entries(HR_AUDIT_FIELD_LABELS)) {
+    const from = text(before[field]);
+    const to = text(after[field]);
+    if (from === to) continue;
+    changes.push({ field, label, from, to });
+  }
+  if (changes.length === 0) {
+    return { summary: "保存档案（无字段变化）", changes };
+  }
+  const preview = changes
+    .slice(0, 6)
+    .map((c) => `${c.label}: ${c.from || "空"}→${c.to || "空"}`)
+    .join("；");
+  const more = changes.length > 6 ? `等${changes.length}项` : "";
+  return { summary: `修改 ${preview}${more}`, changes };
+}
+
 const HR_SELECT = `
   SELECT h.*,
     COALESCE(NULLIF(TRIM(p.name), ''), h.name) AS name,
@@ -52,11 +210,6 @@ const HR_SELECT = `
   LEFT JOIN personnel p ON p.id = h.personnel_id
   LEFT JOIN labor_companies lc ON lc.id = h.labor_company_id
 `;
-
-function text(v: unknown, fallback = ""): string {
-  if (v === undefined || v === null) return fallback;
-  return String(v).trim();
-}
 
 /** 去掉表头空格/换行，便于匹配「姓 名」「合同终止日期 」等 */
 function normalizeRowKeys(row: Record<string, unknown>): Record<string, unknown> {
@@ -552,9 +705,41 @@ router.get("/reminders", (_req, res) => {
   });
 });
 
-// POST /api/hr-profiles/batch-create — 一键为未建档人员生成空档案
-router.post("/batch-create", requireModuleEdit("hr_management"), (_req, res) => {
+// GET /api/hr-profiles/logs — 最近操作记录
+router.get("/logs", requireModuleView("hr_management"), (req, res) => {
   const db = getDb();
+  const limitRaw = Number(req.query.limit || 100);
+  const limit = Number.isFinite(limitRaw)
+    ? Math.min(Math.max(Math.floor(limitRaw), 1), 500)
+    : 100;
+  const rows = db
+    .prepare(`
+      SELECT * FROM hr_profile_logs
+      ORDER BY created_at DESC
+      LIMIT ?
+    `)
+    .all(limit);
+  res.json(rows.map(rowToHrProfileLog));
+});
+
+// GET /api/hr-profiles/:id/logs — 单档案操作记录
+router.get("/:id/logs", requireModuleView("hr_management"), (req, res) => {
+  const db = getDb();
+  const rows = db
+    .prepare(`
+      SELECT * FROM hr_profile_logs
+      WHERE profile_id = ?
+      ORDER BY created_at DESC
+      LIMIT 200
+    `)
+    .all(req.params.id);
+  res.json(rows.map(rowToHrProfileLog));
+});
+
+// POST /api/hr-profiles/batch-create — 一键为未建档人员生成空档案
+router.post("/batch-create", requireModuleEdit("hr_management"), (req, res) => {
+  const db = getDb();
+  const operator = getOperator(req);
   const people = db.prepare("SELECT * FROM personnel ORDER BY name").all() as any[];
 
   const existingIds = new Set(
@@ -580,8 +765,9 @@ router.post("/batch-create", requireModuleEdit("hr_management"), (_req, res) => 
       continue;
     }
     const empty = upsertHrFields({}, { salesCompanyId: person.sales_unit_id || "" });
+    const profileId = generateId("hr");
     insertStmt.run(
-      generateId("hr"),
+      profileId,
       person.id,
       person.name || "",
       person.phone || "",
@@ -591,6 +777,14 @@ router.post("/batch-create", requireModuleEdit("hr_management"), (_req, res) => 
       person.status || "active",
       ...hrFieldValues(empty),
     );
+    touchHrOperator(db, profileId, operator);
+    writeHrProfileLog(db, {
+      profileId,
+      profileName: person.name || "",
+      action: "batch_create",
+      operator,
+      summary: `一键建档「${person.name || ""}」`,
+    });
     created += 1;
   }
 
@@ -606,11 +800,22 @@ router.post("/batch-delete", requireModuleEdit("hr_management"), (req, res) => {
     return res.status(400).json({ error: "请选择要删除的人事档案" });
   }
   const db = getDb();
+  const operator = getOperator(req);
   const del = db.prepare("DELETE FROM hr_profiles WHERE id = ?");
   let deleted = 0;
   for (const id of ids) {
+    const existing: any = db.prepare(`${HR_SELECT} WHERE h.id = ?`).get(id);
     const info = del.run(id);
-    deleted += Number(info.changes || 0);
+    if (Number(info.changes || 0) > 0) {
+      deleted += 1;
+      writeHrProfileLog(db, {
+        profileId: id,
+        profileName: existing?.name || "",
+        action: "batch_delete",
+        operator,
+        summary: `批量删除人事档案「${existing?.name || id}」`,
+      });
+    }
   }
   res.json({ deleted });
 });
@@ -637,6 +842,7 @@ router.post("/", requireModuleEdit("hr_management"), (req, res) => {
   if (!fields.salesCompanyId) fields.salesCompanyId = person.sales_unit_id || "";
 
   const id = generateId("hr");
+  const operator = getOperator(req);
   db.prepare(`
     INSERT INTO hr_profiles (
       id, personnel_id, name, phone, position, hire_date, resign_date, status,
@@ -653,6 +859,14 @@ router.post("/", requireModuleEdit("hr_management"), (req, res) => {
     person.status || "active",
     ...hrFieldValues(fields),
   );
+  touchHrOperator(db, id, operator);
+  writeHrProfileLog(db, {
+    profileId: id,
+    profileName: person.name || "",
+    action: "create",
+    operator,
+    summary: `新建人事档案「${person.name || ""}」`,
+  });
 
   const row = db.prepare(`${HR_SELECT} WHERE h.id = ?`).get(id);
   res.json(rowToHrProfile(row));
@@ -665,6 +879,7 @@ router.put("/:id", requireModuleEdit("hr_management"), (req, res) => {
   const existing: any = db.prepare(`${HR_SELECT} WHERE h.id = ?`).get(id);
   if (!existing) return res.status(404).json({ error: "人事档案不存在" });
 
+  const before = rowToHrProfile(existing) as Record<string, unknown>;
   const fields = upsertHrFields({
     gender: req.body.gender ?? existing.gender,
     contractStartDate: req.body.contractStartDate ?? existing.contract_start_date,
@@ -685,7 +900,8 @@ router.put("/:id", requireModuleEdit("hr_management"), (req, res) => {
     laborCompanyId: req.body.laborCompanyId ?? existing.labor_company_id,
     // 业绩归属单位：未关联人员时强制留空；已关联则保留/沿用人员单位镜像
     salesCompanyId: existing.personnel_id
-      ? (req.body.salesCompanyId ?? existing.sales_company_id || existing.sales_unit_id || "")
+      ? (req.body.salesCompanyId
+        ?? (existing.sales_company_id || existing.sales_unit_id || ""))
       : "",
     companyTenure: req.body.companyTenure ?? existing.company_tenure,
     regularizationDate: req.body.regularizationDate ?? existing.regularization_date,
@@ -715,19 +931,23 @@ router.put("/:id", requireModuleEdit("hr_management"), (req, res) => {
     UPDATE hr_profiles SET ${setClause}, updated_at=datetime('now') WHERE id=?
   `).run(...hrFieldValues(fields), id);
 
+  let nextHire = existing.hire_date || "";
+  let nextResign = existing.resign_date || "";
+  let status = existing.status || "active";
+
   // 同步入离职：有关联人员则写人员管理；无关联只写档案镜像
   if (req.body.hireDate !== undefined || req.body.resignDate !== undefined) {
-    const nextHire =
+    nextHire =
       req.body.hireDate !== undefined
         ? normalizeDate(req.body.hireDate)
         : (existing.hire_date || "");
-    const nextResign =
+    nextResign =
       req.body.resignDate === undefined
-        ? existing.resign_date
+        ? (existing.resign_date || "")
         : (req.body.resignDate === null || req.body.resignDate === ""
-          ? null
+          ? ""
           : normalizeDate(req.body.resignDate));
-    let status = existing.status || "active";
+    status = existing.status || "active";
     if (req.body.status) {
       status = text(req.body.status, status);
     } else if (!nextResign) {
@@ -739,12 +959,30 @@ router.put("/:id", requireModuleEdit("hr_management"), (req, res) => {
     if (existing.personnel_id) {
       db.prepare(
         "UPDATE personnel SET hire_date=?, resign_date=?, status=? WHERE id=?",
-      ).run(nextHire || "", nextResign, status, existing.personnel_id);
+      ).run(nextHire || "", nextResign || null, status, existing.personnel_id);
     }
     db.prepare(
       "UPDATE hr_profiles SET hire_date=?, resign_date=?, status=?, updated_at=datetime('now') WHERE id=?",
     ).run(nextHire || "", nextResign || "", status, id);
   }
+
+  const operator = getOperator(req);
+  const after: Record<string, unknown> = {
+    ...fields,
+    hireDate: nextHire || "",
+    resignDate: nextResign || "",
+    status,
+  };
+  const diff = buildHrUpdateDiff(before, after);
+  touchHrOperator(db, id, operator);
+  writeHrProfileLog(db, {
+    profileId: id,
+    profileName: text(before.name) || text(existing.name),
+    action: "update",
+    operator,
+    summary: diff.summary,
+    detail: { changes: diff.changes },
+  });
 
   const row = db.prepare(`${HR_SELECT} WHERE h.id = ?`).get(id);
   res.json(rowToHrProfile(row));
@@ -755,6 +993,14 @@ router.delete("/:id", requireModuleEdit("hr_management"), (req, res) => {
   const db = getDb();
   const existing: any = db.prepare(`${HR_SELECT} WHERE h.id = ?`).get(req.params.id);
   if (!existing) return res.status(404).json({ error: "人事档案不存在" });
+  const operator = getOperator(req);
+  writeHrProfileLog(db, {
+    profileId: existing.id,
+    profileName: existing.name || "",
+    action: "delete",
+    operator,
+    summary: `删除人事档案「${existing.name || ""}」`,
+  });
   db.prepare("DELETE FROM hr_profiles WHERE id = ?").run(req.params.id);
   res.json({ ok: true });
 });
@@ -891,6 +1137,16 @@ router.post("/:id/documents", requireModuleEdit("hr_management"), (req, res) => 
   };
   const next = [...profile.docs, doc];
   saveProfileSignedDocs(db, id, next);
+  const operator = getOperator(req);
+  touchHrOperator(db, id, operator);
+  writeHrProfileLog(db, {
+    profileId: id,
+    profileName: text(profile.row?.name),
+    action: "upload_document",
+    operator,
+    summary: `上传签署文档「${fileName}」`,
+    detail: { docId, fileName, size: buffer.length },
+  });
 
   const row = db.prepare(`${HR_SELECT} WHERE h.id = ?`).get(id);
   res.json(rowToHrProfile(row));
@@ -935,6 +1191,17 @@ router.delete("/:id/documents/:docId", requireModuleEdit("hr_management"), (req,
     // 忽略磁盘删除失败，元数据已更新
   }
 
+  const operator = getOperator(req);
+  touchHrOperator(db, id, operator);
+  writeHrProfileLog(db, {
+    profileId: id,
+    profileName: text(profile.row?.name),
+    action: "delete_document",
+    operator,
+    summary: `删除签署文档「${doc.fileName}」`,
+    detail: { docId, fileName: doc.fileName },
+  });
+
   const row = db.prepare(`${HR_SELECT} WHERE h.id = ?`).get(id);
   res.json(rowToHrProfile(row));
 });
@@ -972,6 +1239,7 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
         : "";
 
     const db = getDb();
+    const operator = getOperator(req);
     let defaultLaborCompanyId = text(options.laborCompanyId);
     const selectedLaborName = text(options.laborCompanyName);
     if (!defaultLaborCompanyId && selectedLaborName) {
@@ -1195,6 +1463,9 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
       }
 
       try {
+        let importedProfileId = "";
+        let importMode: "create" | "update" = "create";
+
         if (person) {
           const mirrorName = String(person.name || name);
           const mirrorPhone = phone || String(person.phone || "");
@@ -1204,6 +1475,8 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
             .prepare("SELECT id FROM hr_profiles WHERE personnel_id = ?")
             .get(person.id) as { id: string } | undefined;
           if (existed) {
+            importedProfileId = existed.id;
+            importMode = "update";
             updateByPersonnelStmt.run(
               mirrorName,
               mirrorPhone,
@@ -1215,8 +1488,10 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
               person.id,
             );
           } else {
+            importedProfileId = generateId("hr");
+            importMode = "create";
             insertStmt.run(
-              generateId("hr"),
+              importedProfileId,
               person.id,
               mirrorName,
               mirrorPhone,
@@ -1284,6 +1559,8 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
             `)
             .get(name) as { id: string } | undefined;
           if (existed) {
+            importedProfileId = existed.id;
+            importMode = "update";
             updateByIdStmt.run(
               name,
               phone,
@@ -1295,8 +1572,10 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
               existed.id,
             );
           } else {
+            importedProfileId = generateId("hr");
+            importMode = "create";
             insertStmt.run(
-              generateId("hr"),
+              importedProfileId,
               null,
               name,
               phone,
@@ -1307,6 +1586,25 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
               ...hrFieldValues(fields),
             );
           }
+        }
+
+        if (importedProfileId) {
+          touchHrOperator(db, importedProfileId, operator);
+          writeHrProfileLog(db, {
+            profileId: importedProfileId,
+            profileName: name,
+            action: "import",
+            operator,
+            summary:
+              importMode === "create"
+                ? `导入新建人事档案「${name}」`
+                : `导入更新人事档案「${name}」`,
+            detail: {
+              mode: importMode,
+              excelRow,
+              linkedPersonnel: Boolean(person),
+            },
+          });
         }
 
         result.success += 1;
@@ -1320,6 +1618,19 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
         });
       }
     }
+
+    writeHrProfileLog(db, {
+      profileId: "",
+      profileName: "",
+      action: "import",
+      operator,
+      summary: `批量导入完成：成功 ${result.success} 条，失败 ${result.failed} 条`,
+      detail: {
+        success: result.success,
+        failed: result.failed,
+        errors: result.errors.slice(0, 50),
+      },
+    });
 
     res.json(result);
   } catch (e: unknown) {

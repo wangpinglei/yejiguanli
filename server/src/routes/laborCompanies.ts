@@ -30,6 +30,22 @@ router.get("/", (_req, res) => {
 router.post("/", requireModuleEdit("hr_management"), (req, res) => {
   const name = String(req.body?.name || "").trim();
   if (!name) return res.status(400).json({ error: "签署公司名称不能为空" });
+  const invalidNames = [
+    "保洁",
+    "停薪留职",
+    "外聘",
+    "全职",
+    "兼职",
+    "实习",
+    "在职",
+    "离职",
+    "试用",
+  ];
+  if (invalidNames.some((n) => n === name)) {
+    return res.status(400).json({
+      error: `「${name}」不是签署公司，请填入真实劳动合同公司名称`,
+    });
+  }
 
   const db = getDb();
   const existed = db

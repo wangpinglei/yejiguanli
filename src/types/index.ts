@@ -163,6 +163,9 @@ export interface HrProfile {
   companyEmail: string;
   signedDocuments: SignedDocument[];
   updatedAt?: string;
+  lastOperator?: string;
+  lastOperatorId?: string;
+  lastOperatedAt?: string;
   // 联动人员管理（只读展示；改单位请到人员管理）
   name: string;
   salesUnitId: string;
@@ -183,6 +186,18 @@ export interface HrReminders {
   due30: number;
   due60: number;
   total: number;
+}
+
+export interface HrProfileLog {
+  id: string;
+  profileId: string;
+  profileName: string;
+  action: string;
+  operator: string;
+  operatorId: string;
+  summary: string;
+  detail?: unknown;
+  createdAt: string;
 }
 
 // 产品
