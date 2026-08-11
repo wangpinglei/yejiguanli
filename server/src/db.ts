@@ -556,9 +556,20 @@ const INVALID_LABOR_COMPANY_NAMES = [
   "试用",
 ] as const;
 
-function isInvalidLaborCompanyName(name: string): boolean {
+/** 是否像日期/年月（导入时误把合同日期写进签署公司） */
+function looksLikeDateLaborCompanyName(name: string): boolean {
   const n = name.trim();
   if (!n) return true;
+  if (/^\d{4}[\/\-年.]\d{1,2}([\/\-月.]\d{1,2})?日?$/.test(n)) return true;
+  if (/^\d{4}-\d{2}-\d{2}/.test(n)) return true;
+  if (/^\d{8}$/.test(n)) return true;
+  return false;
+}
+
+export function isInvalidLaborCompanyName(name: string): boolean {
+  const n = name.trim();
+  if (!n) return true;
+  if (looksLikeDateLaborCompanyName(n)) return true;
   return INVALID_LABOR_COMPANY_NAMES.some(
     (bad) => bad.toLowerCase() === n.toLowerCase(),
   );
@@ -566,9 +577,9 @@ function isInvalidLaborCompanyName(name: string): boolean {
 
 /**
  * 清除误导入到「劳动合同签署公司」字典的非公司名。
- * 若档案用工性质为空，则把该脏名回填到用工性质。
+ * 若档案用工性质为空，则把该脏名回填到用工性质（日期类脏名不回填）。
  */
-function cleanupInvalidLaborCompanyNames() {
+export function cleanupInvalidLaborCompanyNames() {
   const companies = db
     .prepare("SELECT id, name FROM labor_companies")
     .all() as Array<{ id: string; name: string }>;
@@ -577,6 +588,12 @@ function cleanupInvalidLaborCompanyNames() {
 
   const profilesByLabor = db.prepare(`
     SELECT id, employment_type FROM hr_profiles WHERE labor_company_id = ?
+  `);
+  const clearOnly = db.prepare(`
+    UPDATE hr_profiles SET
+      labor_company_id = '',
+      updated_at = datetime('now')
+    WHERE id = ?
   `);
   const fixProfile = db.prepare(`
     UPDATE hr_profiles SET
@@ -591,12 +608,14 @@ function cleanupInvalidLaborCompanyNames() {
   const deleteLabor = db.prepare("DELETE FROM labor_companies WHERE id = ?");
 
   for (const company of junk) {
+    const isDate = looksLikeDateLaborCompanyName(company.name);
     const profiles = profilesByLabor.all(company.id) as Array<{
       id: string;
       employment_type: string;
     }>;
     for (const p of profiles) {
-      fixProfile.run(company.name, p.id);
+      if (isDate) clearOnly.run(p.id);
+      else fixProfile.run(company.name, p.id);
     }
     deleteLabor.run(company.id);
   }

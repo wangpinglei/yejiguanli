@@ -686,6 +686,34 @@ export default function HrManagementPage() {
     }
   }
 
+  async function handleDeleteLaborCompany(companyId: string) {
+    const company = laborCompanies.find((c) => c.id === companyId);
+    if (!company) return;
+    const ok = window.confirm(
+      `确定删除签署公司「${company.name}」？\n`
+        + "若有人事档案使用该公司，将清空其签署公司字段，档案本身不会删除。",
+    );
+    if (!ok) return;
+    try {
+      await laborCompaniesApi.delete(companyId);
+      setLaborCompanies((prev) => prev.filter((c) => c.id !== companyId));
+      if (laborCompanyFilter === companyId) setLaborCompanyFilter("all");
+      if (form.laborCompanyId === companyId) {
+        setForm({ ...form, laborCompanyId: "" });
+      }
+      if (importOptions.laborCompanyId === companyId) {
+        setImportOptions({
+          ...importOptions,
+          laborCompanyId: "",
+          laborCompanyName: "",
+        });
+      }
+      await loadData();
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "删除签署公司失败");
+    }
+  }
+
   async function handleSave() {
     if (!editing) return;
     setSaving(true);
@@ -1200,6 +1228,18 @@ export default function HrManagementPage() {
             ))}
           </SelectContent>
         </Select>
+        {canEdit
+          && laborCompanyFilter !== "all"
+          && laborCompanyFilter !== "empty" && (
+          <Button
+            type="button"
+            variant="outline"
+            className="text-destructive"
+            onClick={() => void handleDeleteLaborCompany(laborCompanyFilter)}
+          >
+            删除该签署公司
+          </Button>
+        )}
         <Select
           value={statusFilter}
           onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}
@@ -1570,7 +1610,7 @@ export default function HrManagementPage() {
                 </SelectContent>
               </Select>
               {canEdit && (
-                <div className="flex gap-2 pt-1">
+                <div className="flex flex-wrap gap-2 pt-1">
                   <Input
                     placeholder="真实签署公司全称（≠销售单位名）"
                     value={newLaborName}
@@ -1579,10 +1619,20 @@ export default function HrManagementPage() {
                   <Button type="button" variant="outline" onClick={() => void handleAddLaborCompany()}>
                     新增
                   </Button>
+                  {form.laborCompanyId ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="text-destructive"
+                      onClick={() => void handleDeleteLaborCompany(form.laborCompanyId)}
+                    >
+                      删除当前字典项
+                    </Button>
+                  ) : null}
                 </div>
               )}
               <p className="text-xs text-muted-foreground">
-                与「销售单位管理」无关；请按劳动合同上的公司名称维护。
+                与「销售单位管理」无关；请按劳动合同上的公司名称维护。误识别的日期等可删字典项。
               </p>
             </div>
             <div className="space-y-1.5">

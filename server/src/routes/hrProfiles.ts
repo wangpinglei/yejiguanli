@@ -10,6 +10,7 @@ import {
   parseSignedDocuments,
   runInTransaction,
   ensureHrProfileOperatorColumns,
+  isInvalidLaborCompanyName,
   type SignedDocument,
 } from "../db";
 import { authMiddleware } from "../auth";
@@ -671,27 +672,6 @@ function resolveUnitIdByName(db: ReturnType<typeof getDb>, name: string): string
     if (matched.length === 1) return matched[0].id;
   }
   return "";
-}
-
-/** 明显不是劳动合同签署公司的脏名字（多为用工性质/状态误写入） */
-const INVALID_LABOR_COMPANY_NAMES = [
-  "保洁",
-  "停薪留职",
-  "外聘",
-  "全职",
-  "兼职",
-  "实习",
-  "在职",
-  "离职",
-  "试用",
-] as const;
-
-function isInvalidLaborCompanyName(name: string): boolean {
-  const n = name.trim();
-  if (!n) return true;
-  return INVALID_LABOR_COMPANY_NAMES.some(
-    (bad) => bad.toLowerCase() === n.toLowerCase(),
-  );
 }
 
 /** 劳动签署公司：按名称查找或自动创建字典项（labor_companies） */

@@ -1,5 +1,10 @@
 import { Router } from "express";
-import { getDb, generateId } from "../db";
+import {
+  getDb,
+  generateId,
+  isInvalidLaborCompanyName,
+  cleanupInvalidLaborCompanyNames,
+} from "../db";
 import { authMiddleware } from "../auth";
 import { requireModuleView, requireModuleEdit } from "../middleware";
 
@@ -19,6 +24,8 @@ function rowToLaborCompany(row: any) {
 
 // GET /api/labor-companies
 router.get("/", (_req, res) => {
+  // 顺带清理误导入的日期/用工性质等脏字典项
+  cleanupInvalidLaborCompanyNames();
   const db = getDb();
   const rows = db
     .prepare("SELECT * FROM labor_companies ORDER BY name COLLATE NOCASE")
@@ -30,20 +37,9 @@ router.get("/", (_req, res) => {
 router.post("/", requireModuleEdit("hr_management"), (req, res) => {
   const name = String(req.body?.name || "").trim();
   if (!name) return res.status(400).json({ error: "签署公司名称不能为空" });
-  const invalidNames = [
-    "保洁",
-    "停薪留职",
-    "外聘",
-    "全职",
-    "兼职",
-    "实习",
-    "在职",
-    "离职",
-    "试用",
-  ];
-  if (invalidNames.some((n) => n === name)) {
+  if (isInvalidLaborCompanyName(name)) {
     return res.status(400).json({
-      error: `「${name}」不是签署公司，请填入真实劳动合同公司名称`,
+      error: `「${name}」不是签署公司，请填入真实劳动合同公司名称（勿填日期或用工性质）`,
     });
   }
 
@@ -72,6 +68,11 @@ router.put("/:id", requireModuleEdit("hr_management"), (req, res) => {
 
   const name = String(req.body?.name ?? existing.name).trim();
   if (!name) return res.status(400).json({ error: "签署公司名称不能为空" });
+  if (isInvalidLaborCompanyName(name)) {
+    return res.status(400).json({
+      error: `「${name}」不是签署公司，请填入真实劳动合同公司名称`,
+    });
+  }
 
   const dup = db
     .prepare(
@@ -89,20 +90,29 @@ router.put("/:id", requireModuleEdit("hr_management"), (req, res) => {
 });
 
 // DELETE /api/labor-companies/:id
+// 会先清空引用该字典的人事档案签署公司，再删除字典项
 router.delete("/:id", requireModuleEdit("hr_management"), (req, res) => {
   const db = getDb();
+  const existing = db
+    .prepare("SELECT * FROM labor_companies WHERE id = ?")
+    .get(req.params.id) as any;
+  if (!existing) return res.status(404).json({ error: "签署公司不存在" });
+
   const used = db
     .prepare(
       "SELECT COUNT(*) as c FROM hr_profiles WHERE labor_company_id = ?",
     )
     .get(req.params.id) as { c: number };
-  if (used?.c > 0) {
-    return res.status(400).json({
-      error: `仍有 ${used.c} 份人事档案使用该公司，无法删除`,
-    });
-  }
+  const cleared = used?.c || 0;
+
+  db.prepare(
+    `UPDATE hr_profiles SET
+      labor_company_id = '',
+      updated_at = datetime('now')
+     WHERE labor_company_id = ?`,
+  ).run(req.params.id);
   db.prepare("DELETE FROM labor_companies WHERE id = ?").run(req.params.id);
-  res.json({ ok: true });
+  res.json({ ok: true, clearedProfiles: cleared });
 });
 
 export default router;
