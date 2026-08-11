@@ -49,6 +49,15 @@ function ensureColumns(table: string, cols: Array<{ name: string; ddl: string }>
   }
 }
 
+/** 人事操作人字段：表重建后可能丢失，对外暴露以便路由侧再次兜底补齐 */
+export function ensureHrProfileOperatorColumns() {
+  ensureColumns("hr_profiles", [
+    { name: "last_operator", ddl: "last_operator TEXT DEFAULT ''" },
+    { name: "last_operator_id", ddl: "last_operator_id TEXT DEFAULT ''" },
+    { name: "last_operated_at", ddl: "last_operated_at TEXT DEFAULT ''" },
+  ]);
+}
+
 function initSchema() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
@@ -488,6 +497,9 @@ function initSchema() {
   // 允许人事档案不关联人员管理（personnel_id 可空）
   migrateHrProfilesNullablePersonnel();
 
+  // 表重建后可能丢掉操作人列，这里再补一次
+  ensureHrProfileOperatorColumns();
+
   // 人员单位归属时间轴：存量补一段当前单位
   ensurePersonnelUnitAssignments();
 
@@ -693,6 +705,9 @@ function migrateHrProfilesNullablePersonnel() {
       company_email TEXT DEFAULT '',
       signed_documents TEXT DEFAULT '[]',
       updated_at TEXT DEFAULT (datetime('now')),
+      last_operator TEXT DEFAULT '',
+      last_operator_id TEXT DEFAULT '',
+      last_operated_at TEXT DEFAULT '',
       FOREIGN KEY (personnel_id) REFERENCES personnel(id) ON DELETE CASCADE
     );
   `);
@@ -746,6 +761,9 @@ function migrateHrProfilesNullablePersonnel() {
     "company_email",
     "signed_documents",
     "updated_at",
+    "last_operator",
+    "last_operator_id",
+    "last_operated_at",
   ];
   const selectExprs = insertCols.map((c) => {
     if (c === "personnel_id") {

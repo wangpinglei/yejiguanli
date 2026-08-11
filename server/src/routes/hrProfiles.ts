@@ -9,6 +9,7 @@ import {
   getContractAlert,
   parseSignedDocuments,
   runInTransaction,
+  ensureHrProfileOperatorColumns,
   type SignedDocument,
 } from "../db";
 import { authMiddleware } from "../auth";
@@ -61,6 +62,7 @@ function touchHrOperator(
   profileId: string,
   operator: { name: string; id: string },
 ) {
+  ensureHrProfileOperatorColumns();
   db.prepare(`
     UPDATE hr_profiles SET
       last_operator = ?,
@@ -755,6 +757,7 @@ function saveProfileSignedDocs(
 
 // GET /api/hr-profiles（有人事权限即可看全量，不按销售单位过滤）
 router.get("/", (_req, res) => {
+  ensureHrProfileOperatorColumns();
   const db = getDb();
   const rows = db.prepare(`
     ${HR_SELECT}
@@ -765,6 +768,7 @@ router.get("/", (_req, res) => {
 
 // GET /api/hr-profiles/reminders
 router.get("/reminders", (_req, res) => {
+  ensureHrProfileOperatorColumns();
   const db = getDb();
   const rows = db.prepare(`${HR_SELECT}`).all() as any[];
   let expired = 0;
