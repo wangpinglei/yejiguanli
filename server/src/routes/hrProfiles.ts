@@ -195,10 +195,16 @@ function buildHrUpdateDiff(
 
 const HR_SELECT = `
   SELECT h.*,
+    CAST(h.id_number AS TEXT) AS id_number,
+    CAST(h.bank_account AS TEXT) AS bank_account,
+    CAST(h.emergency_phone AS TEXT) AS emergency_phone,
     COALESCE(NULLIF(TRIM(p.name), ''), h.name) AS name,
     CASE WHEN p.id IS NOT NULL THEN IFNULL(p.sales_unit_id, '') ELSE '' END AS sales_unit_id,
     COALESCE(NULLIF(TRIM(p.position), ''), h.position) AS position,
-    COALESCE(NULLIF(TRIM(p.phone), ''), h.phone) AS phone,
+    COALESCE(
+      NULLIF(TRIM(CAST(p.phone AS TEXT)), ''),
+      CAST(h.phone AS TEXT)
+    ) AS phone,
     h.hire_date AS hire_date,
     h.resign_date AS resign_date,
     COALESCE(NULLIF(TRIM(h.status), ''), 'active') AS status,
@@ -466,7 +472,7 @@ function upsertHrFields(body: Record<string, unknown>, fallback?: {
   laborCompanyId?: string;
   salesCompanyId?: string;
 }) {
-  const idNumber = text(body.idNumber ?? body.id_number);
+  const idNumber = fixExcelLongNumber(body.idNumber ?? body.id_number);
   const birthDate = normalizeDate(body.birthDate ?? body.birth_date);
   const ageFromBody = parseOptionalNumber(body.age);
   const age = ageFromBody ?? calcAgeFromIdOrBirth(idNumber, birthDate);
@@ -512,11 +518,11 @@ function upsertHrFields(body: Record<string, unknown>, fallback?: {
     education: text(body.education),
     school: text(body.school),
     major: text(body.major),
-    bankAccount: text(body.bankAccount ?? body.bank_account),
+    bankAccount: fixExcelLongNumber(body.bankAccount ?? body.bank_account),
     bankName: text(body.bankName ?? body.bank_name),
     address: text(body.address),
     emergencyContact: text(body.emergencyContact ?? body.emergency_contact),
-    emergencyPhone: text(body.emergencyPhone ?? body.emergency_phone),
+    emergencyPhone: fixExcelLongNumber(body.emergencyPhone ?? body.emergency_phone),
     laborCompanyId: text(
       body.laborCompanyId ?? body.labor_company_id ?? fallback?.laborCompanyId ?? "",
     ),

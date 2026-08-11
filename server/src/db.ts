@@ -481,6 +481,9 @@ function initSchema() {
     { name: "last_operated_at", ddl: "last_operated_at TEXT DEFAULT ''" },
   ]);
 
+  // 尽早把身份证/银行卡等超大整数改成 TEXT，避免后续任意 SELECT * 崩溃
+  normalizeHrLongNumberColumnsAsText();
+
   // 允许人事档案不关联人员管理（personnel_id 可空）
   migrateHrProfilesNullablePersonnel();
 
@@ -498,6 +501,32 @@ function initSchema() {
   cleanupInvalidLaborCompanyNames();
   // 清理人事导入曾自动创建的「人事挂靠」人员（人事档案一并删）；手动录入的人员管理数据保留
   cleanupHrAffiliateAutoCreated();
+}
+
+/**
+ * 将人事/人员表中误存为 INTEGER/REAL 的长数字字段改回 TEXT，
+ * 避免 node:sqlite 读取超大整数时抛出
+ * “Value is too large to be represented as a JavaScript number”。
+ */
+function normalizeHrLongNumberColumnsAsText() {
+  const hrCols = [
+    "id_number",
+    "bank_account",
+    "phone",
+    "emergency_phone",
+  ] as const;
+  for (const col of hrCols) {
+    db.prepare(`
+      UPDATE hr_profiles
+      SET ${col} = CAST(${col} AS TEXT)
+      WHERE typeof(${col}) IN ('integer', 'real')
+    `).run();
+  }
+  db.prepare(`
+    UPDATE personnel
+    SET phone = CAST(phone AS TEXT)
+    WHERE typeof(phone) IN ('integer', 'real')
+  `).run();
 }
 
 /** 明显不是劳动合同签署公司的脏名字（多为用工性质/状态误写入） */
@@ -1044,10 +1073,16 @@ export function calcAgeFromIdOrBirth(idNumber?: string, birthDate?: string): num
 
 export function rowToHrProfile(row: any) {
   const alert = getContractAlert(row.contract_end_date);
+  const asText = (v: unknown): string => {
+    if (v === undefined || v === null) return "";
+    if (typeof v === "bigint") return v.toString();
+    return String(v);
+  };
+  const idNumber = asText(row.id_number);
   const age =
     row.age != null && row.age !== ""
       ? Number(row.age)
-      : calcAgeFromIdOrBirth(row.id_number, row.birth_date);
+      : calcAgeFromIdOrBirth(idNumber, row.birth_date);
   const linked = Boolean(row.personnel_id);
   return {
     id: row.id,
@@ -1055,7 +1090,7 @@ export function rowToHrProfile(row: any) {
     gender: row.gender || "",
     contractStartDate: row.contract_start_date || "",
     contractEndDate: row.contract_end_date || "",
-    idNumber: row.id_number || "",
+    idNumber,
     birthDate: row.birth_date || "",
     age: age == null || Number.isNaN(age) ? null : age,
     ethnicity: row.ethnicity || "",
@@ -1063,11 +1098,11 @@ export function rowToHrProfile(row: any) {
     education: row.education || "",
     school: row.school || "",
     major: row.major || "",
-    bankAccount: row.bank_account || "",
+    bankAccount: asText(row.bank_account),
     bankName: row.bank_name || "",
     address: row.address || "",
     emergencyContact: row.emergency_contact || "",
-    emergencyPhone: row.emergency_phone || "",
+    emergencyPhone: asText(row.emergency_phone),
     laborCompanyId: row.labor_company_id || "",
     laborCompanyName: row.labor_company_name || "",
     salesCompanyId: linked ? (row.sales_company_id || row.sales_unit_id || "") : "",
@@ -1099,7 +1134,7 @@ export function rowToHrProfile(row: any) {
     name: row.name || "",
     salesUnitId: linked ? (row.sales_unit_id || "") : "",
     position: row.position || "",
-    phone: row.phone || "",
+    phone: asText(row.phone),
     hireDate: row.hire_date || "",
     resignDate: row.resign_date || undefined,
     status: (row.status || "active") as "active" | "inactive",

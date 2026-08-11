@@ -249,12 +249,13 @@ function calendarYmdFromDate(d: Date): string {
   return fromExcelSerial(serial);
 }
 
-/** 导入单元格：Date / Excel 序列 → YYYY-MM-DD，避免 JSON 时区串日 */
+/** 导入单元格：日期与超长数字统一成安全字符串 */
 function normalizeImportCell(headerKey: string, v: unknown): unknown {
   if (v === undefined || v === null || v === "") return "";
   const isDateCol = /日期|时间|年月|起止|出生|入职|离职|转正|毕业|合同|实习/.test(
     headerKey,
   );
+  const isLongNumCol = /身份证|银行卡|手机|电话|账号|账户/.test(headerKey);
   if (v instanceof Date && !Number.isNaN(v.getTime())) {
     return calendarYmdFromDate(v);
   }
@@ -266,6 +267,16 @@ function normalizeImportCell(headerKey: string, v: unknown): unknown {
     v < 80000
   ) {
     return fromExcelSerial(v);
+  }
+  if (isLongNumCol) {
+    if (typeof v === "number" && Number.isFinite(v)) {
+      if (Math.abs(v) >= 1e14) return BigInt(Math.round(v)).toString();
+      if (Number.isInteger(v)) return String(v);
+      return String(v);
+    }
+    const s = String(v).trim();
+    if (/^\d+\.0$/.test(s)) return s.slice(0, -2);
+    return s;
   }
   if (typeof v === "string") {
     const s = v.trim();
