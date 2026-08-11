@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Calculator, Download } from 'lucide-react'
+import { Calculator, ChevronDown, Download } from 'lucide-react'
 
 import { formatCurrency } from '@/lib/format'
 import {
@@ -14,8 +14,21 @@ import {
   type EstimateSnapshot,
 } from '@/lib/performanceEstimate'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   Sheet,
   SheetContent,
@@ -24,30 +37,64 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 
+export type EstimateSummaryInput = {
+  salesAmount: number
+  settlementIncome: number
+  otherIncome: number
+  totalCost: number
+  manualCost?: number
+  salaryCost?: number
+  /** 当月销售提成（用于拆出固定成本、预填提成比例） */
+  totalCommission?: number
+}
+
 type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
-  selectedMonth: string
-  filterUnitLabel: string
-  summary: {
-    salesAmount: number
-    settlementIncome: number
-    otherIncome: number
-    totalCost: number
-    manualCost?: number
-    salaryCost?: number
-    /** 当月销售提成（用于拆出固定成本、预填提成比例） */
-    totalCommission?: number
+  initialMonth: string
+  /** 空数组 = 全部单位 */
+  initialUnitIds: string[]
+  monthOptions: Array<{ value: string; label: string }>
+  salesUnits: Array<{ id: string; name: string }>
+  getSummary: (month: string, unitIds: string[]) => EstimateSummaryInput
+}
+
+function normalizeUnitIds(
+  ids: string[],
+  unitCount: number,
+): string[] {
+  if (ids.length === 0 || ids.length === unitCount) return []
+  return ids
+}
+
+function getUnitFilterLabel(
+  selectedIds: string[],
+  units: Array<{ id: string; name: string }>,
+): string {
+  if (selectedIds.length === 0 || selectedIds.length === units.length) {
+    return '全部单位'
   }
+  if (selectedIds.length === 1) {
+    return units.find((u) => u.id === selectedIds[0])?.name || '已选 1 个单位'
+  }
+  return `已选 ${selectedIds.length} 个单位`
 }
 
 export default function MPerformanceEstimateSheet({
   open,
   onOpenChange,
-  selectedMonth,
-  filterUnitLabel,
-  summary,
+  initialMonth,
+  initialUnitIds,
+  monthOptions,
+  salesUnits,
+  getSummary,
 }: Props) {
+  const [estimateMonth, setEstimateMonth] = useState(initialMonth)
+  const [estimateUnitIds, setEstimateUnitIds] = useState<string[]>(
+    normalizeUnitIds(initialUnitIds, salesUnits.length),
+  )
+  const [unitPickerOpen, setUnitPickerOpen] = useState(false)
+  const [summary, setSummary] = useState<EstimateSummaryInput | null>(null)
   const [snapshot, setSnapshot] = useState<EstimateSnapshot | null>(null)
   const [ratioPercentInput, setRatioPercentInput] = useState('')
   const [commissionPercentInput, setCommissionPercentInput] = useState('')
@@ -56,6 +103,12 @@ export default function MPerformanceEstimateSheet({
   const [predictedSalesInput, setPredictedSalesInput] = useState('')
   const [importedAt, setImportedAt] = useState('')
   const [costHint, setCostHint] = useState('')
+
+  const isAllUnits =
+    estimateUnitIds.length === 0
+    || estimateUnitIds.length === salesUnits.length
+
+  const unitFilterLabel = getUnitFilterLabel(estimateUnitIds, salesUnits)
 
   const settlementRatio = useMemo(
     () => parseSettlementRatioPercent(ratioPercentInput),
@@ -94,27 +147,29 @@ export default function MPerformanceEstimateSheet({
     })
   }, [snapshot, editableOtherIncome, editableFixedCost])
 
-  function handleImportCostAndIncome() {
-    const commission = summary.totalCommission ?? 0
-    // 固定成本 = 总成本 − 已计入的销售提成，避免倒推时再扣一遍提成
-    const fixedCost = Math.max(0, summary.totalCost - commission)
+  function applySummary(nextSummary: EstimateSummaryInput) {
+    setSummary(nextSummary)
+    const commission = nextSummary.totalCommission ?? 0
+    const fixedCost = Math.max(0, nextSummary.totalCost - commission)
     const suggestedCommissionRatio = getCommissionToSalesRatio(
       commission,
-      summary.salesAmount,
+      nextSummary.salesAmount,
     )
     const next = buildEstimateSnapshot({
-      salesAmount: summary.salesAmount,
-      settlementIncome: summary.settlementIncome,
-      otherIncome: summary.otherIncome,
+      salesAmount: nextSummary.salesAmount,
+      settlementIncome: nextSummary.settlementIncome,
+      otherIncome: nextSummary.otherIncome,
       totalCost: fixedCost,
       suggestedCommissionRatio,
     })
     setSnapshot(next)
-    setOtherIncomeInput(String(summary.otherIncome || 0))
+    setOtherIncomeInput(String(nextSummary.otherIncome || 0))
     setTotalCostInput(String(fixedCost || 0))
-    setPredictedSalesInput(String(summary.salesAmount || 0))
+    setPredictedSalesInput(String(nextSummary.salesAmount || 0))
     if (next.suggestedRatio > 0) {
       setRatioPercentInput(formatRatioAsPercentInput(next.suggestedRatio))
+    } else {
+      setRatioPercentInput('')
     }
     setCommissionPercentInput(
       suggestedCommissionRatio > 0
@@ -122,8 +177,8 @@ export default function MPerformanceEstimateSheet({
         : '0',
     )
 
-    const manual = summary.manualCost ?? 0
-    const salary = summary.salaryCost ?? 0
+    const manual = nextSummary.manualCost ?? 0
+    const salary = nextSummary.salaryCost ?? 0
     const salaryWithoutCommission = Math.max(0, salary - commission)
     setCostHint(
       `固定成本已扣当月提成 ${formatCurrency(commission)}`
@@ -133,10 +188,44 @@ export default function MPerformanceEstimateSheet({
     setImportedAt(new Date().toLocaleString('zh-CN', { hour12: false }))
   }
 
+  function handleImportCostAndIncome(
+    month = estimateMonth,
+    unitIds = estimateUnitIds,
+  ) {
+    const normalized = normalizeUnitIds(unitIds, salesUnits.length)
+    applySummary(getSummary(month, normalized))
+  }
+
+  function handleChangeMonth(month: string) {
+    setEstimateMonth(month)
+    handleImportCostAndIncome(month, estimateUnitIds)
+  }
+
+  function handleSelectAllUnits() {
+    setEstimateUnitIds([])
+    handleImportCostAndIncome(estimateMonth, [])
+  }
+
+  function handleToggleUnit(unitId: string, checked: boolean) {
+    const current = isAllUnits
+      ? salesUnits.map((u) => u.id)
+      : [...estimateUnitIds]
+    let next = checked
+      ? Array.from(new Set([...current, unitId]))
+      : current.filter((id) => id !== unitId)
+    if (next.length === 0) next = []
+    next = normalizeUnitIds(next, salesUnits.length)
+    setEstimateUnitIds(next)
+    handleImportCostAndIncome(estimateMonth, next)
+  }
+
   useEffect(() => {
     if (!open) return
-    handleImportCostAndIncome()
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅随 open 触发
+    const normalized = normalizeUnitIds(initialUnitIds, salesUnits.length)
+    setEstimateMonth(initialMonth)
+    setEstimateUnitIds(normalized)
+    applySummary(getSummary(initialMonth, normalized))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 打开时同步页面筛选并带入
   }, [open])
 
   const breakEven = useMemo(() => {
@@ -180,20 +269,88 @@ export default function MPerformanceEstimateSheet({
         </SheetHeader>
 
         <div className="flex flex-1 flex-col gap-5 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="text-sm text-muted-foreground">
-              {selectedMonth} · {filterUnitLabel}
-              {importedAt ? (
-                <span className="ml-2 text-xs">已带入 {importedAt}</span>
-              ) : null}
+          <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>测算月份</Label>
+                <Select value={estimateMonth} onValueChange={handleChangeMonth}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择月份" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {monthOptions.map((m) => (
+                      <SelectItem key={m.value} value={m.value}>
+                        {m.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>测算单位（可多选）</Label>
+                <Popover open={unitPickerOpen} onOpenChange={setUnitPickerOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 w-full justify-between font-normal"
+                    >
+                      <span className="truncate">{unitFilterLabel}</span>
+                      <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-72 p-2" align="start">
+                    <div className="max-h-72 space-y-1 overflow-y-auto">
+                      <button
+                        type="button"
+                        className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
+                        onClick={handleSelectAllUnits}
+                      >
+                        <Checkbox checked={isAllUnits} />
+                        <span>全部单位</span>
+                      </button>
+                      <div className="my-1 border-t" />
+                      {salesUnits.map((u) => {
+                        const checked =
+                          isAllUnits || estimateUnitIds.includes(u.id)
+                        return (
+                          <label
+                            key={u.id}
+                            className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted"
+                          >
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={(v) =>
+                                handleToggleUnit(u.id, v === true)
+                              }
+                            />
+                            <span className="truncate">{u.name}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
             </div>
-            <Button type="button" size="sm" onClick={handleImportCostAndIncome}>
-              <Download className="mr-1.5 h-4 w-4" />
-              一键带入成本与收入
-            </Button>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-muted-foreground">
+                {importedAt
+                  ? `已带入 ${importedAt}`
+                  : '切换月份/单位后会自动重新带入'}
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => handleImportCostAndIncome()}
+              >
+                <Download className="mr-1.5 h-4 w-4" />
+                一键带入成本与收入
+              </Button>
+            </div>
           </div>
 
-          {workingSnapshot && snapshot ? (
+          {workingSnapshot && snapshot && summary ? (
             <>
               <section className="space-y-3 rounded-lg border p-3">
                 <h3 className="text-sm font-medium">成本与收入（可改）</h3>
@@ -240,9 +397,10 @@ export default function MPerformanceEstimateSheet({
                     <p className="text-xs text-muted-foreground">当前净利润（系统）</p>
                     <p
                       className={`font-medium ${
-                        snapshot.salesAmount > 0
-                        && snapshot.settlementIncome + snapshot.otherIncome
-                          - (summary.totalCost) > 0
+                        snapshot.settlementIncome
+                          + snapshot.otherIncome
+                          - summary.totalCost
+                        > 0
                           ? 'text-emerald-600'
                           : 'text-red-600'
                       }`}
@@ -427,7 +585,7 @@ export default function MPerformanceEstimateSheet({
             </>
           ) : (
             <p className="text-sm text-muted-foreground">
-              点击「一键带入成本与收入」从盈亏分析载入当月数据。
+              点击「一键带入成本与收入」从盈亏分析载入所选月份数据。
             </p>
           )}
         </div>

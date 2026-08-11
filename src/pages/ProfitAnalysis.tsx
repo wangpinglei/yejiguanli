@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useData } from "@/context/DataContext";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -31,6 +32,11 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -53,7 +59,9 @@ export default function ProfitAnalysis() {
     upsList: visibleUnitProductSettlements,
   }), [teamMgmtCommissionRules, performanceTargets, visibleUnitProductSettlements]);
 
-  const [filterUnit, setFilterUnit] = useState("all");
+  /** 空数组 = 全部单位 */
+  const [filterUnitIds, setFilterUnitIds] = useState<string[]>([]);
+  const [unitPickerOpen, setUnitPickerOpen] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
   // 收入明细展开状态
   const [expandedIncomeRows, setExpandedIncomeRows] = useState<Set<string>>(new Set());
@@ -61,6 +69,39 @@ export default function ProfitAnalysis() {
   const [settlementDialog, setSettlementDialog] = useState<{ unitId: string; unitName: string; estimated: number } | null>(null);
   const [settlementForm, setSettlementForm] = useState({ actualAmount: 0, remark: "" });
   const [estimateOpen, setEstimateOpen] = useState(false);
+
+  const isAllFilterUnits = filterUnitIds.length === 0;
+  function matchFilterUnit(unitId: string): boolean {
+    return isAllFilterUnits || filterUnitIds.includes(unitId);
+  }
+  const resolvedFilterUnitIds = useMemo(
+    () => (isAllFilterUnits ? salesUnits.map((u) => u.id) : filterUnitIds),
+    [isAllFilterUnits, salesUnits, filterUnitIds],
+  );
+  const filterUnitLabel = useMemo(() => {
+    if (isAllFilterUnits) return "全部单位";
+    if (filterUnitIds.length === 1) {
+      return salesUnits.find((u) => u.id === filterUnitIds[0])?.name || "已选 1 个单位";
+    }
+    return `已选 ${filterUnitIds.length} 个单位`;
+  }, [isAllFilterUnits, filterUnitIds, salesUnits]);
+
+  function handleSelectAllFilterUnits() {
+    setFilterUnitIds([]);
+  }
+
+  function handleToggleFilterUnit(unitId: string, checked: boolean) {
+    const current = isAllFilterUnits
+      ? salesUnits.map((u) => u.id)
+      : [...filterUnitIds];
+    let next = checked
+      ? Array.from(new Set([...current, unitId]))
+      : current.filter((id) => id !== unitId);
+    if (next.length === 0 || next.length === salesUnits.length) {
+      next = [];
+    }
+    setFilterUnitIds(next);
+  }
 
   // 按月过滤
   const monthlySales = useMemo(() => filterByMonth(salesRecords, selectedMonth), [salesRecords, selectedMonth]);
@@ -71,12 +112,12 @@ export default function ProfitAnalysis() {
 
   // 筛选数据
   const filteredSales = useMemo(() => {
-    return filterUnit === "all" ? monthlySales : monthlySales.filter((s) => s.salesUnitId === filterUnit);
-  }, [monthlySales, filterUnit]);
+    return monthlySales.filter((s) => matchFilterUnit(s.salesUnitId));
+  }, [monthlySales, filterUnitIds, isAllFilterUnits]);
 
   const filteredCosts = useMemo(() => {
-    return filterUnit === "all" ? monthlyCosts : monthlyCosts.filter((c) => c.salesUnitId === filterUnit);
-  }, [monthlyCosts, filterUnit]);
+    return monthlyCosts.filter((c) => matchFilterUnit(c.salesUnitId));
+  }, [monthlyCosts, filterUnitIds, isAllFilterUnits]);
 
   // 结算收入（按单位×产品结算规则：生效区间 + 特殊奖励）
   const calcSettlementIncome = (sales: typeof filteredSales) => {
@@ -104,8 +145,7 @@ unitIds,
     const targetM = parseInt(selectedMonth.slice(5, 7), 10);
     return incomeRecords
       .filter((r) => {
-        const matchUnit = filterUnit === "all" || r.salesUnitId === filterUnit;
-        if (!matchUnit) return false;
+        if (!matchFilterUnit(r.salesUnitId)) return false;
         if (r.isRecurring) {
           const months = r.recurringMonths || [1,2,3,4,5,6,7,8,9,10,11,12];
           if (!months.includes(targetM)) return false;
@@ -116,13 +156,13 @@ unitIds,
         return getYearMonth(r.date) === selectedMonth;
       })
       .sort((a, b) => (b.createdAt || b.date).localeCompare(a.createdAt || a.date));
-  }, [incomeRecords, filterUnit, selectedMonth]);
+  }, [incomeRecords, filterUnitIds, isAllFilterUnits, selectedMonth]);
 
   // 汇总（按月度）
   const summary = useMemo(() => {
     const totalSalesAmount = filteredSales.reduce((sum, s) => sum + s.totalAmount, 0); // 实收总额
     const totalSettlementIncome = calcSettlementIncome(filteredSales); // 结算收入
-    const unitIds = filterUnit === "all" ? salesUnits.map((u) => u.id) : [filterUnit];
+    const unitIds = resolvedFilterUnitIds;
     const salaryData = getTotalSalaryCost(
 unitIds,
       personnel,
@@ -158,8 +198,7 @@ unitIds,
   }, [
     filteredSales,
     filteredCosts,
-    filterUnit,
-    salesUnits,
+    resolvedFilterUnitIds,
     personnel,
     salesRecords,
     products,
@@ -175,7 +214,7 @@ unitIds,
   const monthlyData = useMemo(() => {
     const monthMap = new Map<string, { salesAmount: number; settlementIncome: number; otherIncome: number; cost: number }>();
     salesRecords.forEach((s) => {
-      if (filterUnit !== "all" && s.salesUnitId !== filterUnit) return;
+      if (!matchFilterUnit(s.salesUnitId)) return;
       const ym = getYearMonth(s.saleDate);
       const existing = monthMap.get(ym) || { salesAmount: 0, settlementIncome: 0, otherIncome: 0, cost: 0 };
       existing.salesAmount += s.totalAmount;
@@ -183,7 +222,7 @@ unitIds,
       monthMap.set(ym, existing);
     });
     costRecords.forEach((c) => {
-      if (filterUnit !== "all" && c.salesUnitId !== filterUnit) return;
+      if (!matchFilterUnit(c.salesUnitId)) return;
       const yearMonths = listRecurringYearMonths(c, selectedMonth);
       yearMonths.forEach((ym) => {
         const existing = monthMap.get(ym) || { salesAmount: 0, settlementIncome: 0, otherIncome: 0, cost: 0 };
@@ -192,7 +231,7 @@ unitIds,
       });
     });
     incomeRecords.forEach((r) => {
-      if (filterUnit !== "all" && r.salesUnitId !== filterUnit) return;
+      if (!matchFilterUnit(r.salesUnitId)) return;
       const months = r.isRecurring
         ? listRecurringYearMonths(r, selectedMonth)
         : [getYearMonth(r.date)]
@@ -208,7 +247,7 @@ unitIds,
         monthMap.set(ym, existing)
       })
     })
-    const unitIds = filterUnit === "all" ? salesUnits.map((u) => u.id) : [filterUnit];
+    const unitIds = resolvedFilterUnitIds;
     return Array.from(monthMap.entries())
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([month, data]) => {
@@ -233,14 +272,14 @@ unitIds,
           margin: revenue > 0 ? (profit / revenue) * 100 : 0,
         };
       });
-  }, [filterUnit, salesUnits, personnel, salesRecords, products, costRecords, incomeRecords, monthlyAdjustments, visibleUnitProductSettlements, productPersonCommissions, teamMgmtContext, selectedMonth]);
+  }, [filterUnitIds, isAllFilterUnits, resolvedFilterUnitIds, salesUnits, personnel, salesRecords, products, costRecords, incomeRecords, monthlyAdjustments, visibleUnitProductSettlements, productPersonCommissions, teamMgmtContext, selectedMonth]);
 
   // 各单位对比（按月度；跟随顶部单位筛选）
   const unitComparison = useMemo(() => {
     const unitsToShow =
-      filterUnit === "all"
+      isAllFilterUnits
         ? salesUnits
-        : salesUnits.filter((u) => u.id === filterUnit);
+        : salesUnits.filter((u) => filterUnitIds.includes(u.id));
     return unitsToShow.map((unit) => {
       const unitSales = monthlySales.filter((s) => s.salesUnitId === unit.id);
       const salesAmount = unitSales.reduce((sum, s) => sum + s.totalAmount, 0);
@@ -282,7 +321,7 @@ unitIds,
       };
     }).sort((a, b) => b.profit - a.profit);
   }, [
-    salesUnits, filterUnit, monthlySales, monthlyCosts, monthlyIncomeRecords, personnel, salesRecords,
+    salesUnits, filterUnitIds, isAllFilterUnits, monthlySales, monthlyCosts, monthlyIncomeRecords, personnel, salesRecords,
     products, selectedMonth, monthlyAdjustments, visibleUnitProductSettlements,
     productPersonCommissions, teamMgmtContext,
   ]);
@@ -297,7 +336,7 @@ unitIds,
     });
     // 添加自动薪酬成本
     const salaryData = getTotalSalaryCost(
-      filterUnit === "all" ? salesUnits.map((u) => u.id) : [filterUnit],
+      resolvedFilterUnitIds,
       personnel,
       salesRecords,
       products,
@@ -315,7 +354,7 @@ unitIds,
     return Array.from(catMap.entries())
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value);
-  }, [filteredCosts, filterUnit, salesUnits, personnel, salesRecords, products, selectedMonth, monthlyAdjustments, productPersonCommissions, teamMgmtContext]);
+  }, [filteredCosts, resolvedFilterUnitIds, personnel, salesRecords, products, selectedMonth, monthlyAdjustments, productPersonCommissions, teamMgmtContext]);
 
   // 人员业绩排行
   const personnelRanking = useMemo(() => {
@@ -347,7 +386,9 @@ unitIds,
 
   // 按单位计算收入明细
   const incomeDetail = useMemo(() => {
-    const unitsToShow = filterUnit === "all" ? salesUnits : salesUnits.filter((u) => u.id === filterUnit);
+    const unitsToShow = isAllFilterUnits
+      ? salesUnits
+      : salesUnits.filter((u) => filterUnitIds.includes(u.id));
     return unitsToShow.map((unit) => {
       // 预估业绩收入：根据单位×产品结算规则（含生效期与奖励）
       const unitSales = monthlySales.filter((s) => s.salesUnitId === unit.id);
@@ -369,7 +410,7 @@ unitIds,
         unitSales, unitIncomeRecords, otherIncome, totalIncome, diff,
       };
     });
-  }, [salesUnits, filterUnit, monthlySales, revenueSettlements, selectedMonth, monthlyIncomeRecords, visibleUnitProductSettlements]);
+  }, [salesUnits, filterUnitIds, isAllFilterUnits, monthlySales, revenueSettlements, selectedMonth, monthlyIncomeRecords, visibleUnitProductSettlements]);
 
   // 收入合计
   const incomeTotals = useMemo(() => {
@@ -464,10 +505,80 @@ unitIds,
     return options;
   }, []);
 
-  const filterUnitLabel =
-    filterUnit === "all"
-      ? "全部单位"
-      : salesUnits.find((u) => u.id === filterUnit)?.name || "单位";
+  /** 业绩测算：按弹窗内所选月份/单位汇总（unitIds 为空表示全部单位） */
+  const getEstimateSummary = useCallback(
+    (month: string, unitIds: string[]) => {
+      const unitIdSet = unitIds.length > 0 ? new Set(unitIds) : null;
+      const matchUnit = (salesUnitId: string) =>
+        !unitIdSet || unitIdSet.has(salesUnitId);
+
+      const monthSales = filterByMonth(salesRecords, month).filter((s) =>
+        matchUnit(s.salesUnitId),
+      );
+      const monthCosts = costRecords.filter(
+        (c) =>
+          matchesRecurringYearMonth(c, month) && matchUnit(c.salesUnitId),
+      );
+      const targetM = parseInt(month.slice(5, 7), 10);
+      const monthIncomes = incomeRecords.filter((r) => {
+        if (!matchUnit(r.salesUnitId)) return false;
+        if (r.isRecurring) {
+          const months = r.recurringMonths || [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+          if (!months.includes(targetM)) return false;
+          if (r.recurringStartDate && month < r.recurringStartDate.slice(0, 7)) {
+            return false;
+          }
+          if (r.recurringEndDate && month > r.recurringEndDate.slice(0, 7)) {
+            return false;
+          }
+          return true;
+        }
+        return getYearMonth(r.date) === month;
+      });
+
+      const salesAmount = monthSales.reduce((sum, s) => sum + s.totalAmount, 0);
+      const settlementIncome = monthSales.reduce(
+        (sum, s) => sum + calcSaleSettlementIncome(s, visibleUnitProductSettlements),
+        0,
+      );
+      const otherIncome = monthIncomes.reduce((sum, r) => sum + r.totalAmount, 0);
+      const resolvedUnitIds =
+        unitIds.length > 0 ? unitIds : salesUnits.map((u) => u.id);
+      const salaryData = getTotalSalaryCost(
+        resolvedUnitIds,
+        personnel,
+        salesRecords,
+        products,
+        month,
+        monthlyAdjustments,
+        productPersonCommissions,
+        teamMgmtContext,
+      );
+      const manualCost = monthCosts.reduce((sum, c) => sum + c.totalCost, 0);
+      const salaryCost = salaryData.grandTotal;
+      return {
+        salesAmount,
+        settlementIncome,
+        otherIncome,
+        totalCost: manualCost + salaryCost,
+        manualCost,
+        salaryCost,
+        totalCommission: salaryData.grandSalesCommission,
+      };
+    },
+    [
+      salesRecords,
+      costRecords,
+      incomeRecords,
+      salesUnits,
+      personnel,
+      products,
+      monthlyAdjustments,
+      productPersonCommissions,
+      teamMgmtContext,
+      visibleUnitProductSettlements,
+    ],
+  );
 
   return (
     <div>
@@ -482,13 +593,49 @@ unitIds,
                 {monthOptions.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
               </SelectContent>
             </Select>
-            <Select value={filterUnit} onValueChange={setFilterUnit}>
-              <SelectTrigger className="w-48"><SelectValue placeholder="选择单位" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部单位</SelectItem>
-                {salesUnits.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <Popover open={unitPickerOpen} onOpenChange={setUnitPickerOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 w-48 justify-between font-normal"
+                >
+                  <span className="truncate">{filterUnitLabel}</span>
+                  <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-72 p-2" align="end">
+                <div className="max-h-72 space-y-1 overflow-y-auto">
+                  <button
+                    type="button"
+                    className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
+                    onClick={handleSelectAllFilterUnits}
+                  >
+                    <Checkbox checked={isAllFilterUnits} />
+                    <span>全部单位</span>
+                  </button>
+                  <div className="my-1 border-t" />
+                  {salesUnits.map((u) => {
+                    const checked =
+                      isAllFilterUnits || filterUnitIds.includes(u.id);
+                    return (
+                      <label
+                        key={u.id}
+                        className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted"
+                      >
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={(v) =>
+                            handleToggleFilterUnit(u.id, v === true)
+                          }
+                        />
+                        <span className="truncate">{u.name}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
         }
       />
@@ -638,9 +785,9 @@ unitIds,
         <CardHeader>
           <CardTitle className="text-base">各单位盈亏明细</CardTitle>
           <CardDescription>
-            {filterUnit === "all"
+            {isAllFilterUnits
               ? "按销售单位对比营收、成本与利润（当前：全部单位）"
-              : `仅显示所选单位：${salesUnits.find((u) => u.id === filterUnit)?.name || "-"}`}
+              : `仅显示所选单位：${filterUnitLabel}`}
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -1050,17 +1197,11 @@ unitIds,
       <MPerformanceEstimateSheet
         open={estimateOpen}
         onOpenChange={setEstimateOpen}
-        selectedMonth={selectedMonth}
-        filterUnitLabel={filterUnitLabel}
-        summary={{
-          salesAmount: summary.totalSalesAmount,
-          settlementIncome: summary.totalSettlementIncome,
-          otherIncome: summary.totalOtherIncome,
-          totalCost: summary.totalCost,
-          manualCost: summary.manualCost,
-          salaryCost: summary.salaryCost,
-          totalCommission: summary.totalCommission,
-        }}
+        initialMonth={selectedMonth}
+        initialUnitIds={filterUnitIds}
+        monthOptions={monthOptions}
+        salesUnits={salesUnits.map((u) => ({ id: u.id, name: u.name }))}
+        getSummary={getEstimateSummary}
       />
     </div>
   );
