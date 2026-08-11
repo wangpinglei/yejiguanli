@@ -17,6 +17,7 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  Merge,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -119,7 +120,7 @@ const RANGE_LABELS: Record<SalesRange, string> = {
 };
 
 export default function PersonnelPage() {
-  const { addPersonnel, updatePersonnel, deletePersonnel, products, monthlyAdjustments, productPersonCommissions, teamMgmtCommissionRules, performanceTargets, unitProductSettlements } = useData();
+  const { addPersonnel, updatePersonnel, deletePersonnel, mergePersonnel, products, monthlyAdjustments, productPersonCommissions, teamMgmtCommissionRules, performanceTargets, unitProductSettlements } = useData();
   const teamMgmtContext = useMemo(() => ({
     rules: teamMgmtCommissionRules,
     targets: performanceTargets,
@@ -128,6 +129,8 @@ export default function PersonnelPage() {
   const { visiblePersonnel: personnel, visibleSalesUnits: salesUnits, visibleSalesRecords: salesRecords, canEditPersonnel, isReadOnly, role, canEditCost } = usePermissions();
   const [search, setSearch] = useState("");
   const [filterUnit, setFilterUnit] = useState("all");
+  /** all | active | inactive — 在职/离职（与列表「在岗/离职」一致） */
+  const [filterStatus, setFilterStatus] = useState<"all" | "active" | "inactive">("all");
   /** all | missing — 缺产品提成配置筛选 */
   const [filterCommission, setFilterCommission] = useState<"all" | "missing">("all");
   /** none | desc | asc — 销售总额排序 */
@@ -138,6 +141,10 @@ export default function PersonnelPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingPerson, setEditingPerson] = useState<Personnel | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeKeepId, setMergeKeepId] = useState("");
+  const [mergeRemoveId, setMergeRemoveId] = useState("");
+  const [merging, setMerging] = useState(false);
   const [commissionPerson, setCommissionPerson] = useState<Personnel | null>(null);
   const [salaryDetailPerson, setSalaryDetailPerson] = useState<Personnel | null>(null);
   const [salaryDetailMonth, setSalaryDetailMonth] = useState(new Date().toISOString().slice(0, 7));
@@ -218,17 +225,51 @@ export default function PersonnelPage() {
     )
   }, [personnel, commissionStatusByPersonId])
 
+  /** 同名（去空格）出现 2 次及以上 → 疑似重复人员 */
+  const duplicateNameSet = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of personnel) {
+      const key = (p.name || "").trim();
+      if (!key) continue;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    const dup = new Set<string>();
+    for (const [name, n] of counts) {
+      if (n >= 2) dup.add(name);
+    }
+    return dup;
+  }, [personnel]);
+
+  const duplicatePersonCount = useMemo(
+    () => personnel.filter((p) => duplicateNameSet.has((p.name || "").trim())).length,
+    [personnel, duplicateNameSet],
+  );
+
+  function isOnDutyPerson(person: { resignDate?: string; status?: string }) {
+    const resign = (person.resignDate || '').slice(0, 10)
+    if (resign) {
+      const today = new Date().toISOString().slice(0, 10)
+      return resign >= today
+    }
+    return person.status !== 'inactive'
+  }
+
   const filteredPersonnel = useMemo(() => {
     return personnel.filter((p) => {
       const matchSearch =
         p.name.toLowerCase().includes(search.toLowerCase()) ||
         p.position.toLowerCase().includes(search.toLowerCase());
       const matchUnit = filterUnit === "all" || p.salesUnitId === filterUnit;
+      const onDuty = isOnDutyPerson(p);
+      const matchStatus =
+        filterStatus === "all"
+        || (filterStatus === "active" && onDuty)
+        || (filterStatus === "inactive" && !onDuty);
       const missing = commissionStatusByPersonId[p.id]?.missingCount || 0;
       const matchCommission = filterCommission === "all" || missing > 0;
-      return matchSearch && matchUnit && matchCommission;
+      return matchSearch && matchUnit && matchStatus && matchCommission;
     });
-  }, [personnel, search, filterUnit, filterCommission, commissionStatusByPersonId]);
+  }, [personnel, search, filterUnit, filterStatus, filterCommission, commissionStatusByPersonId]);
 
   const getUnitName = (id: string) => salesUnits.find((u) => u.id === id)?.name || "-";
 
@@ -320,16 +361,6 @@ export default function PersonnelPage() {
     }));
   };
 
-
-  function isOnDutyPerson(person: { resignDate?: string; status?: string }) {
-    const resign = (person.resignDate || '').slice(0, 10)
-    if (resign) {
-      const today = new Date().toISOString().slice(0, 10)
-      return resign >= today
-    }
-    return person.status !== 'inactive'
-  }
-
   function getFormDutyStatus(resignDate: string): Personnel['status'] {
     const resign = resignDate.trim()
     if (!resign) return 'active'
@@ -368,7 +399,71 @@ export default function PersonnelPage() {
     }
   };
 
+  function openMergeDialog(preferKeepId?: string, preferRemoveId?: string) {
+    setMergeKeepId(preferKeepId || "");
+    setMergeRemoveId(preferRemoveId || "");
+    setMergeOpen(true);
+  }
+
+  function openMergeForPerson(person: Personnel) {
+    const name = (person.name || "").trim();
+    const others = personnel.filter(
+      (p) => p.id !== person.id && (p.name || "").trim() === name,
+    );
+    // 默认保留当前点的这条，另一条作被合并（若同名多人则留给用户再选）
+    setMergeKeepId(person.id);
+    setMergeRemoveId(others.length === 1 ? others[0].id : "");
+    setMergeOpen(true);
+  }
+
+  async function handleMerge() {
+    if (!mergeKeepId || !mergeRemoveId) {
+      alert("请选择保留人员与被合并人员");
+      return;
+    }
+    if (mergeKeepId === mergeRemoveId) {
+      alert("保留人员与被合并人员不能相同");
+      return;
+    }
+    const keep = personnel.find((p) => p.id === mergeKeepId);
+    const remove = personnel.find((p) => p.id === mergeRemoveId);
+    if (!keep || !remove) return;
+    if (
+      !confirm(
+        `确认将「${remove.name}」（${remove.position || "无职位"}）合并到「${keep.name}」（${keep.position || "无职位"}）？\n\n`
+        + `会迁移销售/提成等到保留人，然后删除被合并人员。冲突项保留「${keep.name}」侧。此操作不可撤销。`,
+      )
+    ) {
+      return;
+    }
+    setMerging(true);
+    try {
+      const result = await mergePersonnel(mergeKeepId, mergeRemoveId);
+      const s = result.stats;
+      alert(
+        `${result.message}\n`
+        + `销售 ${s.sales} 条；提成迁入 ${s.commissionsMoved}`
+        + (s.commissionsDropped ? `（冲突丢弃 ${s.commissionsDropped}）` : "")
+        + `；调整迁入 ${s.adjustmentsMoved}`
+        + (s.adjustmentsDropped ? `（冲突丢弃 ${s.adjustmentsDropped}）` : "")
+        + (s.hrRelinked ? "；人事档案已改挂保留人" : "")
+        + (s.hrDropped ? "；重复人事档案已删" : "")
+        + (s.fieldsFilled.length ? `；补全：${s.fieldsFilled.join("、")}` : ""),
+      );
+      setMergeOpen(false);
+      setMergeKeepId("");
+      setMergeRemoveId("");
+    } catch (error: any) {
+      alert("合并失败: " + (error.message || "未知错误"));
+    } finally {
+      setMerging(false);
+    }
+  }
+
   const showActions = canEditPersonnel || datesOnly;
+
+  const mergeKeepPerson = personnel.find((p) => p.id === mergeKeepId) || null;
+  const mergeRemovePerson = personnel.find((p) => p.id === mergeRemoveId) || null;
 
   // 薪资明细计算（按月度）
   const salaryDetail = useMemo(() => {
@@ -394,13 +489,37 @@ export default function PersonnelPage() {
         description="管理各销售单位人员信息、入离职时间、薪资结构与销售业绩"
         action={
           showActions && !isReadOnly && (
-            <Button onClick={openAdd}>
-              <Plus className="mr-2 h-4 w-4" />
-              新增人员
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => openMergeDialog()}>
+                <Merge className="mr-2 h-4 w-4" />
+                合并人员
+              </Button>
+              <Button onClick={openAdd}>
+                <Plus className="mr-2 h-4 w-4" />
+                新增人员
+              </Button>
+            </div>
           )
         }
       />
+
+      {duplicatePersonCount > 0 && canEditPersonnel && !isReadOnly && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+          <span>
+            检测到 {duplicateNameSet.size} 个同名、共 {duplicatePersonCount} 条人员，可能是重复录入。
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 border-amber-300 bg-white"
+            onClick={() => openMergeDialog()}
+          >
+            <Merge className="mr-1 h-3.5 w-3.5" />
+            去合并
+          </Button>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -422,6 +541,19 @@ export default function PersonnelPage() {
             {salesUnits.map((u) => (
               <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
             ))}
+          </SelectContent>
+        </Select>
+        <Select
+          value={filterStatus}
+          onValueChange={(v) => setFilterStatus(v as "all" | "active" | "inactive")}
+        >
+          <SelectTrigger className="w-32">
+            <SelectValue placeholder="在职状态" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部状态</SelectItem>
+            <SelectItem value="active">在职</SelectItem>
+            <SelectItem value="inactive">离职</SelectItem>
           </SelectContent>
         </Select>
         <Button
@@ -641,6 +773,14 @@ export default function PersonnelPage() {
                             </AvatarFallback>
                           </Avatar>
                           <span className="font-medium">{person.name}</span>
+                          {duplicateNameSet.has((person.name || "").trim()) && (
+                            <Badge
+                              variant="outline"
+                              className="border-amber-400 text-amber-800"
+                            >
+                              同名
+                            </Badge>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell>{getUnitName(person.salesUnitId)}</TableCell>
@@ -721,6 +861,17 @@ export default function PersonnelPage() {
                           </Button>
                           {showActions && !isReadOnly ? (
                             <>
+                              {canEditPersonnel
+                                && duplicateNameSet.has((person.name || "").trim()) && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  title="合并同名人员"
+                                  onClick={() => openMergeForPerson(person)}
+                                >
+                                  <Merge className="h-4 w-4 text-amber-700" />
+                                </Button>
+                              )}
                               <Button variant="ghost" size="icon" onClick={() => openEdit(person)}>
                                 <Pencil className="h-4 w-4" />
                               </Button>
@@ -1096,6 +1247,99 @@ export default function PersonnelPage() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setSalaryDetailPerson(null)}>关闭</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 合并人员 */}
+      <Dialog
+        open={mergeOpen}
+        onOpenChange={(open) => {
+          setMergeOpen(open);
+          if (!open) {
+            setMergeKeepId("");
+            setMergeRemoveId("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Merge className="h-5 w-5" />
+              合并人员
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-1">
+            <p className="text-sm text-muted-foreground">
+              将「被合并人员」的销售、提成、月度调整、业绩目标迁到「保留人员」，并删除被合并人员。
+              同产品提成 / 同月调整冲突时保留「保留人员」侧；空白字段会用被合并人员补全。
+            </p>
+            <div className="space-y-1.5">
+              <Label>保留人员（合并后留下）</Label>
+              <Select value={mergeKeepId || undefined} onValueChange={setMergeKeepId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="选择保留人员" />
+                </SelectTrigger>
+                <SelectContent>
+                  {personnel.map((p) => (
+                    <SelectItem key={p.id} value={p.id} disabled={p.id === mergeRemoveId}>
+                      {p.name} · {getUnitName(p.salesUnitId)} · {p.position || "无职位"}
+                      {duplicateNameSet.has((p.name || "").trim()) ? " · 同名" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {mergeKeepPerson && (
+                <p className="text-xs text-muted-foreground">
+                  底薪 {formatCurrency(mergeKeepPerson.salary.baseSalary)} · 固定月薪{" "}
+                  {formatCurrency(getFixedSalary(mergeKeepPerson.salary))} · 入职{" "}
+                  {formatDate(mergeKeepPerson.hireDate) || "—"} · 销售{" "}
+                  {formatCurrency(getPersonnelSales(mergeKeepPerson.id).total)}
+                </p>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <Label>被合并人员（合并后删除）</Label>
+              <Select value={mergeRemoveId || undefined} onValueChange={setMergeRemoveId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="选择将被删除的人员" />
+                </SelectTrigger>
+                <SelectContent>
+                  {personnel.map((p) => (
+                    <SelectItem key={p.id} value={p.id} disabled={p.id === mergeKeepId}>
+                      {p.name} · {getUnitName(p.salesUnitId)} · {p.position || "无职位"}
+                      {duplicateNameSet.has((p.name || "").trim()) ? " · 同名" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {mergeRemovePerson && (
+                <p className="text-xs text-muted-foreground">
+                  底薪 {formatCurrency(mergeRemovePerson.salary.baseSalary)} · 固定月薪{" "}
+                  {formatCurrency(getFixedSalary(mergeRemovePerson.salary))} · 入职{" "}
+                  {formatDate(mergeRemovePerson.hireDate) || "—"} · 销售{" "}
+                  {formatCurrency(getPersonnelSales(mergeRemovePerson.id).total)}
+                </p>
+              )}
+            </div>
+            {mergeKeepPerson
+              && mergeRemovePerson
+              && (mergeKeepPerson.name || "").trim() !== (mergeRemovePerson.name || "").trim() && (
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                注意：两人姓名不同，请确认确为同一人后再合并。
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" disabled={merging} onClick={() => setMergeOpen(false)}>
+              取消
+            </Button>
+            <Button
+              disabled={merging || !mergeKeepId || !mergeRemoveId}
+              onClick={() => void handleMerge()}
+            >
+              {merging ? "合并中…" : "确认合并"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

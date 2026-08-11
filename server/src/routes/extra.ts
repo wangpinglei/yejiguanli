@@ -7,7 +7,7 @@ import {
   rowToTeamMgmtCommissionRule,
 } from "../db";
 import { authMiddleware } from "../auth";
-import { getVisibleUnitIds, requireEditPermission, requireModuleEdit } from "../middleware";
+import { getVisibleUnitIds, requireEditPermission, requireModuleEdit, requireRole } from "../middleware";
 
 const router = Router();
 router.use(authMiddleware);
@@ -385,8 +385,8 @@ router.post("/cost-change-logs", requireEditPermission, (req, res) => {
   res.json(rowToCostChangeLog(db.prepare("SELECT * FROM cost_change_logs WHERE id=?").get(id)));
 });
 
-// ---------- notifications ----------
-router.get("/notifications", (_req, res) => {
+// ---------- notifications（仅超级管理员可查看/标记已读） ----------
+router.get("/notifications", requireRole("superadmin"), (_req, res) => {
   const db = getDb();
   const rows = db.prepare("SELECT * FROM notifications ORDER BY timestamp DESC").all();
   res.json(rows.map(rowToNotification));
@@ -402,7 +402,7 @@ router.post("/notifications", requireEditPermission, (req, res) => {
   res.json(rowToNotification(db.prepare("SELECT * FROM notifications WHERE id=?").get(id)));
 });
 
-router.put("/notifications/:id/read", (req, res) => {
+router.put("/notifications/:id/read", requireRole("superadmin"), (req, res) => {
   const db = getDb();
   db.prepare("UPDATE notifications SET read=1 WHERE id=?").run(req.params.id);
   const row = db.prepare("SELECT * FROM notifications WHERE id=?").get(req.params.id);
@@ -410,7 +410,7 @@ router.put("/notifications/:id/read", (req, res) => {
   res.json(rowToNotification(row));
 });
 
-router.put("/notifications/read-all", (_req, res) => {
+router.put("/notifications/read-all", requireRole("superadmin"), (_req, res) => {
   const db = getDb();
   db.prepare("UPDATE notifications SET read=1").run();
   res.json({ message: "ok" });

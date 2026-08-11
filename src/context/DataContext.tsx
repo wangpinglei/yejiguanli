@@ -109,6 +109,22 @@ interface DataContextType {
   addPersonnel: (p: Omit<Personnel, "id">) => Promise<Personnel>;
   updatePersonnel: (id: string, p: Partial<Personnel>) => Promise<void>;
   deletePersonnel: (id: string) => Promise<void>;
+  mergePersonnel: (keepId: string, removeId: string) => Promise<{
+    message: string
+    stats: {
+      sales: number
+      commissionsMoved: number
+      commissionsDropped: number
+      adjustmentsMoved: number
+      adjustmentsDropped: number
+      targetsMoved: number
+      targetsDropped: number
+      hrRelinked: number
+      hrDropped: number
+      fieldsFilled: string[]
+      teamRulesUpdated: number
+    }
+  }>;
   enablePersonnelDistribution: (
     id: string,
     data: {
@@ -372,6 +388,22 @@ export function DataProvider({ children }: { children: ReactNode }) {
     await personnelApi.delete(id);
     setPersonnel((prev) => prev.filter((x) => x.id !== id));
   }, []);
+  const mergePersonnel = useCallback(async (keepId: string, removeId: string) => {
+    const result = await personnelApi.merge({ keepId, removeId });
+    setPersonnel((prev) => {
+      const withoutRemoved = prev.filter((x) => x.id !== removeId);
+      return withoutRemoved.map((x) => (x.id === keepId ? result.personnel : x));
+    });
+    setProductPersonCommissions((prev) => {
+      const others = prev.filter(
+        (c) => c.personnelId !== removeId && c.personnelId !== keepId,
+      );
+      return [...others, ...result.productPersonCommissions];
+    });
+    // 销售等关联已在服务端迁移，刷新保证列表一致
+    await refreshAll();
+    return { message: result.message, stats: result.stats };
+  }, [refreshAll]);
   const enablePersonnelDistribution = useCallback(
     async (
       id: string,
@@ -778,7 +810,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     teamMgmtCommissionRules,
     costChangeLogs, notifications, monthlyAdjustments, loading,
     addSalesUnit, updateSalesUnit, deleteSalesUnit,
-    addPersonnel, updatePersonnel, deletePersonnel, enablePersonnelDistribution, ensurePersonnelByName,
+    addPersonnel, updatePersonnel, deletePersonnel, mergePersonnel, enablePersonnelDistribution, ensurePersonnelByName,
     addProduct, updateProduct, deleteProduct, ensureProductByName,
     addSalesRecord, updateSalesRecord, deleteSalesRecord,
     addCostRecord, updateCostRecord, deleteCostRecord,

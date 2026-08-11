@@ -120,6 +120,25 @@ export const personnelApi = {
   create: (data: any) => api.post<any>("/personnel", data),
   update: (id: string, data: any) => api.put<any>(`/personnel/${id}`, data),
   delete: (id: string) => api.delete(`/personnel/${id}`),
+  merge: (data: { keepId: string; removeId: string }) =>
+    api.post<{
+      personnel: import("@/types").Personnel
+      productPersonCommissions: import("@/types").ProductPersonCommission[]
+      message: string
+      stats: {
+        sales: number
+        commissionsMoved: number
+        commissionsDropped: number
+        adjustmentsMoved: number
+        adjustmentsDropped: number
+        targetsMoved: number
+        targetsDropped: number
+        hrRelinked: number
+        hrDropped: number
+        fieldsFilled: string[]
+        teamRulesUpdated: number
+      }
+    }>("/personnel/merge", data),
   enableDistribution: (
     id: string,
     data: {

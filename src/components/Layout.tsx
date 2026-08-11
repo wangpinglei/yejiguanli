@@ -126,7 +126,7 @@ function SidebarContent({
 export default function Layout() {
   const { user, logout } = useAuth();
   const { notifications, unreadCount, markNotificationRead, markAllNotificationsRead } = useData();
-  const { canView, isSuperadmin, canManageUsers, canViewHr } = usePermissions();
+  const { canView, isSuperadmin, canViewHr } = usePermissions();
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -198,7 +198,7 @@ export default function Layout() {
           </div>
 
           <div className="flex items-center gap-3">
-            {(isSuperadmin || canManageUsers) && (
+            {isSuperadmin && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="icon" className="relative">

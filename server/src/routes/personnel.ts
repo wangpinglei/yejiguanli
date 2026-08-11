@@ -1,5 +1,11 @@
 import { Router } from "express";
-import { getDb, rowToPersonnel, rowToProductPersonCommission, generateId } from "../db";
+import {
+  getDb,
+  rowToPersonnel,
+  rowToProductPersonCommission,
+  generateId,
+  runInTransaction,
+} from "../db";
 import { authMiddleware } from "../auth";
 import { getVisibleUnitIds, requireEditPermission, isOrgDept, isReadOnly } from "../middleware";
 
@@ -87,6 +93,312 @@ router.post("/", requireEditPermission, (req, res) => {
 
   const row = db.prepare("SELECT * FROM personnel WHERE id = ?").get(id);
   res.json(rowToPersonnel(row));
+});
+
+/**
+ * POST /api/personnel/merge
+ * 合并重复人员：保留 keepId，迁移 removeId 的销售/提成/调整/目标/人事关联后删除 removeId。
+ * 冲突时保留 keep 侧数据（提成同产品、同月调整、人事档案等）。
+ * 空白字段可用 remove 侧补全 keep。
+ */
+router.post("/merge", requireEditPermission, (req, res) => {
+  if (isOrgDept(req.user!.role) || isReadOnly(req.user!)) {
+    return res.status(403).json({ error: "当前角色无权合并人员" });
+  }
+
+  const keepId = String(req.body?.keepId || "").trim();
+  const removeId = String(req.body?.removeId || "").trim();
+  if (!keepId || !removeId) {
+    return res.status(400).json({ error: "请指定保留人员与被合并人员" });
+  }
+  if (keepId === removeId) {
+    return res.status(400).json({ error: "保留人员与被合并人员不能相同" });
+  }
+
+  const db = getDb();
+  const keep: any = db.prepare("SELECT * FROM personnel WHERE id = ?").get(keepId);
+  const remove: any = db.prepare("SELECT * FROM personnel WHERE id = ?").get(removeId);
+  if (!keep || !remove) {
+    return res.status(404).json({ error: "人员不存在" });
+  }
+
+  const visibleIds = getVisibleUnitIds(req.user!);
+  if (visibleIds !== null) {
+    const idSet = new Set(visibleIds);
+    if (!idSet.has(keep.sales_unit_id) || !idSet.has(remove.sales_unit_id)) {
+      return res.status(403).json({ error: "无权合并所选单位人员" });
+    }
+  }
+
+  const stats = runInTransaction(() => {
+    const moved = {
+      sales: 0,
+      commissionsMoved: 0,
+      commissionsDropped: 0,
+      adjustmentsMoved: 0,
+      adjustmentsDropped: 0,
+      targetsMoved: 0,
+      targetsDropped: 0,
+      hrRelinked: 0,
+      hrDropped: 0,
+      fieldsFilled: [] as string[],
+      teamRulesUpdated: 0,
+    };
+
+    // ---- 销售记录 ----
+    const salesInfo = db
+      .prepare("UPDATE sales_records SET personnel_id = ? WHERE personnel_id = ?")
+      .run(keepId, removeId);
+    moved.sales = Number(salesInfo.changes || 0);
+    // 按姓名兜底的销售：若姓名一致且未关联人员，也绑到保留人（同单位）
+    const keepName = String(keep.name || "").trim();
+    const removeName = String(remove.name || "").trim();
+    if (keepName && keepName === removeName) {
+      db.prepare(`
+        UPDATE sales_records SET personnel_id = ?
+        WHERE (personnel_id IS NULL OR TRIM(personnel_id) = '')
+          AND TRIM(sales_person_name) = ?
+          AND sales_unit_id = ?
+      `).run(keepId, keepName, keep.sales_unit_id);
+    }
+
+    // ---- 个人产品提成 UNIQUE(unit, product, personnel) ----
+    const removePpc = db
+      .prepare("SELECT * FROM product_person_commissions WHERE personnel_id = ?")
+      .all(removeId) as any[];
+    const findKeepPpc = db.prepare(`
+      SELECT id FROM product_person_commissions
+      WHERE sales_unit_id = ? AND product_id = ? AND personnel_id = ?
+    `);
+    const delPpc = db.prepare("DELETE FROM product_person_commissions WHERE id = ?");
+    const movePpc = db.prepare(
+      "UPDATE product_person_commissions SET personnel_id = ? WHERE id = ?",
+    );
+    for (const row of removePpc) {
+      const clash = findKeepPpc.get(row.sales_unit_id, row.product_id, keepId);
+      if (clash) {
+        delPpc.run(row.id);
+        moved.commissionsDropped += 1;
+      } else {
+        movePpc.run(keepId, row.id);
+        moved.commissionsMoved += 1;
+      }
+    }
+
+    // ---- 月度调整 UNIQUE(personnel, year_month) ----
+    const removeAdj = db
+      .prepare("SELECT * FROM monthly_adjustments WHERE personnel_id = ?")
+      .all(removeId) as any[];
+    const findKeepAdj = db.prepare(
+      "SELECT id FROM monthly_adjustments WHERE personnel_id = ? AND year_month = ?",
+    );
+    const delAdj = db.prepare("DELETE FROM monthly_adjustments WHERE id = ?");
+    const moveAdj = db.prepare(
+      "UPDATE monthly_adjustments SET personnel_id = ? WHERE id = ?",
+    );
+    for (const row of removeAdj) {
+      const clash = findKeepAdj.get(keepId, row.year_month);
+      if (clash) {
+        delAdj.run(row.id);
+        moved.adjustmentsDropped += 1;
+      } else {
+        moveAdj.run(keepId, row.id);
+        moved.adjustmentsMoved += 1;
+      }
+    }
+
+    // ---- 业绩目标 ----
+    const removeTargets = db
+      .prepare("SELECT * FROM performance_targets WHERE personnel_id = ?")
+      .all(removeId) as any[];
+    const findKeepTarget = db.prepare(`
+      SELECT id FROM performance_targets
+      WHERE sales_unit_id = ? AND year_month = ? AND personnel_id = ?
+    `);
+    const delTarget = db.prepare("DELETE FROM performance_targets WHERE id = ?");
+    const moveTarget = db.prepare(
+      "UPDATE performance_targets SET personnel_id = ? WHERE id = ?",
+    );
+    for (const row of removeTargets) {
+      const clash = findKeepTarget.get(row.sales_unit_id, row.year_month, keepId);
+      if (clash) {
+        delTarget.run(row.id);
+        moved.targetsDropped += 1;
+      } else {
+        moveTarget.run(keepId, row.id);
+        moved.targetsMoved += 1;
+      }
+    }
+
+    // ---- 人事档案（personnel_id UNIQUE）----
+    const keepHr: any = db
+      .prepare("SELECT id FROM hr_profiles WHERE personnel_id = ?")
+      .get(keepId);
+    const removeHr: any = db
+      .prepare("SELECT id FROM hr_profiles WHERE personnel_id = ?")
+      .get(removeId);
+    if (removeHr) {
+      if (keepHr) {
+        db.prepare("DELETE FROM hr_profiles WHERE id = ?").run(removeHr.id);
+        moved.hrDropped = 1;
+      } else {
+        db.prepare("UPDATE hr_profiles SET personnel_id = ? WHERE id = ?").run(
+          keepId,
+          removeHr.id,
+        );
+        moved.hrRelinked = 1;
+      }
+    }
+
+    // ---- 团队管理提成规则里的 managers_json ----
+    const teamRules = db
+      .prepare("SELECT id, managers_json FROM team_mgmt_commission_rules")
+      .all() as Array<{ id: string; managers_json: string }>;
+    for (const rule of teamRules) {
+      let managers: Array<{ personnelId?: string; weight?: number }> = [];
+      try {
+        managers = JSON.parse(rule.managers_json || "[]");
+      } catch {
+        continue;
+      }
+      if (!Array.isArray(managers) || managers.length === 0) continue;
+      let changed = false;
+      const next: Array<{ personnelId: string; weight: number }> = [];
+      const weightById = new Map<string, number>();
+      for (const m of managers) {
+        let pid = String(m.personnelId || "").trim();
+        if (pid === removeId) {
+          pid = keepId;
+          changed = true;
+        }
+        if (!pid) continue;
+        const w = Number(m.weight) || 0;
+        weightById.set(pid, (weightById.get(pid) || 0) + w);
+      }
+      for (const [pid, weight] of weightById) {
+        if (weight > 0) next.push({ personnelId: pid, weight });
+      }
+      if (changed) {
+        db.prepare(`
+          UPDATE team_mgmt_commission_rules
+          SET managers_json = ?, updated_at = datetime('now')
+          WHERE id = ?
+        `).run(JSON.stringify(next), rule.id);
+        moved.teamRulesUpdated += 1;
+      }
+    }
+
+    // ---- 用 remove 补全 keep 空白字段 ----
+    const fillText = (keepVal: unknown, removeVal: unknown) => {
+      const k = String(keepVal ?? "").trim();
+      const r = String(removeVal ?? "").trim();
+      return k ? k : r;
+    };
+    const nextName = fillText(keep.name, remove.name);
+    const nextPosition = fillText(keep.position, remove.position);
+    const nextPhone = fillText(keep.phone, remove.phone);
+    const nextEmail = fillText(keep.email, remove.email);
+    const nextHire = fillText(keep.hire_date, remove.hire_date);
+    let nextResign = keep.resign_date;
+    if ((nextResign == null || String(nextResign).trim() === "") && remove.resign_date) {
+      nextResign = remove.resign_date;
+    }
+    let nextSalary = keep.salary;
+    try {
+      const keepSal = parseSalary(keep.salary);
+      const removeSal = parseSalary(remove.salary);
+      const keepFixed =
+        Number(keepSal.baseSalary || 0)
+        + Number(keepSal.performance || 0)
+        + Number(keepSal.positionAllowance || 0);
+      const removeFixed =
+        Number(removeSal.baseSalary || 0)
+        + Number(removeSal.performance || 0)
+        + Number(removeSal.positionAllowance || 0);
+      if (keepFixed <= 0 && removeFixed > 0) {
+        nextSalary = JSON.stringify(removeSal);
+        moved.fieldsFilled.push("薪资");
+      }
+    } catch {
+      /* keep */
+    }
+    const nextSocial =
+      Number(keep.social_insurance || 0) > 0
+        ? keep.social_insurance
+        : (remove.social_insurance || 0);
+    const nextHousing =
+      Number(keep.housing_fund || 0) > 0
+        ? keep.housing_fund
+        : (remove.housing_fund || 0);
+    const nextHigh = fillText(keep.high_commission_from, remove.high_commission_from);
+    let nextRegular = keep.regular_compensation || "";
+    if (!String(nextRegular).trim() && remove.regular_compensation) {
+      nextRegular = remove.regular_compensation;
+      moved.fieldsFilled.push("常规薪酬快照");
+    }
+    if (nextName !== (keep.name || "")) moved.fieldsFilled.push("姓名");
+    if (nextPosition !== (keep.position || "")) moved.fieldsFilled.push("职位");
+    if (nextPhone !== (keep.phone || "")) moved.fieldsFilled.push("手机");
+    if (nextEmail !== (keep.email || "")) moved.fieldsFilled.push("邮箱");
+    if (nextHire !== (keep.hire_date || "")) moved.fieldsFilled.push("入职日期");
+    if (String(nextResign || "") !== String(keep.resign_date || "")) {
+      moved.fieldsFilled.push("离职日期");
+    }
+
+    // 状态：有人在职则偏在职；否则取 keep
+    let nextStatus = keep.status || "active";
+    if (keep.status === "inactive" && remove.status === "active") {
+      nextStatus = "active";
+      moved.fieldsFilled.push("状态");
+    }
+
+    db.prepare(`
+      UPDATE personnel SET
+        name = ?, position = ?, phone = ?, email = ?,
+        salary = ?, social_insurance = ?, housing_fund = ?,
+        hire_date = ?, resign_date = ?, status = ?,
+        high_commission_from = ?, regular_compensation = ?
+      WHERE id = ?
+    `).run(
+      nextName || keep.name,
+      nextPosition,
+      nextPhone,
+      nextEmail,
+      nextSalary,
+      nextSocial || 0,
+      nextHousing || 0,
+      nextHire,
+      nextResign || null,
+      nextStatus,
+      nextHigh,
+      nextRegular,
+      keepId,
+    );
+
+    // 清理 remove 残留后删除
+    db.prepare("DELETE FROM product_person_commissions WHERE personnel_id = ?").run(removeId);
+    db.prepare("DELETE FROM monthly_adjustments WHERE personnel_id = ?").run(removeId);
+    db.prepare("DELETE FROM performance_targets WHERE personnel_id = ?").run(removeId);
+    db.prepare("DELETE FROM hr_profiles WHERE personnel_id = ?").run(removeId);
+    db.prepare("UPDATE sales_records SET personnel_id = '' WHERE personnel_id = ?").run(removeId);
+    db.prepare("DELETE FROM personnel WHERE id = ?").run(removeId);
+
+    return moved;
+  });
+
+  const personnel = rowToPersonnel(
+    db.prepare("SELECT * FROM personnel WHERE id = ?").get(keepId),
+  );
+  const productPersonCommissions = (
+    db.prepare("SELECT * FROM product_person_commissions WHERE personnel_id = ?").all(keepId) as any[]
+  ).map(rowToProductPersonCommission);
+
+  res.json({
+    personnel,
+    productPersonCommissions,
+    stats,
+    message: `已合并「${remove.name}」到「${keep.name}」`,
+  });
 });
 
 /**
