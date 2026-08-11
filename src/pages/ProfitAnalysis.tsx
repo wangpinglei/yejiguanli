@@ -15,6 +15,7 @@ import type { RevenueSettlement } from "@/types";
 import {
   TrendingUp, DollarSign, Award, AlertTriangle,
   ChevronDown, ChevronRight, Pencil, Receipt, CheckCircle2, Clock,
+  Calculator,
 } from "lucide-react";
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
@@ -38,6 +39,8 @@ import {
   ResponsiveContainer, Legend, PieChart, Pie, Cell,
 } from "recharts";
 
+import MPerformanceEstimateSheet from "./ProfitAnalysis/components/m-performance-estimate-sheet";
+
 const COLORS = ["#3b82f6", "#f97316", "#10b981", "#8b5cf6", "#ef4444", "#06b6d4", "#eab308"];
 
 export default function ProfitAnalysis() {
@@ -57,6 +60,7 @@ export default function ProfitAnalysis() {
   // 结算调整弹窗
   const [settlementDialog, setSettlementDialog] = useState<{ unitId: string; unitName: string; estimated: number } | null>(null);
   const [settlementForm, setSettlementForm] = useState({ actualAmount: 0, remark: "" });
+  const [estimateOpen, setEstimateOpen] = useState(false);
 
   // 按月过滤
   const monthlySales = useMemo(() => filterByMonth(salesRecords, selectedMonth), [salesRecords, selectedMonth]);
@@ -265,6 +269,7 @@ unitIds,
       const profit = revenue - cost;
       const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
       return {
+        id: unit.id,
         name: unit.name,
         salesAmount,
         settlementIncome,
@@ -459,6 +464,11 @@ unitIds,
     return options;
   }, []);
 
+  const filterUnitLabel =
+    filterUnit === "all"
+      ? "全部单位"
+      : salesUnits.find((u) => u.id === filterUnit)?.name || "单位";
+
   return (
     <div>
       <PageHeader
@@ -495,7 +505,7 @@ unitIds,
         </Link>
       </div>
 
-      <div className="mb-4 flex flex-wrap gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         {[
           { id: 'section-profit-overview', label: '盈亏总览' },
           { id: 'section-profit-trend', label: '月度趋势' },
@@ -518,6 +528,15 @@ unitIds,
             {item.label}
           </Button>
         ))}
+        <Button
+          type="button"
+          size="sm"
+          className="h-8"
+          onClick={() => setEstimateOpen(true)}
+        >
+          <Calculator className="mr-1.5 h-4 w-4" />
+          业绩测算
+        </Button>
       </div>
 
       {/* Summary Cards */}
@@ -1027,6 +1046,22 @@ unitIds,
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <MPerformanceEstimateSheet
+        open={estimateOpen}
+        onOpenChange={setEstimateOpen}
+        selectedMonth={selectedMonth}
+        filterUnitLabel={filterUnitLabel}
+        summary={{
+          salesAmount: summary.totalSalesAmount,
+          settlementIncome: summary.totalSettlementIncome,
+          otherIncome: summary.totalOtherIncome,
+          totalCost: summary.totalCost,
+          manualCost: summary.manualCost,
+          salaryCost: summary.salaryCost,
+          totalCommission: summary.totalCommission,
+        }}
+      />
     </div>
   );
 }
