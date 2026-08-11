@@ -689,7 +689,7 @@ export default function CostManagement() {
             <h3 className="text-base font-semibold">
               自动计入人力成本 / 实时薪资（{selectedMonth} 月度）
               <span className="ml-2 text-xs font-normal text-muted-foreground">
-                按人员入离职（人事同步）判定在岗
+                按人员管理入离职日期判定在岗
               </span>
             </h3>
             <Badge variant="outline" className="border-blue-200 text-blue-700">

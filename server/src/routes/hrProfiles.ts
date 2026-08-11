@@ -198,12 +198,9 @@ const HR_SELECT = `
     CASE WHEN p.id IS NOT NULL THEN IFNULL(p.sales_unit_id, '') ELSE '' END AS sales_unit_id,
     COALESCE(NULLIF(TRIM(p.position), ''), h.position) AS position,
     COALESCE(NULLIF(TRIM(p.phone), ''), h.phone) AS phone,
-    COALESCE(NULLIF(TRIM(p.hire_date), ''), h.hire_date) AS hire_date,
-    CASE
-      WHEN p.id IS NOT NULL THEN p.resign_date
-      ELSE h.resign_date
-    END AS resign_date,
-    COALESCE(NULLIF(TRIM(p.status), ''), NULLIF(TRIM(h.status), ''), 'active') AS status,
+    h.hire_date AS hire_date,
+    h.resign_date AS resign_date,
+    COALESCE(NULLIF(TRIM(h.status), ''), 'active') AS status,
     p.salary, p.social_insurance, p.housing_fund,
     lc.name AS labor_company_name
   FROM hr_profiles h
@@ -337,6 +334,22 @@ function normalizeDate(v: unknown): string {
   }
 
   return "";
+}
+
+/** 司龄（年），保留一位小数；在职算到今天，已离职算到离职日 */
+function calcCompanyTenureYears(hireDate: string, resignDate: string): string {
+  const hire = text(hireDate).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(hire)) return "";
+  const resign = text(resignDate).slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  const end =
+    /^\d{4}-\d{2}-\d{2}$/.test(resign) && resign < today ? resign : today;
+  const startMs = Date.parse(`${hire}T00:00:00Z`);
+  const endMs = Date.parse(`${end}T00:00:00Z`);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
+    return "0.0";
+  }
+  return ((endMs - startMs) / (365.25 * 24 * 60 * 60 * 1000)).toFixed(1);
 }
 
 /** 解析「起止」合并单元格，如 2020.01.01-2023.12.31 / 2020年1月1日至2023年12月31日 */
@@ -880,7 +893,7 @@ router.put("/:id", requireModuleEdit("hr_management"), (req, res) => {
   let nextResign = existing.resign_date || "";
   let status = existing.status || "active";
 
-  // 同步入离职：有关联人员则写人员管理；无关联只写档案镜像
+  // 入离职只写入人事档案，不回写人员管理表格日期
   if (req.body.hireDate !== undefined || req.body.resignDate !== undefined) {
     nextHire =
       req.body.hireDate !== undefined
@@ -901,14 +914,12 @@ router.put("/:id", requireModuleEdit("hr_management"), (req, res) => {
       const today = new Date().toISOString().slice(0, 10);
       status = nextResign < today ? "inactive" : "active";
     }
-    if (existing.personnel_id) {
-      db.prepare(
-        "UPDATE personnel SET hire_date=?, resign_date=?, status=? WHERE id=?",
-      ).run(nextHire || "", nextResign || null, status, existing.personnel_id);
-    }
+    const tenure = calcCompanyTenureYears(nextHire || "", nextResign || "");
     db.prepare(
-      "UPDATE hr_profiles SET hire_date=?, resign_date=?, status=?, updated_at=datetime('now') WHERE id=?",
-    ).run(nextHire || "", nextResign || "", status, id);
+      `UPDATE hr_profiles SET hire_date=?, resign_date=?, status=?, company_tenure=?,
+       updated_at=datetime('now') WHERE id=?`,
+    ).run(nextHire || "", nextResign || "", status, tenure, id);
+    fields.companyTenure = tenure;
   }
 
   const operator = getOperator(req);
@@ -1383,7 +1394,7 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
         ),
         laborCompanyId,
         salesCompanyId,
-        companyTenure: pick(row, ["司龄", "companyTenure"]),
+        companyTenure: "",
         regularizationDate: pick(row, ["转正日期", "regularizationDate"]),
         employmentType: pick(row, ["用工性质", "employmentType"]),
         maritalStatus: pick(row, ["婚姻状况", "maritalStatus"]),
@@ -1406,6 +1417,11 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
       } else if (forceStatus === "inactive") {
         profileStatus = "inactive";
       }
+      const mirrorHireForTenure = hireDate || (person ? String(person.hire_date || "") : "");
+      fields.companyTenure = calcCompanyTenureYears(
+        mirrorHireForTenure,
+        profileResign || (person ? String(person.resign_date || "") : ""),
+      );
 
       try {
         let importedProfileId = "";
@@ -1449,19 +1465,10 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
           }
 
           let personnelStatus = person.status || status;
-          let nextResign: string | null | undefined = resignDate;
-          let touchResign = resignDate !== undefined ? 1 : 0;
-
           if (forceStatus === "active") {
             personnelStatus = "active";
-            nextResign = "";
-            touchResign = 1;
           } else if (forceStatus === "inactive") {
             personnelStatus = "inactive";
-            if (resignDate !== undefined) {
-              nextResign = resignDate;
-              touchResign = 1;
-            }
           } else if (statusRaw.includes("离")) {
             personnelStatus = "inactive";
           } else if (statusRaw.includes("在") || statusRaw.includes("职")) {
@@ -1472,19 +1479,15 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
             personnelStatus = status;
           }
 
+          // 不回写人员管理入离职日期；仅可同步职位/电话/邮箱/在职状态文案
           db.prepare(`
             UPDATE personnel SET
-              hire_date = COALESCE(NULLIF(?, ''), hire_date),
-              resign_date = CASE WHEN ? = 1 THEN ? ELSE resign_date END,
               status = ?,
               position = CASE WHEN ? != '' THEN ? ELSE position END,
               phone = CASE WHEN ? != '' THEN ? ELSE phone END,
               email = CASE WHEN ? != '' THEN ? ELSE email END
             WHERE id = ?
           `).run(
-            hireDate,
-            touchResign,
-            nextResign ?? null,
             personnelStatus,
             personPosition,
             personPosition,

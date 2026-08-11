@@ -46,7 +46,7 @@ import {
 import { useData } from "@/context/DataContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { hrProfilesApi, laborCompaniesApi, getToken } from "@/lib/api";
-import { formatDateTime } from "@/lib/format";
+import { calcCompanyTenureYears, formatCompanyTenure, formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type {
   ContractAlert,
@@ -353,7 +353,7 @@ function downloadImportSampleTemplate() {
   const sample: Record<string, string> = {
     姓名: "张三",
     入职时间: "2024-01-15",
-    司龄: "2年",
+    司龄: "2.0年",
     转正日期: "2024-04-15",
     用工性质: "全职",
     合同主体: "示例劳务公司",
@@ -665,6 +665,7 @@ export default function HrManagementPage() {
     try {
       const hireDate = form.hireDate.trim();
       const resignDate = form.resignDate.trim();
+      const companyTenure = calcCompanyTenureYears(hireDate, resignDate);
       await hrProfilesApi.update(editing.id, {
         gender: form.gender,
         contractStartDate: form.contractStartDate,
@@ -685,7 +686,7 @@ export default function HrManagementPage() {
         hireDate,
         resignDate: resignDate || null,
         status: getDutyStatusFromResign(resignDate),
-        companyTenure: form.companyTenure,
+        companyTenure,
         regularizationDate: form.regularizationDate,
         employmentType: form.employmentType,
         maritalStatus: form.maritalStatus,
@@ -1049,7 +1050,7 @@ export default function HrManagementPage() {
     <div className="space-y-4 p-6">
       <PageHeader
         title="人事管理"
-        description="可独立导入人事档案：匹配到人员管理则关联并同步入离职；匹配不到只建人事档、不同步人员。业绩归属单位仅关联人员时显示。签署公司≠销售单位。"
+        description="可独立导入人事档案：匹配到人员管理则关联；匹配不到只建人事档。入离职日期只保存在人事档案，不会改写人员管理表格。业绩归属单位仅关联人员时显示。签署公司≠销售单位。"
         action={
           <div className="flex flex-wrap gap-2">
             <Button
@@ -1261,7 +1262,7 @@ export default function HrManagementPage() {
                   <TableHead className="min-w-[80px]">用工性质</TableHead>
                   <TableHead className="min-w-[110px]">入职日期</TableHead>
                   <TableHead className="min-w-[110px]">离职日期</TableHead>
-                  <TableHead className="min-w-[64px]">司龄</TableHead>
+                  <TableHead className="min-w-[72px]">司龄</TableHead>
                   <TableHead className="min-w-[110px]">转正日期</TableHead>
                   <TableHead className="min-w-[110px]">合同提醒到期</TableHead>
                   <TableHead className="min-w-[100px]">合同提醒</TableHead>
@@ -1380,7 +1381,9 @@ export default function HrManagementPage() {
                       <TableCell>{row.employmentType || "—"}</TableCell>
                       <TableCell className="tabular-nums">{displayDate(row.hireDate)}</TableCell>
                       <TableCell className="tabular-nums">{displayDate(row.resignDate)}</TableCell>
-                      <TableCell>{row.companyTenure || "—"}</TableCell>
+                      <TableCell className="tabular-nums">
+                        {formatCompanyTenure(row.hireDate, row.resignDate) || "—"}
+                      </TableCell>
                       <TableCell className="tabular-nums">
                         {displayDate(row.regularizationDate)}
                       </TableCell>
@@ -1585,13 +1588,24 @@ export default function HrManagementPage() {
                 onChange={(e) => setForm({ ...form, resignDate: e.target.value })}
               />
               <p className="text-xs text-muted-foreground">
-                清空表示在职。若已关联人员管理，保存后同步入离职并用于成本计停；分销与提成请在人员管理设置。
+                清空表示在职。入离职仅写入人事档案，不会修改人员管理中的入离职日期；成本计停仍以人员管理为准。
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label>司龄（自动）</Label>
+              <Input
+                readOnly
+                value={
+                  formatCompanyTenure(form.hireDate, form.resignDate) || "—"
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                按入职日自动计算，保留一位小数；在职算到今天，已离职算到离职日。
               </p>
             </div>
             {(
               [
                 ["gender", "性别"],
-                ["companyTenure", "司龄"],
                 ["regularizationDate", "转正日期"],
                 ["employmentType", "用工性质"],
                 ["maritalStatus", "婚姻状况"],
