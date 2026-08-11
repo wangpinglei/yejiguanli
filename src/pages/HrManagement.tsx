@@ -221,11 +221,32 @@ function getAlertClass(alert: ContractAlert): string {
   return "";
 }
 
-function formatLocalYmd(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+function ymdParts(y: number, m: number, d: number): string {
+  return `${y}-${pad2(m)}-${pad2(d)}`;
+}
+
+/** Excel 序列日 → YYYY-MM-DD（按 UTC 日历，与 Excel 显示日一致） */
+function fromExcelSerial(n: number): string {
+  if (!Number.isFinite(n) || n < 1 || n >= 80000) return "";
+  const utc = Date.UTC(1899, 11, 30) + Math.round(n) * 86400000;
+  const dt = new Date(utc);
+  return ymdParts(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate());
+}
+
+/**
+ * SheetJS cellDates 常把「2018/6/20」解成 2018-06-19T15:59:17Z，
+ * 用本地 getDate 会少一天；经 Excel 序列四舍五入可还原表格日历日。
+ */
+function calendarYmdFromDate(d: Date): string {
+  if (Number.isNaN(d.getTime())) return "";
+  const serial = Math.round(
+    (d.getTime() - Date.UTC(1899, 11, 30)) / 86400000,
+  );
+  return fromExcelSerial(serial);
 }
 
 /** 导入单元格：Date / Excel 序列 → YYYY-MM-DD，避免 JSON 时区串日 */
@@ -235,7 +256,7 @@ function normalizeImportCell(headerKey: string, v: unknown): unknown {
     headerKey,
   );
   if (v instanceof Date && !Number.isNaN(v.getTime())) {
-    return formatLocalYmd(v);
+    return calendarYmdFromDate(v);
   }
   if (
     isDateCol &&
@@ -244,15 +265,13 @@ function normalizeImportCell(headerKey: string, v: unknown): unknown {
     v > 2000 &&
     v < 80000
   ) {
-    const utc = Date.UTC(1899, 11, 30) + Math.round(v) * 86400000;
-    const dt = new Date(utc);
-    return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+    return fromExcelSerial(v);
   }
   if (typeof v === "string") {
     const s = v.trim();
     if (isDateCol && /^\d{4}-\d{2}-\d{2}T/.test(s)) {
       const dt = new Date(s);
-      if (!Number.isNaN(dt.getTime())) return formatLocalYmd(dt);
+      if (!Number.isNaN(dt.getTime())) return calendarYmdFromDate(dt);
     }
   }
   return v;
@@ -276,7 +295,8 @@ function pickImportField(
 }
 
 function parseImportWorkbook(buf: ArrayBuffer): Record<string, unknown>[] {
-  const wb = XLSX.read(buf, { type: "array", cellDates: true });
+  // cellDates:false，保留 Excel 序列数字，避免 Date 时区把入职日提前一天
+  const wb = XLSX.read(buf, { type: "array", cellDates: false });
   let sheet = wb.Sheets[wb.SheetNames[0]];
   for (const name of wb.SheetNames) {
     const s = wb.Sheets[name];
@@ -414,7 +434,7 @@ function displayDate(v: string | null | undefined): string {
   if (!s) return "—";
   if (/^\d{4}-\d{2}-\d{2}T/.test(s)) {
     const dt = new Date(s);
-    if (!Number.isNaN(dt.getTime())) return formatLocalYmd(dt);
+    if (!Number.isNaN(dt.getTime())) return calendarYmdFromDate(dt);
   }
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
   const cn = s.match(/(\d{4})\s*年\s*(\d{1,2})\s*月(?:\s*(\d{1,2})\s*日)?/);
@@ -424,11 +444,7 @@ function displayDate(v: string | null | undefined): string {
   }
   if (/^\d+(\.\d+)?$/.test(s)) {
     const n = Number(s);
-    if (n > 2000 && n < 80000) {
-      const utc = Date.UTC(1899, 11, 30) + Math.round(n) * 86400000;
-      const dt = new Date(utc);
-      return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
-    }
+    if (n > 2000 && n < 80000) return fromExcelSerial(n);
   }
   const slash = s.match(/(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
   if (slash) {

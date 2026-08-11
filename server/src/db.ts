@@ -348,6 +348,18 @@ function initSchema() {
       updated_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS personnel_unit_assignments (
+      id TEXT PRIMARY KEY,
+      personnel_id TEXT NOT NULL,
+      sales_unit_id TEXT NOT NULL,
+      start_date TEXT NOT NULL,
+      end_date TEXT,
+      remark TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (personnel_id) REFERENCES personnel(id) ON DELETE CASCADE,
+      FOREIGN KEY (sales_unit_id) REFERENCES sales_units(id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_personnel_unit ON personnel(sales_unit_id);
     CREATE INDEX IF NOT EXISTS idx_hr_profiles_personnel ON hr_profiles(personnel_id);
     CREATE INDEX IF NOT EXISTS idx_hr_profiles_contract_end ON hr_profiles(contract_end_date);
@@ -358,6 +370,8 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_sales_personnel ON sales_records(personnel_id);
     CREATE INDEX IF NOT EXISTS idx_cost_unit ON cost_records(sales_unit_id);
     CREATE INDEX IF NOT EXISTS idx_income_unit ON income_records(sales_unit_id);
+    CREATE INDEX IF NOT EXISTS idx_pua_personnel ON personnel_unit_assignments(personnel_id);
+    CREATE INDEX IF NOT EXISTS idx_pua_unit ON personnel_unit_assignments(sales_unit_id);
   `);
 
   ensureColumns("sales_units", [
@@ -470,6 +484,9 @@ function initSchema() {
   // 允许人事档案不关联人员管理（personnel_id 可空）
   migrateHrProfilesNullablePersonnel();
 
+  // 人员单位归属时间轴：存量补一段当前单位
+  ensurePersonnelUnitAssignments();
+
   // 将误挂在销售单位上的 labor_company_id 迁移为独立签署公司字典
   migrateLaborCompanyIdsFromSalesUnits();
   // 迁移产生的「同名销售单位」签署公司会误导展示，清空后由人事重新维护真实签署公司
@@ -537,6 +554,47 @@ function cleanupInvalidLaborCompanyNames() {
     }
     deleteLabor.run(company.id);
   }
+}
+
+/**
+ * 为尚无归属时间轴的人员补一段：start=入职日（或 1970-01-01），当前 sales_unit_id，end 为空
+ */
+function ensurePersonnelUnitAssignments() {
+  const people = db.prepare("SELECT id, sales_unit_id, hire_date FROM personnel").all() as Array<{
+    id: string;
+    sales_unit_id: string;
+    hire_date: string;
+  }>;
+  if (people.length === 0) return;
+
+  const hasAny = db
+    .prepare("SELECT 1 FROM personnel_unit_assignments LIMIT 1")
+    .get();
+  const countByPerson = db.prepare(`
+    SELECT personnel_id, COUNT(*) AS c FROM personnel_unit_assignments GROUP BY personnel_id
+  `).all() as Array<{ personnel_id: string; c: number }>;
+  const hasMap = new Set(countByPerson.map((r) => r.personnel_id));
+
+  const insert = db.prepare(`
+    INSERT INTO personnel_unit_assignments (
+      id, personnel_id, sales_unit_id, start_date, end_date, remark, created_at
+    ) VALUES (?, ?, ?, ?, NULL, '', datetime('now'))
+  `);
+
+  for (const p of people) {
+    if (hasMap.has(p.id)) continue;
+    const start =
+      (p.hire_date || "").trim().slice(0, 10) || "1970-01-01";
+    insert.run(
+      `pua_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
+      p.id,
+      p.sales_unit_id,
+      start,
+    );
+  }
+
+  // 表刚创建时上面循环已覆盖；hasAny 仅用于避免无意义日志
+  void hasAny;
 }
 
 /**
@@ -875,7 +933,19 @@ export function rowToSalesUnit(row: any) {
   };
 }
 
-export function rowToPersonnel(row: any) {
+export function rowToPersonnelUnitAssignment(row: any) {
+  return {
+    id: row.id,
+    personnelId: row.personnel_id,
+    salesUnitId: row.sales_unit_id,
+    startDate: row.start_date || "",
+    endDate: row.end_date || undefined,
+    remark: row.remark || "",
+    createdAt: row.created_at || "",
+  };
+}
+
+export function rowToPersonnel(row: any, assignments?: any[]) {
   let regularCompensation: any = undefined;
   const rawMeta = row.regular_compensation;
   if (rawMeta) {
@@ -901,6 +971,9 @@ export function rowToPersonnel(row: any) {
     status: row.status || "active",
     highCommissionFrom: row.high_commission_from || undefined,
     regularCompensation: regularCompensation || undefined,
+    unitAssignments: Array.isArray(assignments)
+      ? assignments.map(rowToPersonnelUnitAssignment)
+      : undefined,
   };
 }
 

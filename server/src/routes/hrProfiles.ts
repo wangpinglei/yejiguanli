@@ -8,6 +8,7 @@ import {
   calcAgeFromIdOrBirth,
   getContractAlert,
   parseSignedDocuments,
+  runInTransaction,
   type SignedDocument,
 } from "../db";
 import { authMiddleware } from "../auth";
@@ -261,6 +262,18 @@ function fromExcelSerial(n: number): string {
 }
 
 /**
+ * SheetJS cellDates 常把表格日解成前一天 15:59:17Z；
+ * 经 Excel 序列四舍五入可还原与 Excel 一致的日历日。
+ */
+function calendarYmdFromDate(d: Date): string {
+  if (Number.isNaN(d.getTime())) return "";
+  const serial = Math.round(
+    (d.getTime() - Date.UTC(1899, 11, 30)) / 86400000,
+  );
+  return fromExcelSerial(serial);
+}
+
+/**
  * 导入/入库日期统一为 YYYY-MM-DD（年-月-日）
  * 兼容：Date、Excel 序列、ISO、中文年月日、美式 M/D/Y、年月
  */
@@ -268,8 +281,7 @@ function normalizeDate(v: unknown): string {
   if (v === undefined || v === null || v === "") return "";
 
   if (v instanceof Date && !Number.isNaN(v.getTime())) {
-    // 用本地年月日，避免 JSON ISO 时区把「当天 0 点」写成前一天
-    return ymd(v.getFullYear(), v.getMonth() + 1, v.getDate());
+    return calendarYmdFromDate(v);
   }
 
   if (typeof v === "number" && Number.isFinite(v)) {
@@ -280,11 +292,11 @@ function normalizeDate(v: unknown): string {
   const s = text(v);
   if (!s || s === "-" || s === "—" || s === "/" || s === "无") return "";
 
-  // ISO 带时间：按本地日历日（修正 UTC 偏移串日）
+  // ISO 带时间：按 Excel 序列还原日历日（避免少一天）
   if (/^\d{4}-\d{2}-\d{2}T/.test(s)) {
     const dt = new Date(s);
     if (!Number.isNaN(dt.getTime())) {
-      return ymd(dt.getFullYear(), dt.getMonth() + 1, dt.getDate());
+      return calendarYmdFromDate(dt);
     }
   }
 
@@ -329,8 +341,7 @@ function normalizeDate(v: unknown): string {
   // 英文日期串等
   const parsed = Date.parse(s);
   if (!Number.isNaN(parsed)) {
-    const dt = new Date(parsed);
-    return ymd(dt.getFullYear(), dt.getMonth() + 1, dt.getDate());
+    return calendarYmdFromDate(new Date(parsed));
   }
 
   return "";
@@ -1424,136 +1435,138 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
       );
 
       try {
-        let importedProfileId = "";
-        let importMode: "create" | "update" = "create";
+        runInTransaction(() => {
+          let importedProfileId = "";
+          let importMode: "create" | "update" = "create";
 
-        if (person) {
-          const mirrorName = String(person.name || name);
-          const mirrorPhone = phone || String(person.phone || "");
-          const mirrorPosition = personPosition || String(person.position || "");
-          const mirrorHire = hireDate || String(person.hire_date || "");
-          const existed = db
-            .prepare("SELECT id FROM hr_profiles WHERE personnel_id = ?")
-            .get(person.id) as { id: string } | undefined;
-          if (existed) {
-            importedProfileId = existed.id;
-            importMode = "update";
-            updateByPersonnelStmt.run(
-              mirrorName,
-              mirrorPhone,
-              mirrorPosition,
-              mirrorHire,
-              profileResign || person.resign_date || "",
-              profileStatus,
-              ...hrFieldValues(fields),
+          if (person) {
+            const mirrorName = String(person.name || name);
+            const mirrorPhone = phone || String(person.phone || "");
+            const mirrorPosition = personPosition || String(person.position || "");
+            const mirrorHire = hireDate || String(person.hire_date || "");
+            const existed = db
+              .prepare("SELECT id FROM hr_profiles WHERE personnel_id = ?")
+              .get(person.id) as { id: string } | undefined;
+            if (existed) {
+              importedProfileId = existed.id;
+              importMode = "update";
+              updateByPersonnelStmt.run(
+                mirrorName,
+                mirrorPhone,
+                mirrorPosition,
+                mirrorHire,
+                profileResign || person.resign_date || "",
+                profileStatus,
+                ...hrFieldValues(fields),
+                person.id,
+              );
+            } else {
+              importedProfileId = generateId("hr");
+              importMode = "create";
+              insertStmt.run(
+                importedProfileId,
+                person.id,
+                mirrorName,
+                mirrorPhone,
+                mirrorPosition,
+                mirrorHire,
+                profileResign || person.resign_date || "",
+                profileStatus,
+                ...hrFieldValues(fields),
+              );
+            }
+
+            let personnelStatus = person.status || status;
+            if (forceStatus === "active") {
+              personnelStatus = "active";
+            } else if (forceStatus === "inactive") {
+              personnelStatus = "inactive";
+            } else if (statusRaw.includes("离")) {
+              personnelStatus = "inactive";
+            } else if (statusRaw.includes("在") || statusRaw.includes("职")) {
+              personnelStatus = "active";
+            } else if (resignDate) {
+              personnelStatus = "inactive";
+            } else if (statusRaw) {
+              personnelStatus = status;
+            }
+
+            // 不回写人员管理入离职日期；仅可同步职位/电话/邮箱/在职状态文案
+            db.prepare(`
+              UPDATE personnel SET
+                status = ?,
+                position = CASE WHEN ? != '' THEN ? ELSE position END,
+                phone = CASE WHEN ? != '' THEN ? ELSE phone END,
+                email = CASE WHEN ? != '' THEN ? ELSE email END
+              WHERE id = ?
+            `).run(
+              personnelStatus,
+              personPosition,
+              personPosition,
+              phone,
+              phone,
+              fields.companyEmail,
+              fields.companyEmail,
               person.id,
             );
           } else {
-            importedProfileId = generateId("hr");
-            importMode = "create";
-            insertStmt.run(
-              importedProfileId,
-              person.id,
-              mirrorName,
-              mirrorPhone,
-              mirrorPosition,
-              mirrorHire,
-              profileResign || person.resign_date || "",
-              profileStatus,
-              ...hrFieldValues(fields),
-            );
+            // 未匹配人员管理：只写人事档案，不同步/不新建人员
+            const existed = db
+              .prepare(`
+                SELECT id FROM hr_profiles
+                WHERE personnel_id IS NULL AND TRIM(name) = ?
+                LIMIT 1
+              `)
+              .get(name) as { id: string } | undefined;
+            if (existed) {
+              importedProfileId = existed.id;
+              importMode = "update";
+              updateByIdStmt.run(
+                name,
+                phone,
+                personPosition,
+                hireDate,
+                profileResign,
+                profileStatus,
+                ...hrFieldValues(fields),
+                existed.id,
+              );
+            } else {
+              importedProfileId = generateId("hr");
+              importMode = "create";
+              insertStmt.run(
+                importedProfileId,
+                null,
+                name,
+                phone,
+                personPosition,
+                hireDate,
+                profileResign,
+                profileStatus,
+                ...hrFieldValues(fields),
+              );
+            }
           }
 
-          let personnelStatus = person.status || status;
-          if (forceStatus === "active") {
-            personnelStatus = "active";
-          } else if (forceStatus === "inactive") {
-            personnelStatus = "inactive";
-          } else if (statusRaw.includes("离")) {
-            personnelStatus = "inactive";
-          } else if (statusRaw.includes("在") || statusRaw.includes("职")) {
-            personnelStatus = "active";
-          } else if (resignDate) {
-            personnelStatus = "inactive";
-          } else if (statusRaw) {
-            personnelStatus = status;
+          if (importedProfileId) {
+            touchHrOperator(db, importedProfileId, operator);
+            writeHrProfileLog(db, {
+              profileId: importedProfileId,
+              profileName: name,
+              action: "import",
+              operator,
+              summary:
+                importMode === "create"
+                  ? `导入新建人事档案「${name}」`
+                  : `导入更新人事档案「${name}」`,
+              detail: {
+                mode: importMode,
+                excelRow,
+                linkedPersonnel: Boolean(person),
+              },
+            });
           }
-
-          // 不回写人员管理入离职日期；仅可同步职位/电话/邮箱/在职状态文案
-          db.prepare(`
-            UPDATE personnel SET
-              status = ?,
-              position = CASE WHEN ? != '' THEN ? ELSE position END,
-              phone = CASE WHEN ? != '' THEN ? ELSE phone END,
-              email = CASE WHEN ? != '' THEN ? ELSE email END
-            WHERE id = ?
-          `).run(
-            personnelStatus,
-            personPosition,
-            personPosition,
-            phone,
-            phone,
-            fields.companyEmail,
-            fields.companyEmail,
-            person.id,
-          );
-        } else {
-          // 未匹配人员管理：只写人事档案，不同步/不新建人员
-          const existed = db
-            .prepare(`
-              SELECT id FROM hr_profiles
-              WHERE personnel_id IS NULL AND TRIM(name) = ?
-              LIMIT 1
-            `)
-            .get(name) as { id: string } | undefined;
-          if (existed) {
-            importedProfileId = existed.id;
-            importMode = "update";
-            updateByIdStmt.run(
-              name,
-              phone,
-              personPosition,
-              hireDate,
-              profileResign,
-              profileStatus,
-              ...hrFieldValues(fields),
-              existed.id,
-            );
-          } else {
-            importedProfileId = generateId("hr");
-            importMode = "create";
-            insertStmt.run(
-              importedProfileId,
-              null,
-              name,
-              phone,
-              personPosition,
-              hireDate,
-              profileResign,
-              profileStatus,
-              ...hrFieldValues(fields),
-            );
-          }
-        }
-
-        if (importedProfileId) {
-          touchHrOperator(db, importedProfileId, operator);
-          writeHrProfileLog(db, {
-            profileId: importedProfileId,
-            profileName: name,
-            action: "import",
-            operator,
-            summary:
-              importMode === "create"
-                ? `导入新建人事档案「${name}」`
-                : `导入更新人事档案「${name}」`,
-            detail: {
-              mode: importMode,
-              excelRow,
-              linkedPersonnel: Boolean(person),
-            },
-          });
-        }
+        });
 
         result.success += 1;
       } catch (e: unknown) {

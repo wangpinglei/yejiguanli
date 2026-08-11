@@ -133,6 +133,10 @@ interface DataContextType {
       distributionPersonalRate?: number | null
     },
   ) => Promise<void>;
+  transferPersonnel: (
+    id: string,
+    data: { salesUnitId: string; effectiveDate: string; remark?: string },
+  ) => Promise<void>;
   ensurePersonnelByName: (
     name: string,
     salesUnitId: string,
@@ -419,6 +423,16 @@ export function DataProvider({ children }: { children: ReactNode }) {
         const others = prev.filter((c) => c.personnelId !== id);
         return [...others, ...result.productPersonCommissions];
       });
+    },
+    [],
+  );
+  const transferPersonnel = useCallback(
+    async (
+      id: string,
+      data: { salesUnitId: string; effectiveDate: string; remark?: string },
+    ) => {
+      const updated = await personnelApi.transfer(id, data);
+      setPersonnel((prev) => prev.map((x) => (x.id === id ? updated : x)));
     },
     [],
   );
@@ -810,7 +824,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     teamMgmtCommissionRules,
     costChangeLogs, notifications, monthlyAdjustments, loading,
     addSalesUnit, updateSalesUnit, deleteSalesUnit,
-    addPersonnel, updatePersonnel, deletePersonnel, mergePersonnel, enablePersonnelDistribution, ensurePersonnelByName,
+    addPersonnel, updatePersonnel, deletePersonnel, mergePersonnel, enablePersonnelDistribution, transferPersonnel, ensurePersonnelByName,
     addProduct, updateProduct, deleteProduct, ensureProductByName,
     addSalesRecord, updateSalesRecord, deleteSalesRecord,
     addCostRecord, updateCostRecord, deleteCostRecord,

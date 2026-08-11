@@ -11,6 +11,42 @@ import { getVisibleUnitIds, requireEditPermission, isOrgDept, isReadOnly } from 
 
 const router = Router();
 
+function loadAssignmentsByPersonnelIds(
+  db: ReturnType<typeof getDb>,
+  ids: string[],
+): Map<string, any[]> {
+  const map = new Map<string, any[]>();
+  if (ids.length === 0) return map;
+  const placeholders = ids.map(() => "?").join(",");
+  const rows = db
+    .prepare(`
+      SELECT * FROM personnel_unit_assignments
+      WHERE personnel_id IN (${placeholders})
+      ORDER BY start_date ASC, created_at ASC
+    `)
+    .all(...ids) as any[];
+  for (const row of rows) {
+    const list = map.get(row.personnel_id) || [];
+    list.push(row);
+    map.set(row.personnel_id, list);
+  }
+  return map;
+}
+
+function insertOpenAssignment(
+  db: ReturnType<typeof getDb>,
+  personnelId: string,
+  salesUnitId: string,
+  startDate: string,
+  remark = "",
+) {
+  db.prepare(`
+    INSERT INTO personnel_unit_assignments (
+      id, personnel_id, sales_unit_id, start_date, end_date, remark, created_at
+    ) VALUES (?, ?, ?, ?, NULL, ?, datetime('now'))
+  `).run(generateId("pua"), personnelId, salesUnitId, startDate, remark);
+}
+
 /**
  * 入参可显式清空：null / "" → 写 null；undefined → 保留原值
  */
@@ -41,7 +77,7 @@ router.use(authMiddleware);
 // GET /api/personnel - 获取人员列表（按权限过滤）
 router.get("/", (req, res) => {
   const db = getDb();
-  let rows = db.prepare("SELECT * FROM personnel ORDER BY name").all();
+  let rows = db.prepare("SELECT * FROM personnel ORDER BY name").all() as any[];
 
   const visibleIds = getVisibleUnitIds(req.user!);
   if (visibleIds !== null) {
@@ -49,7 +85,11 @@ router.get("/", (req, res) => {
     rows = rows.filter((r: any) => idSet.has(r.sales_unit_id));
   }
 
-  res.json(rows.map(rowToPersonnel));
+  const assignMap = loadAssignmentsByPersonnelIds(
+    db,
+    rows.map((r) => r.id),
+  );
+  res.json(rows.map((r) => rowToPersonnel(r, assignMap.get(r.id) || [])));
 });
 
 // POST /api/personnel - 创建人员
@@ -67,32 +107,42 @@ router.post("/", requireEditPermission, (req, res) => {
   const db = getDb();
   const salaryJson = JSON.stringify(salary || {});
   const regularJson = regularCompensation ? JSON.stringify(regularCompensation) : "";
-  db.prepare(`
-    INSERT INTO personnel (
-      id, name, sales_unit_id, position, phone, email, salary,
-      social_insurance, housing_fund, hire_date, resign_date, status,
-      high_commission_from, regular_compensation
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    id,
-    name,
-    salesUnitId,
-    position || "",
-    phone || "",
-    email || "",
-    salaryJson,
-    socialInsurance || 0,
-    housingFund || 0,
-    hireDate || "",
-    resignDate || null,
-    status || "active",
-    highCommissionFrom || "",
-    regularJson,
-  );
+  const startDate =
+    (hireDate || "").trim().slice(0, 10) || new Date().toISOString().slice(0, 10);
+  runInTransaction(() => {
+    db.prepare(`
+      INSERT INTO personnel (
+        id, name, sales_unit_id, position, phone, email, salary,
+        social_insurance, housing_fund, hire_date, resign_date, status,
+        high_commission_from, regular_compensation
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      name,
+      salesUnitId,
+      position || "",
+      phone || "",
+      email || "",
+      salaryJson,
+      socialInsurance || 0,
+      housingFund || 0,
+      hireDate || "",
+      resignDate || null,
+      status || "active",
+      highCommissionFrom || "",
+      regularJson,
+    );
+    insertOpenAssignment(db, id, salesUnitId, startDate, "入职建档");
+  });
 
   const row = db.prepare("SELECT * FROM personnel WHERE id = ?").get(id);
-  res.json(rowToPersonnel(row));
+  const assigns = db
+    .prepare(
+      "SELECT * FROM personnel_unit_assignments WHERE personnel_id = ? ORDER BY start_date",
+    )
+    .all(id);
+  res.json(rowToPersonnel(row, assigns));
 });
 
 /**
@@ -380,14 +430,21 @@ router.post("/merge", requireEditPermission, (req, res) => {
     db.prepare("DELETE FROM monthly_adjustments WHERE personnel_id = ?").run(removeId);
     db.prepare("DELETE FROM performance_targets WHERE personnel_id = ?").run(removeId);
     db.prepare("DELETE FROM hr_profiles WHERE personnel_id = ?").run(removeId);
+    db.prepare("DELETE FROM personnel_unit_assignments WHERE personnel_id = ?").run(removeId);
     db.prepare("UPDATE sales_records SET personnel_id = '' WHERE personnel_id = ?").run(removeId);
     db.prepare("DELETE FROM personnel WHERE id = ?").run(removeId);
 
     return moved;
   });
 
+  const keepAssigns = db
+    .prepare(
+      "SELECT * FROM personnel_unit_assignments WHERE personnel_id = ? ORDER BY start_date",
+    )
+    .all(keepId);
   const personnel = rowToPersonnel(
     db.prepare("SELECT * FROM personnel WHERE id = ?").get(keepId),
+    keepAssigns,
   );
   const productPersonCommissions = (
     db.prepare("SELECT * FROM product_person_commissions WHERE personnel_id = ?").all(keepId) as any[]
@@ -399,6 +456,99 @@ router.post("/merge", requireEditPermission, (req, res) => {
     stats,
     message: `已合并「${remove.name}」到「${keep.name}」`,
   });
+});
+
+/**
+ * POST /api/personnel/:id/transfer
+ * 转岗：关闭当前归属段，从生效日起归新单位；历史销售/手工成本不回溯。
+ */
+router.post("/:id/transfer", requireEditPermission, (req, res) => {
+  if (isOrgDept(req.user!.role) || isReadOnly(req.user!)) {
+    return res.status(403).json({ error: "当前角色无权办理转岗" });
+  }
+
+  const { id } = req.params;
+  const toUnitId = String(req.body?.salesUnitId || req.body?.toUnitId || "").trim();
+  const effectiveDate = String(req.body?.effectiveDate || "").trim().slice(0, 10);
+  const remark = String(req.body?.remark || "").trim();
+
+  if (!toUnitId) {
+    return res.status(400).json({ error: "请选择目标部门" });
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)) {
+    return res.status(400).json({ error: "请填写调动生效日（年-月-日）" });
+  }
+
+  const db = getDb();
+  const existing: any = db.prepare("SELECT * FROM personnel WHERE id = ?").get(id);
+  if (!existing) return res.status(404).json({ error: "人员不存在" });
+
+  const unit = db.prepare("SELECT id FROM sales_units WHERE id = ?").get(toUnitId);
+  if (!unit) return res.status(400).json({ error: "目标部门不存在" });
+
+  if (existing.sales_unit_id === toUnitId) {
+    return res.status(400).json({ error: "目标部门与当前所属单位相同" });
+  }
+
+  const visibleIds = getVisibleUnitIds(req.user!);
+  if (visibleIds !== null) {
+    const idSet = new Set(visibleIds);
+    if (!idSet.has(existing.sales_unit_id) || !idSet.has(toUnitId)) {
+      return res.status(403).json({ error: "无权操作所选单位人员" });
+    }
+  }
+
+  const openRow: any = db
+    .prepare(`
+      SELECT * FROM personnel_unit_assignments
+      WHERE personnel_id = ? AND (end_date IS NULL OR TRIM(end_date) = '')
+      ORDER BY start_date DESC LIMIT 1
+    `)
+    .get(id);
+
+  if (openRow) {
+    const openStart = String(openRow.start_date || "").slice(0, 10);
+    if (openStart && effectiveDate < openStart) {
+      return res.status(400).json({
+        error: `调动日不能早于当前段开始日 ${openStart}`,
+      });
+    }
+  }
+
+  runInTransaction(() => {
+    if (openRow) {
+      db.prepare(`
+        UPDATE personnel_unit_assignments SET end_date = ? WHERE id = ?
+      `).run(effectiveDate, openRow.id);
+    } else {
+      // 无时间轴时补旧段再关闭
+      const hire = String(existing.hire_date || "").slice(0, 10) || "1970-01-01";
+      const oldStart = hire <= effectiveDate ? hire : effectiveDate;
+      const oldId = generateId("pua");
+      db.prepare(`
+        INSERT INTO personnel_unit_assignments (
+          id, personnel_id, sales_unit_id, start_date, end_date, remark, created_at
+        ) VALUES (?, ?, ?, ?, ?, '转岗前补录', datetime('now'))
+      `).run(oldId, id, existing.sales_unit_id, oldStart, effectiveDate);
+    }
+
+    insertOpenAssignment(
+      db,
+      id,
+      toUnitId,
+      effectiveDate,
+      remark || "转岗",
+    );
+    db.prepare("UPDATE personnel SET sales_unit_id = ? WHERE id = ?").run(toUnitId, id);
+  });
+
+  const row = db.prepare("SELECT * FROM personnel WHERE id = ?").get(id);
+  const assigns = db
+    .prepare(
+      "SELECT * FROM personnel_unit_assignments WHERE personnel_id = ? ORDER BY start_date",
+    )
+    .all(id);
+  res.json(rowToPersonnel(row, assigns));
 });
 
 /**
@@ -515,8 +665,13 @@ router.post("/:id/enable-distribution", requireEditPermission, (req, res) => {
   }
 
   const row = db.prepare("SELECT * FROM personnel WHERE id = ?").get(id);
+  const assigns = db
+    .prepare(
+      "SELECT * FROM personnel_unit_assignments WHERE personnel_id = ? ORDER BY start_date",
+    )
+    .all(id);
   res.json({
-    personnel: rowToPersonnel(row),
+    personnel: rowToPersonnel(row, assigns),
     productPersonCommissions: db
       .prepare("SELECT * FROM product_person_commissions WHERE personnel_id = ?")
       .all(id)
@@ -546,7 +701,12 @@ router.put("/:id", requireEditPermission, (req, res) => {
       id,
     );
     const row = db.prepare("SELECT * FROM personnel WHERE id = ?").get(id);
-    return res.json(rowToPersonnel(row));
+    const assigns = db
+      .prepare(
+        "SELECT * FROM personnel_unit_assignments WHERE personnel_id = ? ORDER BY start_date",
+      )
+      .all(id);
+    return res.json(rowToPersonnel(row, assigns));
   }
 
   if (isReadOnly(req.user!)) {
@@ -568,32 +728,77 @@ router.put("/:id", requireEditPermission, (req, res) => {
       ? (highCommissionFrom || "")
       : (existing.high_commission_from || "");
 
-  db.prepare(`
-    UPDATE personnel SET
-      name = ?, sales_unit_id = ?, position = ?, phone = ?, email = ?,
-      salary = ?, social_insurance = ?, housing_fund = ?,
-      hire_date = ?, resign_date = ?, status = ?,
-      high_commission_from = ?, regular_compensation = ?
-    WHERE id = ?
-  `).run(
-    name ?? existing.name,
-    salesUnitId ?? existing.sales_unit_id,
-    position ?? existing.position,
-    phone ?? existing.phone,
-    email ?? existing.email,
-    salaryJson,
-    socialInsurance ?? existing.social_insurance,
-    housingFund ?? existing.housing_fund,
-    resolveOptionalText(hireDate, existing.hire_date) ?? "",
-    resolveOptionalText(resignDate, existing.resign_date),
-    status ?? existing.status,
-    highFrom,
-    regularJson,
-    id,
-  );
+  const nextUnitId = salesUnitId ?? existing.sales_unit_id;
+  const unitChanged =
+    salesUnitId !== undefined
+    && String(salesUnitId) !== String(existing.sales_unit_id);
+
+  runInTransaction(() => {
+    db.prepare(`
+      UPDATE personnel SET
+        name = ?, sales_unit_id = ?, position = ?, phone = ?, email = ?,
+        salary = ?, social_insurance = ?, housing_fund = ?,
+        hire_date = ?, resign_date = ?, status = ?,
+        high_commission_from = ?, regular_compensation = ?
+      WHERE id = ?
+    `).run(
+      name ?? existing.name,
+      nextUnitId,
+      position ?? existing.position,
+      phone ?? existing.phone,
+      email ?? existing.email,
+      salaryJson,
+      socialInsurance ?? existing.social_insurance,
+      housingFund ?? existing.housing_fund,
+      resolveOptionalText(hireDate, existing.hire_date) ?? "",
+      resolveOptionalText(resignDate, existing.resign_date),
+      status ?? existing.status,
+      highFrom,
+      regularJson,
+      id,
+    );
+
+    // 编辑里改单位：按今天生效写入时间轴（精确日期请用「转岗」）
+    if (unitChanged) {
+      const today = new Date().toISOString().slice(0, 10);
+      const openRow: any = db
+        .prepare(`
+          SELECT * FROM personnel_unit_assignments
+          WHERE personnel_id = ? AND (end_date IS NULL OR TRIM(end_date) = '')
+          ORDER BY start_date DESC LIMIT 1
+        `)
+        .get(id);
+      if (openRow) {
+        const openStart = String(openRow.start_date || "").slice(0, 10);
+        const endDate = openStart && today < openStart ? openStart : today;
+        db.prepare(`
+          UPDATE personnel_unit_assignments SET end_date = ? WHERE id = ?
+        `).run(endDate, openRow.id);
+      } else {
+        const hire = String(existing.hire_date || "").slice(0, 10) || "1970-01-01";
+        db.prepare(`
+          INSERT INTO personnel_unit_assignments (
+            id, personnel_id, sales_unit_id, start_date, end_date, remark, created_at
+          ) VALUES (?, ?, ?, ?, ?, '编辑前补录', datetime('now'))
+        `).run(
+          generateId("pua"),
+          id,
+          existing.sales_unit_id,
+          hire <= today ? hire : today,
+          today,
+        );
+      }
+      insertOpenAssignment(db, id, String(nextUnitId), today, "编辑改单位");
+    }
+  });
 
   const row = db.prepare("SELECT * FROM personnel WHERE id = ?").get(id);
-  res.json(rowToPersonnel(row));
+  const assigns = db
+    .prepare(
+      "SELECT * FROM personnel_unit_assignments WHERE personnel_id = ? ORDER BY start_date",
+    )
+    .all(id);
+  res.json(rowToPersonnel(row, assigns));
 });
 
 // DELETE /api/personnel/:id - 删除人员（同步删除人事档案；人员管理手动数据由调用方确认）

@@ -5,6 +5,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { calcSalePersonCommissionPreview } from "@/lib/commissionReward";
+import { resolveUnitIdAt } from "@/lib/unitAssignment";
 import type { SalesRecord } from "@/types";
 import { Plus, Search, Pencil, Trash2, RefreshCw, CloudDownload, Upload, FileSpreadsheet, CheckCircle2, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -618,11 +619,15 @@ export default function SalesRecords() {
     return personnel.filter((p) => p.salesUnitId === filterUnit);
   }, [personnel, filterUnit]);
 
-  // 表单中根据选择的单位过滤人员
+  // 表单中根据选择的单位 + 成交日归属过滤人员
   const formPersonnel = useMemo(() => {
     if (!form.salesUnitId) return personnel;
-    return personnel.filter((p) => p.salesUnitId === form.salesUnitId);
-  }, [personnel, form.salesUnitId]);
+    return personnel.filter(
+      (p) =>
+        resolveUnitIdAt(p, form.saleDate) === form.salesUnitId
+        || p.salesUnitId === form.salesUnitId,
+    );
+  }, [personnel, form.salesUnitId, form.saleDate]);
 
   const getUnitName = (s: SalesRecord) => {
     if (s.salesUnitId) return salesUnits.find((u) => u.id === s.salesUnitId)?.name || s.salesUnitName || "-";
@@ -1456,7 +1461,16 @@ export default function SalesRecords() {
               </div>
               <div className="space-y-2">
                 <Label>销售人员 *</Label>
-                <Select value={form.personnelId} onValueChange={(v) => setForm({ ...form, personnelId: v })}>
+                <Select
+                  value={form.personnelId}
+                  onValueChange={(v) => {
+                    const person = personnel.find((p) => p.id === v);
+                    const unitId = person
+                      ? resolveUnitIdAt(person, form.saleDate) || form.salesUnitId
+                      : form.salesUnitId;
+                    setForm({ ...form, personnelId: v, salesUnitId: unitId });
+                  }}
+                >
                   <SelectTrigger><SelectValue placeholder="选择人员" /></SelectTrigger>
                   <SelectContent>
                     {formPersonnel.map((p) => <SelectItem key={p.id} value={p.id}>{p.name} - {p.position}</SelectItem>)}
@@ -1488,7 +1502,18 @@ export default function SalesRecords() {
               </div>
               <div className="space-y-2">
                 <Label>销售日期</Label>
-                <Input type="date" value={form.saleDate} onChange={(e) => setForm({ ...form, saleDate: e.target.value })} />
+                <Input
+                  type="date"
+                  value={form.saleDate}
+                  onChange={(e) => {
+                    const saleDate = e.target.value;
+                    const person = personnel.find((p) => p.id === form.personnelId);
+                    const salesUnitId = person
+                      ? resolveUnitIdAt(person, saleDate) || form.salesUnitId
+                      : form.salesUnitId;
+                    setForm({ ...form, saleDate, salesUnitId });
+                  }}
+                />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">

@@ -8,6 +8,7 @@ import {
   wasEmployedInMonth,
   EMPTY_SALARY,
 } from '@/lib/salary'
+import { personBelongsToUnitInMonth } from '@/lib/unitAssignment'
 import type { Personnel, PerformanceTarget, SalesRecord } from '@/types'
 
 export type PositionGroupMatch = {
@@ -55,9 +56,11 @@ function getUnitPersonnel(
     (r) => r.salesUnitId === unitId,
   )
   return personnel.filter((p) => {
-    if (p.salesUnitId !== unitId) return false
-    if (wasEmployedInMonth(p, yearMonth)) return true
-    return getPersonalSales(p.id, monthUnitSales, p.name) > 0
+    const belongs = personBelongsToUnitInMonth(p, unitId, yearMonth)
+    const hasSales = getPersonalSales(p.id, monthUnitSales, p.name) > 0
+    if (!belongs && !hasSales) return false
+    if (belongs && wasEmployedInMonth(p, yearMonth)) return true
+    return hasSales
   })
 }
 

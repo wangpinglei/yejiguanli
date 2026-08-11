@@ -151,6 +151,11 @@ export const personnelApi = {
       personnel: import("@/types").Personnel
       productPersonCommissions: import("@/types").ProductPersonCommission[]
     }>(`/personnel/${id}/enable-distribution`, data),
+  transfer: (
+    id: string,
+    data: { salesUnitId: string; effectiveDate: string; remark?: string },
+  ) =>
+    api.post<import("@/types").Personnel>(`/personnel/${id}/transfer`, data),
 };
 
 export const hrProfilesApi = {

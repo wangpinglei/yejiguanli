@@ -18,6 +18,7 @@ import {
   ArrowUp,
   ArrowUpDown,
   Merge,
+  ArrowRightLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -120,7 +121,7 @@ const RANGE_LABELS: Record<SalesRange, string> = {
 };
 
 export default function PersonnelPage() {
-  const { addPersonnel, updatePersonnel, deletePersonnel, mergePersonnel, products, monthlyAdjustments, productPersonCommissions, teamMgmtCommissionRules, performanceTargets, unitProductSettlements } = useData();
+  const { addPersonnel, updatePersonnel, deletePersonnel, mergePersonnel, transferPersonnel, products, monthlyAdjustments, productPersonCommissions, teamMgmtCommissionRules, performanceTargets, unitProductSettlements } = useData();
   const teamMgmtContext = useMemo(() => ({
     rules: teamMgmtCommissionRules,
     targets: performanceTargets,
@@ -145,6 +146,13 @@ export default function PersonnelPage() {
   const [mergeKeepId, setMergeKeepId] = useState("");
   const [mergeRemoveId, setMergeRemoveId] = useState("");
   const [merging, setMerging] = useState(false);
+  const [transferPerson, setTransferPerson] = useState<Personnel | null>(null);
+  const [transferUnitId, setTransferUnitId] = useState("");
+  const [transferDate, setTransferDate] = useState(
+    () => new Date().toISOString().slice(0, 10),
+  );
+  const [transferRemark, setTransferRemark] = useState("");
+  const [transferring, setTransferring] = useState(false);
   const [commissionPerson, setCommissionPerson] = useState<Personnel | null>(null);
   const [salaryDetailPerson, setSalaryDetailPerson] = useState<Personnel | null>(null);
   const [salaryDetailMonth, setSalaryDetailMonth] = useState(new Date().toISOString().slice(0, 7));
@@ -414,6 +422,52 @@ export default function PersonnelPage() {
     setMergeKeepId(person.id);
     setMergeRemoveId(others.length === 1 ? others[0].id : "");
     setMergeOpen(true);
+  }
+
+  function openTransfer(person: Personnel) {
+    setTransferPerson(person);
+    setTransferUnitId("");
+    setTransferDate(new Date().toISOString().slice(0, 10));
+    setTransferRemark("");
+  }
+
+  async function handleTransfer() {
+    if (!transferPerson) return;
+    if (!transferUnitId) {
+      alert("请选择目标部门");
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(transferDate)) {
+      alert("请填写调动生效日");
+      return;
+    }
+    if (transferUnitId === transferPerson.salesUnitId) {
+      alert("目标部门与当前所属单位相同");
+      return;
+    }
+    const fromName = getUnitName(transferPerson.salesUnitId);
+    const toName = getUnitName(transferUnitId);
+    if (
+      !confirm(
+        `确认将「${transferPerson.name}」于 ${transferDate} 从「${fromName}」转到「${toName}」？\n\n`
+        + "调动日前的业绩与人力成本仍归原部门；从调动日起归新部门。",
+      )
+    ) {
+      return;
+    }
+    setTransferring(true);
+    try {
+      await transferPersonnel(transferPerson.id, {
+        salesUnitId: transferUnitId,
+        effectiveDate: transferDate,
+        remark: transferRemark.trim() || undefined,
+      });
+      setTransferPerson(null);
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "转岗失败");
+    } finally {
+      setTransferring(false);
+    }
   }
 
   async function handleMerge() {
@@ -872,6 +926,17 @@ export default function PersonnelPage() {
                                   <Merge className="h-4 w-4 text-amber-700" />
                                 </Button>
                               )}
+                              {canEditPersonnel && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 px-2 text-xs"
+                                  title="调岗"
+                                  onClick={() => openTransfer(person)}
+                                >
+                                  调岗
+                                </Button>
+                              )}
                               <Button variant="ghost" size="icon" onClick={() => openEdit(person)}>
                                 <Pencil className="h-4 w-4" />
                               </Button>
@@ -971,14 +1036,26 @@ export default function PersonnelPage() {
                   </div>
                   <div className="space-y-2">
                     <Label>所属单位 *</Label>
-                    <Select value={form.salesUnitId} onValueChange={(v) => setForm({ ...form, salesUnitId: v })}>
-                      <SelectTrigger><SelectValue placeholder="选择单位" /></SelectTrigger>
-                      <SelectContent>
-                        {salesUnits.map((u) => (
-                          <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    {editingPerson ? (
+                      <>
+                        <Input
+                          readOnly
+                          value={getUnitName(form.salesUnitId)}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          调整部门请用行内「调岗」，并填写调动生效日。
+                        </p>
+                      </>
+                    ) : (
+                      <Select value={form.salesUnitId} onValueChange={(v) => setForm({ ...form, salesUnitId: v })}>
+                        <SelectTrigger><SelectValue placeholder="选择单位" /></SelectTrigger>
+                        <SelectContent>
+                          {salesUnits.map((u) => (
+                            <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
@@ -1247,6 +1324,72 @@ export default function PersonnelPage() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setSalaryDetailPerson(null)}>关闭</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 转岗 */}
+      <Dialog
+        open={!!transferPerson}
+        onOpenChange={(open) => {
+          if (!open) setTransferPerson(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowRightLeft className="h-5 w-5" />
+              人员转岗
+            </DialogTitle>
+          </DialogHeader>
+          {transferPerson && (
+            <div className="space-y-4 py-1">
+              <p className="text-sm text-muted-foreground">
+                「{transferPerson.name}」当前：{getUnitName(transferPerson.salesUnitId)}。
+                调动日前业绩与人力成本留在原部门，从调动日起归新部门。
+              </p>
+              <div className="space-y-2">
+                <Label>目标部门 *</Label>
+                <Select value={transferUnitId || undefined} onValueChange={setTransferUnitId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择目标部门" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {salesUnits
+                      .filter((u) => u.id !== transferPerson.salesUnitId)
+                      .map((u) => (
+                        <SelectItem key={u.id} value={u.id}>
+                          {u.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>调动生效日 *</Label>
+                <Input
+                  type="date"
+                  value={transferDate}
+                  onChange={(e) => setTransferDate(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>备注</Label>
+                <Input
+                  value={transferRemark}
+                  onChange={(e) => setTransferRemark(e.target.value)}
+                  placeholder="可选"
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTransferPerson(null)} disabled={transferring}>
+              取消
+            </Button>
+            <Button onClick={() => void handleTransfer()} disabled={transferring}>
+              {transferring ? "提交中…" : "确认转岗"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

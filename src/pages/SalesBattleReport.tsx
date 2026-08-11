@@ -11,6 +11,7 @@ import {
   wasEmployedInMonth,
   EMPTY_SALARY,
 } from "@/lib/salary";
+import { personBelongsToUnitInMonth } from "@/lib/unitAssignment";
 import type { Personnel } from "@/types";
 import {
   CalendarDays,
@@ -92,11 +93,11 @@ export default function SalesBattleReport() {
       (r) => r.salesUnitId === unitId
     );
     return personnel.filter((p) => {
-      if (p.salesUnitId !== unitId) return false;
-      // 按入职/离职日期判断该月是否在职
-      if (wasEmployedInMonth(p, yearMonth)) return true;
-      // 兜底：当月本单位确有业绩（离职日期未填/填错时仍能进战报）
-      return getPersonalSales(p.id, monthUnitSales, p.name) > 0;
+      const belongs = personBelongsToUnitInMonth(p, unitId, yearMonth);
+      const hasSales = getPersonalSales(p.id, monthUnitSales, p.name) > 0;
+      if (!belongs && !hasSales) return false;
+      if (belongs && wasEmployedInMonth(p, yearMonth)) return true;
+      return hasSales;
     });
   }, [personnel, unitId, yearMonth, salesRecords]);
 

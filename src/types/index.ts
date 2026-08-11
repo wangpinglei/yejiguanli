@@ -72,6 +72,19 @@ export interface Personnel {
   highCommissionFrom?: string;
   /** 分销生效前的固定薪酬 + 产品提成快照 */
   regularCompensation?: PersonnelRegularCompensation;
+  /** 单位归属时间轴（转岗历史）；缺省则仅认当前 salesUnitId */
+  unitAssignments?: PersonnelUnitAssignment[];
+}
+
+/** 人员在销售单位的归属时间段：start 含当天，end 空=当前；有 end 则当天起归下一段 */
+export interface PersonnelUnitAssignment {
+  id: string;
+  personnelId: string;
+  salesUnitId: string;
+  startDate: string;
+  endDate?: string;
+  remark?: string;
+  createdAt?: string;
 }
 
 /** 分销切换前快照：保证历史成交仍按原底薪/原产品提成计算 */

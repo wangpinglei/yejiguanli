@@ -5,6 +5,10 @@ import {
   resolvePpcListForSaleDate,
 } from "@/lib/compensation";
 import { getPersonTeamMgmtCommission } from "@/lib/teamMgmtCommission";
+import {
+  getUnitFixedPayRatioInMonth,
+  personBelongsToUnitInMonth,
+} from "@/lib/unitAssignment";
 import type {
   SalaryStructure,
   SalesRecord,
@@ -439,6 +443,7 @@ export function calculateMonthlySalary(
   adjustment?: MonthlyAdjustment,
   productPersonCommissions?: ProductPersonCommission[],
   teamMgmtContext?: TeamMgmtSalaryContext,
+  forUnitId?: string,
 ): {
   baseSalary: number;
   performance: number;
@@ -467,7 +472,11 @@ export function calculateMonthlySalary(
         fixedRatio: 1,
       };
   const s = pay.salary || EMPTY_SALARY;
-  const fixedRatio = Number.isFinite(pay.fixedRatio) ? pay.fixedRatio : 1;
+  let fixedRatio = Number.isFinite(pay.fixedRatio) ? pay.fixedRatio : 1;
+  // 按单位归属时间轴切分固定人力成本
+  if (forUnitId && yearMonth) {
+    fixedRatio = getUnitFixedPayRatioInMonth(person, forUnitId, yearMonth);
+  }
   const personalSales = getPersonalSales(person.id, monthlyRecords, person.name);
 
   // 个人提成：优先产品×单位×人员配置（按成交日分段）
@@ -477,10 +486,11 @@ export function calculateMonthlySalary(
     : calcPersonalCommission(s, personalSales);
 
   // 管理提成：仅团队规则分摊；未传上下文则为 0（停用旧每人×产品管理提成）
+  const mgmtUnitId = forUnitId || person.salesUnitId;
   const managementCommission = teamMgmtContext && yearMonth
     ? getPersonTeamMgmtCommission(
         person.id,
-        person.salesUnitId,
+        mgmtUnitId,
         yearMonth,
         salesRecords,
         teamMgmtContext.upsList,
@@ -599,7 +609,9 @@ export function getUnitSalaryCost(
 
   const memberMap = new Map<string, Personnel>();
   personnel.forEach((p) => {
-    const belongsUnit = p.salesUnitId === unitId;
+    const belongsUnit = yearMonth
+      ? personBelongsToUnitInMonth(p, unitId, yearMonth)
+      : p.salesUnitId === unitId;
     const hasSalesHere = salesPersonIdSet.has(p.id);
     if (!belongsUnit && !hasSalesHere) return;
     // 本单位成员：按月在岗；仅因有销售挂进来的：始终计入（保证提成进成本）
@@ -612,14 +624,17 @@ export function getUnitSalaryCost(
     const adj = monthlyAdjustments.find(
       (a) => a.personnelId === p.id && a.yearMonth === yearMonth
     );
+    // 提成只认本单位成交；固定成本按归属时间轴切到本单位
+    const unitSalesRecords = salesRecords.filter((r) => r.salesUnitId === unitId);
     const calc = calculateMonthlySalary(
       p,
-      salesRecords,
+      unitSalesRecords,
       products,
       yearMonth,
       adj,
       productPersonCommissions,
       teamMgmtContext,
+      unitId,
     );
     const socialInsurance = calc.socialInsurance;
     const housingFund = calc.housingFund;
