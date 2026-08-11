@@ -483,6 +483,7 @@ export default function HrManagementPage() {
   const [editing, setEditing] = useState<HrProfile | null>(null);
   const [form, setForm] = useState<HrForm>(EMPTY_FORM);
   const [newLaborName, setNewLaborName] = useState("");
+  const [laborCompanyManageOpen, setLaborCompanyManageOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -1228,16 +1229,13 @@ export default function HrManagementPage() {
             ))}
           </SelectContent>
         </Select>
-        {canEdit
-          && laborCompanyFilter !== "all"
-          && laborCompanyFilter !== "empty" && (
+        {canEdit && (
           <Button
             type="button"
             variant="outline"
-            className="text-destructive"
-            onClick={() => void handleDeleteLaborCompany(laborCompanyFilter)}
+            onClick={() => setLaborCompanyManageOpen(true)}
           >
-            删除该签署公司
+            管理签署公司
           </Button>
         )}
         <Select
@@ -1582,6 +1580,45 @@ export default function HrManagementPage() {
             </Table>
         </CardContent>
       </Card>
+
+      <Dialog open={laborCompanyManageOpen} onOpenChange={setLaborCompanyManageOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>管理劳动合同签署公司</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            可删除误识别项（例如把合同日期当成公司名）。删除字典不会删人事档案，仅清空相关档案的签署公司字段。
+          </p>
+          <div className="max-h-[360px] space-y-2 overflow-y-auto">
+            {laborCompanies.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">暂无签署公司</p>
+            ) : (
+              laborCompanies.map((c) => (
+                <div
+                  key={c.id}
+                  className="flex items-center justify-between gap-3 rounded-md border px-3 py-2"
+                >
+                  <span className="min-w-0 flex-1 break-all text-sm">{c.name}</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0 text-destructive"
+                    onClick={() => void handleDeleteLaborCompany(c.id)}
+                  >
+                    删除
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLaborCompanyManageOpen(false)}>
+              关闭
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
