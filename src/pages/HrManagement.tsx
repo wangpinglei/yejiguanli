@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import * as XLSX from "xlsx";
 import {
   AlertTriangle,
@@ -11,7 +12,6 @@ import {
   Search,
   Trash2,
   Upload,
-  Zap,
 } from "lucide-react";
 
 import { PageHeader } from "@/components/PageHeader";
@@ -67,6 +67,36 @@ const HR_LOG_ACTION_LABELS: Record<string, { label: string; color: string }> = {
   upload_document: { label: "上传文档", color: "bg-sky-100 text-sky-800" },
   delete_document: { label: "删除文档", color: "bg-rose-100 text-rose-800" },
 };
+
+/** 左侧固定列像素宽（须与 left 累加一致，否则会盖住手机号等列） */
+const HR_STICKY_W = {
+  check: 40,
+  index: 48,
+  status: 84,
+  name: 96,
+  gender: 56,
+} as const;
+
+const HR_STICKY_CELL =
+  "sticky z-20 box-border overflow-hidden bg-background";
+
+function getHrStickyLeft(canEdit: boolean) {
+  const check = canEdit ? HR_STICKY_W.check : 0;
+  const index = check;
+  const status = index + HR_STICKY_W.index;
+  const name = status + HR_STICKY_W.status;
+  const gender = name + HR_STICKY_W.name;
+  return { check: 0, index, status, name, gender };
+}
+
+function hrStickyStyle(left: number, width: number): CSSProperties {
+  return {
+    left,
+    width,
+    minWidth: width,
+    maxWidth: width,
+  };
+}
 type ContractFilter = "all" | "due60" | "due30" | "expired" | "empty";
 type ImportForceStatus = "table" | "active" | "inactive";
 
@@ -436,7 +466,6 @@ export default function HrManagementPage() {
     autoCreateLaborCompany: true,
     forceStatus: "table",
   });
-  const [batchCreating, setBatchCreating] = useState(false);
   const [deletingSelected, setDeletingSelected] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [importResult, setImportResult] = useState<string>("");
@@ -463,16 +492,6 @@ export default function HrManagementPage() {
     laborCompanies.forEach((c) => map.set(c.id, c.name));
     return map;
   }, [laborCompanies]);
-
-  const profiledIds = useMemo(
-    () => new Set(list.map((x) => x.personnelId).filter(Boolean)),
-    [list],
-  );
-
-  const unprofiledPersonnel = useMemo(
-    () => personnel.filter((p) => !profiledIds.has(p.id)),
-    [personnel, profiledIds],
-  );
 
   const loadData = useCallback(async () => {
     if (!canViewHr) return;
@@ -697,33 +716,6 @@ export default function HrManagementPage() {
       alert(e instanceof Error ? e.message : "保存失败");
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function handleBatchCreate() {
-    setBatchCreating(true);
-    setImportResult("");
-    try {
-      // 先刷新人员，避免前端人数缓存不准导致误判
-      await refreshAll();
-      const result = await hrProfilesApi.batchCreate();
-      if (result.created === 0 && result.totalPersonnel === 0) {
-        setImportResult("人员管理中暂无人员，请先在「人员管理」添加后再建档");
-      } else if (result.created === 0) {
-        setImportResult(
-          `人员均已建档（共 ${result.totalPersonnel} 人），无需重复操作。可直接编辑档案或「批量导入表格」补全信息。`,
-        );
-      } else {
-        setImportResult(
-          `一键建档完成：新建 ${result.created} 人，已有档案跳过 ${result.skipped} 人`,
-        );
-      }
-      await loadData();
-      await refreshAll();
-    } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : "一键建档失败");
-    } finally {
-      setBatchCreating(false);
     }
   }
 
@@ -1051,6 +1043,7 @@ export default function HrManagementPage() {
   }
 
   const canEdit = canEditHr && !isReadOnly;
+  const stickyLeft = getHrStickyLeft(canEdit);
 
   return (
     <div className="space-y-4 p-6">
@@ -1079,17 +1072,6 @@ export default function HrManagementPage() {
                     if (f) void handleSelectImportFile(f);
                   }}
                 />
-                <Button
-                  disabled={batchCreating || loading || deletingSelected}
-                  onClick={() => void handleBatchCreate()}
-                >
-                  <Zap className="mr-2 h-4 w-4" />
-                  {batchCreating
-                    ? "建档中…"
-                    : unprofiledPersonnel.length > 0
-                      ? `一键建档（${unprofiledPersonnel.length}）`
-                      : "一键建档"}
-                </Button>
                 <Button
                   variant="outline"
                   disabled={importing || deletingSelected}
@@ -1223,12 +1205,14 @@ export default function HrManagementPage() {
 
       <Card>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <Table>
+          <Table className="min-w-max border-separate border-spacing-0">
               <TableHeader>
                 <TableRow>
                   {canEdit && (
-                    <TableHead className="sticky left-0 z-10 w-10 bg-background px-2">
+                    <TableHead
+                      className={cn(HR_STICKY_CELL, "px-2")}
+                      style={hrStickyStyle(stickyLeft.check, HR_STICKY_W.check)}
+                    >
                       <Checkbox
                         checked={
                           isAllFilteredSelected
@@ -1244,38 +1228,33 @@ export default function HrManagementPage() {
                     </TableHead>
                   )}
                   <TableHead
-                    className={cn(
-                      "sticky z-10 w-12 min-w-[48px] bg-background",
-                      canEdit ? "left-10" : "left-0",
-                    )}
+                    className={HR_STICKY_CELL}
+                    style={hrStickyStyle(stickyLeft.index, HR_STICKY_W.index)}
                   >
                     序号
                   </TableHead>
                   <TableHead
-                    className={cn(
-                      "sticky z-10 w-[72px] min-w-[72px] bg-background",
-                      canEdit ? "left-[88px]" : "left-12",
-                    )}
+                    className={HR_STICKY_CELL}
+                    style={hrStickyStyle(stickyLeft.status, HR_STICKY_W.status)}
                   >
                     状态
                   </TableHead>
                   <TableHead
-                    className={cn(
-                      "sticky z-10 w-[96px] min-w-[96px] max-w-[96px] bg-background",
-                      canEdit ? "left-[160px]" : "left-[120px]",
-                    )}
+                    className={cn(HR_STICKY_CELL, "truncate")}
+                    style={hrStickyStyle(stickyLeft.name, HR_STICKY_W.name)}
                   >
                     姓名
                   </TableHead>
                   <TableHead
                     className={cn(
-                      "sticky z-10 w-[52px] min-w-[52px] bg-background shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)]",
-                      canEdit ? "left-[256px]" : "left-[216px]",
+                      HR_STICKY_CELL,
+                      "shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)]",
                     )}
+                    style={hrStickyStyle(stickyLeft.gender, HR_STICKY_W.gender)}
                   >
                     性别
                   </TableHead>
-                  <TableHead className="min-w-[110px]">手机号</TableHead>
+                  <TableHead className="min-w-[128px]">手机号</TableHead>
                   <TableHead className="min-w-[140px]">劳动合同签署公司</TableHead>
                   <TableHead className="min-w-[120px]">业绩归属单位</TableHead>
                   <TableHead className="min-w-[80px]">职位</TableHead>
@@ -1334,7 +1313,7 @@ export default function HrManagementPage() {
                       colSpan={canEdit ? 46 : 44}
                       className="py-10 text-center text-muted-foreground"
                     >
-                      暂无人事档案。可点「一键建档」（仅针对人员管理已有人员）或「批量导入表格」（须先在人员管理存在同名人员）。
+                      暂无人事档案。可点「批量导入表格」（须先在人员管理存在同名人员）。
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -1344,7 +1323,10 @@ export default function HrManagementPage() {
                       data-state={selectedIds.includes(row.id) ? "selected" : undefined}
                     >
                       {canEdit && (
-                        <TableCell className="sticky left-0 z-10 bg-background px-2">
+                        <TableCell
+                          className={cn(HR_STICKY_CELL, "px-2")}
+                          style={hrStickyStyle(stickyLeft.check, HR_STICKY_W.check)}
+                        >
                           <Checkbox
                             checked={selectedIds.includes(row.id)}
                             onCheckedChange={(checked) => handleToggleSelectRow(row.id, checked)}
@@ -1354,41 +1336,38 @@ export default function HrManagementPage() {
                         </TableCell>
                       )}
                       <TableCell
-                        className={cn(
-                          "sticky z-10 w-12 min-w-[48px] bg-background",
-                          canEdit ? "left-10" : "left-0",
-                        )}
+                        className={HR_STICKY_CELL}
+                        style={hrStickyStyle(stickyLeft.index, HR_STICKY_W.index)}
                       >
                         {index + 1}
                       </TableCell>
                       <TableCell
-                        className={cn(
-                          "sticky z-10 w-[72px] min-w-[72px] bg-background",
-                          canEdit ? "left-[88px]" : "left-12",
-                        )}
+                        className={HR_STICKY_CELL}
+                        style={hrStickyStyle(stickyLeft.status, HR_STICKY_W.status)}
                       >
                         <Badge variant={row.status === "active" ? "default" : "secondary"}>
                           {row.status === "active" ? "在职" : "离职"}
                         </Badge>
                       </TableCell>
                       <TableCell
-                        className={cn(
-                          "sticky z-10 w-[96px] min-w-[96px] max-w-[96px] truncate bg-background font-medium",
-                          canEdit ? "left-[160px]" : "left-[120px]",
-                        )}
+                        className={cn(HR_STICKY_CELL, "truncate font-medium")}
+                        style={hrStickyStyle(stickyLeft.name, HR_STICKY_W.name)}
                         title={row.name}
                       >
                         {row.name}
                       </TableCell>
                       <TableCell
                         className={cn(
-                          "sticky z-10 w-[52px] min-w-[52px] bg-background shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)]",
-                          canEdit ? "left-[256px]" : "left-[216px]",
+                          HR_STICKY_CELL,
+                          "shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)]",
                         )}
+                        style={hrStickyStyle(stickyLeft.gender, HR_STICKY_W.gender)}
                       >
                         {row.gender || "—"}
                       </TableCell>
-                      <TableCell>{row.phone || "—"}</TableCell>
+                      <TableCell className="min-w-[128px] tabular-nums">
+                        {row.phone || "—"}
+                      </TableCell>
                       <TableCell>
                         {row.laborCompanyName
                           || laborNameMap.get(row.laborCompanyId)
@@ -1531,7 +1510,6 @@ export default function HrManagementPage() {
                 )}
               </TableBody>
             </Table>
-          </div>
         </CardContent>
       </Card>
 

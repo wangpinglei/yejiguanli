@@ -736,61 +736,6 @@ router.get("/:id/logs", requireModuleView("hr_management"), (req, res) => {
   res.json(rows.map(rowToHrProfileLog));
 });
 
-// POST /api/hr-profiles/batch-create — 一键为未建档人员生成空档案
-router.post("/batch-create", requireModuleEdit("hr_management"), (req, res) => {
-  const db = getDb();
-  const operator = getOperator(req);
-  const people = db.prepare("SELECT * FROM personnel ORDER BY name").all() as any[];
-
-  const existingIds = new Set(
-    (db.prepare(`
-      SELECT personnel_id FROM hr_profiles
-      WHERE personnel_id IS NOT NULL AND TRIM(personnel_id) != ''
-    `).all() as Array<{ personnel_id: string }>)
-      .map((r) => r.personnel_id),
-  );
-
-  const insertStmt = db.prepare(`
-    INSERT INTO hr_profiles (
-      id, personnel_id, name, phone, position, hire_date, resign_date, status,
-      ${HR_FIELD_COLUMNS}, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ${HR_FIELD_COLUMNS.split(",").map(() => "?").join(", ")}, datetime('now'))
-  `);
-
-  let created = 0;
-  let skipped = 0;
-  for (const person of people) {
-    if (existingIds.has(person.id)) {
-      skipped += 1;
-      continue;
-    }
-    const empty = upsertHrFields({}, { salesCompanyId: person.sales_unit_id || "" });
-    const profileId = generateId("hr");
-    insertStmt.run(
-      profileId,
-      person.id,
-      person.name || "",
-      person.phone || "",
-      person.position || "",
-      person.hire_date || "",
-      person.resign_date || "",
-      person.status || "active",
-      ...hrFieldValues(empty),
-    );
-    touchHrOperator(db, profileId, operator);
-    writeHrProfileLog(db, {
-      profileId,
-      profileName: person.name || "",
-      action: "batch_create",
-      operator,
-      summary: `一键建档「${person.name || ""}」`,
-    });
-    created += 1;
-  }
-
-  res.json({ created, skipped, totalPersonnel: people.length });
-});
-
 // POST /api/hr-profiles/batch-delete — 批量删除所选人事档案（保留人员管理手动录入数据）
 router.post("/batch-delete", requireModuleEdit("hr_management"), (req, res) => {
   const ids = Array.isArray(req.body?.ids)

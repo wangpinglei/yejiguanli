@@ -167,10 +167,6 @@ export const hrProfilesApi = {
   delete: (id: string) => api.delete(`/hr-profiles/${id}`),
   batchDelete: (ids: string[]) =>
     api.post<{ deleted: number }>("/hr-profiles/batch-delete", { ids }),
-  batchCreate: () =>
-    api.post<{ created: number; skipped: number; totalPersonnel: number }>(
-      "/hr-profiles/batch-create",
-    ),
   importRows: (
     rows: Record<string, unknown>[],
     options?: {
