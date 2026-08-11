@@ -76,11 +76,9 @@ async function main() {
     totalTarget: 0,
     battlePersonalSalesTotal: 22580,
     teamTotal: 22580,
-    unitTargetAmount: 0,
     effectiveTeamTarget: 0,
     teamDiff: 0,
     effectiveTeamCompletionRate: 0,
-    targetGap: 0,
   }
 
   const outDir = path.join(__dirname, 'preview-out')

@@ -487,6 +487,9 @@ function initSchema() {
   // 人员单位归属时间轴：存量补一段当前单位
   ensurePersonnelUnitAssignments();
 
+  // 已废弃「单位整体业绩目标」（personnel_id 为空），仅保留个人目标
+  db.prepare("DELETE FROM performance_targets WHERE personnel_id IS NULL OR TRIM(personnel_id) = ''").run();
+
   // 将误挂在销售单位上的 labor_company_id 迁移为独立签署公司字典
   migrateLaborCompanyIdsFromSalesUnits();
   // 迁移产生的「同名销售单位」签署公司会误导展示，清空后由人事重新维护真实签署公司
@@ -1325,7 +1328,7 @@ export function rowToPerformanceTarget(row: any) {
     id: row.id,
     salesUnitId: row.sales_unit_id,
     yearMonth: row.year_month,
-    personnelId: row.personnel_id || undefined,
+    personnelId: row.personnel_id || "",
     targetAmount: row.target_amount || 0,
     note: row.note || "",
     createdAt: row.created_at,

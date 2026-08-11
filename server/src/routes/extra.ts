@@ -463,18 +463,12 @@ router.get("/performance-targets", (req, res) => {
 router.post("/performance-targets/upsert", requireModuleEdit("sales_battle_report"), (req, res) => {
   const b = req.body;
   if (!b.salesUnitId || !b.yearMonth) return res.status(400).json({ error: "单位和月份不能为空" });
+  if (!b.personnelId) return res.status(400).json({ error: "人员不能为空，仅支持个人业绩目标" });
   const db = getDb();
-  const personnelId = b.personnelId || null;
-  let existing;
-  if (personnelId) {
-    existing = db.prepare(
-      "SELECT * FROM performance_targets WHERE sales_unit_id=? AND year_month=? AND personnel_id=?"
-    ).get(b.salesUnitId, b.yearMonth, personnelId);
-  } else {
-    existing = db.prepare(
-      "SELECT * FROM performance_targets WHERE sales_unit_id=? AND year_month=? AND personnel_id IS NULL"
-    ).get(b.salesUnitId, b.yearMonth);
-  }
+  const personnelId = String(b.personnelId);
+  const existing = db.prepare(
+    "SELECT * FROM performance_targets WHERE sales_unit_id=? AND year_month=? AND personnel_id=?"
+  ).get(b.salesUnitId, b.yearMonth, personnelId);
   if (existing) {
     db.prepare(`UPDATE performance_targets SET target_amount=?, note=?, created_by=? WHERE id=?`)
       .run(b.targetAmount ?? 0, b.note || "", b.createdBy || req.user!.name, existing.id);
@@ -494,18 +488,11 @@ router.post("/performance-targets/batch", requireModuleEdit("sales_battle_report
   const db = getDb();
   runInTransaction(() => {
     for (const b of items) {
-      if (!b.salesUnitId || !b.yearMonth) continue;
-      const personnelId = b.personnelId || null;
-      let existing;
-      if (personnelId) {
-        existing = db.prepare(
-          "SELECT * FROM performance_targets WHERE sales_unit_id=? AND year_month=? AND personnel_id=?"
-        ).get(b.salesUnitId, b.yearMonth, personnelId);
-      } else {
-        existing = db.prepare(
-          "SELECT * FROM performance_targets WHERE sales_unit_id=? AND year_month=? AND personnel_id IS NULL"
-        ).get(b.salesUnitId, b.yearMonth);
-      }
+      if (!b.salesUnitId || !b.yearMonth || !b.personnelId) continue;
+      const personnelId = String(b.personnelId);
+      const existing = db.prepare(
+        "SELECT * FROM performance_targets WHERE sales_unit_id=? AND year_month=? AND personnel_id=?"
+      ).get(b.salesUnitId, b.yearMonth, personnelId);
       if (existing) {
         db.prepare(`UPDATE performance_targets SET target_amount=?, note=? WHERE id=?`)
           .run(b.targetAmount ?? 0, b.note || "", existing.id);

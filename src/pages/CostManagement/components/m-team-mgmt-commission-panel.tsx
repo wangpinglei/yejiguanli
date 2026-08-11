@@ -239,7 +239,7 @@ export default function MTeamMgmtCommissionPanel({ selectedMonth }: Props) {
           <div className="min-w-0">
             <h3 className="text-base font-semibold text-emerald-900">团队管理提成</h3>
             <p className="text-xs text-muted-foreground">
-              按单位实收（可排除产品）÷ 月目标算完成率，匹配档位后形成提成池，再按管理人员权重分摊
+              按单位实收（可排除产品）÷ 人员月目标合计算完成率，匹配档位后形成提成池，再按管理人员权重分摊
             </p>
           </div>
         </div>

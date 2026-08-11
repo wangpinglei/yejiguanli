@@ -467,12 +467,12 @@ export interface MonthlyAdjustment {
   createdBy?: string;
 }
 
-// 月度业绩目标（战报表用）
+// 月度业绩目标（战报表用，仅人员个人目标）
 export interface PerformanceTarget {
   id: string;
   salesUnitId: string; // 销售单位
   yearMonth: string; // "2026-08"
-  personnelId?: string; // 为空表示单位整体目标
+  personnelId: string; // 人员 ID
   targetAmount: number; // 目标金额
   note: string; // 备注
   createdAt: string;

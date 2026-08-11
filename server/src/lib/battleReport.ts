@@ -62,11 +62,9 @@ export type UnitBattleReport = {
   totalTarget: number
   battlePersonalSalesTotal: number
   teamTotal: number
-  unitTargetAmount: number
   effectiveTeamTarget: number
   teamDiff: number
   effectiveTeamCompletionRate: number
-  targetGap: number
 }
 
 function filterByMonth(records: BattleSale[], yearMonth: string): BattleSale[] {
@@ -160,11 +158,6 @@ export function buildUnitBattleReport(options: {
   )
   const teamTotal = unitMonthlyRecords.reduce((sum, r) => sum + (r.totalAmount || 0), 0)
 
-  const unitTarget = performanceTargets.find(
-    (t) => t.salesUnitId === salesUnitId && t.yearMonth === yearMonth && !t.personnelId,
-  )
-  const unitTargetAmount = unitTarget?.targetAmount || 0
-
   const personnelTargets = new Map<string, number>()
   performanceTargets.forEach((t) => {
     if (t.salesUnitId === salesUnitId && t.yearMonth === yearMonth && t.personnelId) {
@@ -218,11 +211,10 @@ export function buildUnitBattleReport(options: {
 
   const totalTarget = rows.reduce((sum, row) => sum + (row.targetAmount || 0), 0)
   const battlePersonalSalesTotal = rows.reduce((sum, row) => sum + row.personalSales, 0)
-  const effectiveTeamTarget = totalTarget > 0 ? totalTarget : unitTargetAmount
+  const effectiveTeamTarget = totalTarget
   const teamDiff = effectiveTeamTarget > 0 ? teamTotal - effectiveTeamTarget : 0
   const effectiveTeamCompletionRate =
     effectiveTeamTarget > 0 ? (teamTotal / effectiveTeamTarget) * 100 : 0
-  const targetGap = unitTarget ? unitTargetAmount - totalTarget : 0
 
   return {
     salesUnitId,
@@ -232,10 +224,8 @@ export function buildUnitBattleReport(options: {
     totalTarget,
     battlePersonalSalesTotal,
     teamTotal,
-    unitTargetAmount,
     effectiveTeamTarget,
     teamDiff,
     effectiveTeamCompletionRate,
-    targetGap,
   }
 }

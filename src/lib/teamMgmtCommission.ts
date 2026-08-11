@@ -47,19 +47,20 @@ export function calcTeamMgmtEligibleSales(
     .reduce((sum, s) => sum + (s.totalAmount || 0), 0)
 }
 
-/** 单位整体月目标（personnelId 为空） */
+/** 单位月目标 = 该单位当月人员个人目标合计 */
 export function getUnitMonthTarget(
   targets: PerformanceTarget[],
   unitId: string,
   yearMonth: string,
 ): number {
-  const t = targets.find(
-    (x) =>
-      x.salesUnitId === unitId
-      && x.yearMonth === yearMonth
-      && !x.personnelId,
-  )
-  return t?.targetAmount || 0
+  return targets
+    .filter(
+      (x) =>
+        x.salesUnitId === unitId
+        && x.yearMonth === yearMonth
+        && Boolean(x.personnelId),
+    )
+    .reduce((sum, x) => sum + (x.targetAmount || 0), 0)
 }
 
 /** 按完成率匹配档位（取 minCompletionPercent <= 完成率 的最高档） */
@@ -86,7 +87,7 @@ export type TeamMgmtCommissionResult = {
 
 /**
  * 计算某单位当月团队管理提成池及按权重分摊
- * 无单位目标时完成率=0、池=0
+ * 无人员目标合计时完成率=0、池=0
  */
 export function calcUnitTeamMgmtCommission(
   unitId: string,
