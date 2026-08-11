@@ -194,10 +194,51 @@ function buildHrUpdateDiff(
 }
 
 const HR_SELECT = `
-  SELECT h.*,
+  SELECT
+    h.id,
+    h.personnel_id,
+    h.gender,
+    h.contract_start_date,
+    h.contract_end_date,
     CAST(h.id_number AS TEXT) AS id_number,
+    h.birth_date,
+    h.age,
+    h.ethnicity,
+    h.political_status,
+    h.education,
+    h.school,
+    h.major,
     CAST(h.bank_account AS TEXT) AS bank_account,
+    h.bank_name,
+    h.address,
+    h.emergency_contact,
     CAST(h.emergency_phone AS TEXT) AS emergency_phone,
+    h.labor_company_id,
+    h.sales_company_id,
+    h.company_tenure,
+    h.regularization_date,
+    h.employment_type,
+    h.marital_status,
+    h.native_place,
+    h.household_register,
+    h.id_address,
+    h.graduation_date,
+    h.emergency_relation,
+    h.internship_start_date,
+    h.internship_end_date,
+    h.contract1_start_date,
+    h.contract1_end_date,
+    h.contract2_start_date,
+    h.contract2_end_date,
+    h.contract3_start_date,
+    h.contract3_end_date,
+    h.bank_belong,
+    h.company_email,
+    h.signed_documents,
+    h.updated_at,
+    h.last_operator,
+    h.last_operator_id,
+    h.last_operated_at,
     COALESCE(NULLIF(TRIM(p.name), ''), h.name) AS name,
     CASE WHEN p.id IS NOT NULL THEN IFNULL(p.sales_unit_id, '') ELSE '' END AS sales_unit_id,
     COALESCE(NULLIF(TRIM(p.position), ''), h.position) AS position,
@@ -687,9 +728,17 @@ function getProfileSignedDocs(
   db: ReturnType<typeof getDb>,
   profileId: string,
 ): { row: any; docs: SignedDocument[] } | null {
-  const row = db.prepare("SELECT * FROM hr_profiles WHERE id = ?").get(profileId) as
-    | any
-    | undefined;
+  const row = db.prepare(`
+    SELECT
+      id,
+      CAST(id_number AS TEXT) AS id_number,
+      CAST(bank_account AS TEXT) AS bank_account,
+      CAST(phone AS TEXT) AS phone,
+      CAST(emergency_phone AS TEXT) AS emergency_phone,
+      signed_documents
+    FROM hr_profiles
+    WHERE id = ?
+  `).get(profileId) as any | undefined;
   if (!row) return null;
   return { row, docs: parseSignedDocuments(row.signed_documents) };
 }

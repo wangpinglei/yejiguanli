@@ -11,7 +11,8 @@ let db: any;
 
 export function getDb(): any {
   if (!db) {
-    db = new DatabaseSync(DB_PATH);
+    // 超大 INTEGER（身份证/银行卡误存）默认读成 Number 会直接抛错；改为 BigInt 再在接口层转字符串
+    db = new DatabaseSync(DB_PATH, { readBigInts: true });
     db.exec("PRAGMA journal_mode = WAL");
     db.exec("PRAGMA foreign_keys = ON");
     initSchema();
@@ -516,16 +517,17 @@ function normalizeHrLongNumberColumnsAsText() {
     "emergency_phone",
   ] as const;
   for (const col of hrCols) {
+    // '' || col 强制转为 TEXT，避免 node:sqlite 读取超大 INTEGER 崩溃
     db.prepare(`
       UPDATE hr_profiles
-      SET ${col} = CAST(${col} AS TEXT)
-      WHERE typeof(${col}) IN ('integer', 'real')
+      SET ${col} = '' || ${col}
+      WHERE ${col} IS NOT NULL AND typeof(${col}) != 'text'
     `).run();
   }
   db.prepare(`
     UPDATE personnel
-    SET phone = CAST(phone AS TEXT)
-    WHERE typeof(phone) IN ('integer', 'real')
+    SET phone = '' || phone
+    WHERE phone IS NOT NULL AND typeof(phone) != 'text'
   `).run();
 }
 

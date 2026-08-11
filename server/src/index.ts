@@ -19,12 +19,32 @@ import extraRoutes from "./routes/extra";
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+/** JSON 输出时把 BigInt 转成字符串，避免序列化失败 */
+function sanitizeBigInts(value: unknown): unknown {
+  if (typeof value === "bigint") return value.toString();
+  if (Array.isArray(value)) return value.map((item) => sanitizeBigInts(item));
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = sanitizeBigInts(v);
+    }
+    return out;
+  }
+  return value;
+}
+
 // ===================== 中间件 =====================
 app.use(cors({
   origin: true, // 允许所有来源（生产环境应限制为前端域名）
   credentials: true,
 }));
 app.use(express.json({ limit: "50mb" }));
+
+app.use((req, res, next) => {
+  const originalJson = res.json.bind(res);
+  res.json = ((body: unknown) => originalJson(sanitizeBigInts(body))) as typeof res.json;
+  next();
+});
 
 // 请求日志
 app.use((req, _res, next) => {
@@ -46,7 +66,11 @@ app.use("/api/migrate", migrateRoutes);
 
 // 健康检查与占位接口需在 /api 通配路由之前注册，避免被 extra 的鉴权中间件拦截
 app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", timestamp: new Date().toISOString() });
+  res.json({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    bigintSafe: true,
+  });
 });
 
 // 外部订单同步（X-API-Key，写入销售记录）
