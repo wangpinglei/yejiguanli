@@ -21,13 +21,16 @@ const FUZHOU_WEBHOOK =
   'https://oapi.dingtalk.com/robot/send?access_token=44060aaa07294373e9fcc93333c43c2d6e9c86a3e20a1482a11284b851289dc4'
 const FOSHAN_WEBHOOK =
   'https://oapi.dingtalk.com/robot/send?access_token=d32c7adc8fcf5e7eb9aa58195c6d8c2e4dc757c18643d4f75975bc8e54d15d9e'
+const WUXI_WEBHOOK =
+  'https://oapi.dingtalk.com/robot/send?access_token=13871d8e98a307657126cdc4974c8fedcad0b6d0dbb39a0a3af9c2cceae3bc23'
 
-/** 默认：海南 / 深圳 / 抚州 / 佛山 → 各自群机器人 */
+/** 默认：海南 / 深圳 / 抚州 / 佛山 / 无锡 → 各自群机器人 */
 const DEFAULT_TARGETS = [
   { unitName: '海南运营中心', webhook: HAINAN_WEBHOOK },
   { unitName: '深圳运营中心', webhook: SHENZHEN_WEBHOOK },
   { unitName: '抚州运营中心', webhook: FUZHOU_WEBHOOK },
   { unitName: '佛山运营中心', webhook: FOSHAN_WEBHOOK },
+  { unitName: '无锡运营中心', webhook: WUXI_WEBHOOK },
 ]
 
 function addLog(msg) {
@@ -79,7 +82,7 @@ function getPublicBase() {
 /**
  * 解析推送目标
  * YEJI_BATTLE_TARGETS 格式：单位名|webhook,单位名|webhook
- * 未配置时用 DEFAULT_TARGETS（海南/深圳/抚州/佛山）
+ * 未配置时用 DEFAULT_TARGETS（海南/深圳/抚州/佛山/无锡）
  */
 function getPushTargets() {
   const raw = (process.env.YEJI_BATTLE_TARGETS || '').trim()
