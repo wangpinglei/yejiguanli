@@ -56,6 +56,16 @@ function getDateKey(month) {
   return month || new Date().toISOString().slice(0, 7)
 }
 
+/** 去重用日历日（上海时区），避免整月只推一次 */
+function getDedupeDayKey() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: process.env.YEJI_BATTLE_TZ || 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+}
+
 /** 与战报一致：优先 WAR_REPORT_PUBLIC_BASE_URL（域名反代地址） */
 function getPublicBase() {
   return (
@@ -189,7 +199,9 @@ async function pushAll(options = {}) {
   const force = !!options.force
   const slot = options.slot || 'manual'
   const sent = loadSent()
-  const dedupeKey = `${month}:${slot}`
+  // 按「日+时段」去重（旧版误用 month:slot，导致整月只推一次）
+  const dedupeKey = `${getDedupeDayKey()}:${slot}`
+  const legacyMonthKey = `${month}:${slot}`
 
   if (!force && sent[dedupeKey]) {
     addLog(`今日该时段已推送过，跳过 (${dedupeKey})`)
@@ -250,6 +262,8 @@ async function pushAll(options = {}) {
     count: results.length,
     units: results.map((r) => r.salesUnitName),
   }
+  // 清掉旧的「整月」去重键，避免继续挡住后续日期
+  if (sent[legacyMonthKey]) delete sent[legacyMonthKey]
   saveSent(sent)
   addLog(`✅ 已推送 ${results.length} 张 (${dedupeKey})`)
   return {
