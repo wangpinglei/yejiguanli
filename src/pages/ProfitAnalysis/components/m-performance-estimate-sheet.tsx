@@ -23,13 +23,6 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -56,7 +49,8 @@ type Props = {
   initialUnitIds: string[]
   monthOptions: Array<{ value: string; label: string }>
   salesUnits: Array<{ id: string; name: string }>
-  getSummary: (month: string, unitIds: string[]) => EstimateSummaryInput
+  /** months 为空表示 monthOptions 全部月份 */
+  getSummary: (months: string[], unitIds: string[]) => EstimateSummaryInput
 }
 
 function normalizeUnitIds(
@@ -64,6 +58,14 @@ function normalizeUnitIds(
   unitCount: number,
 ): string[] {
   if (ids.length === 0 || ids.length === unitCount) return []
+  return ids
+}
+
+function normalizeMonthIds(
+  ids: string[],
+  monthCount: number,
+): string[] {
+  if (ids.length === 0 || ids.length === monthCount) return []
   return ids
 }
 
@@ -80,6 +82,20 @@ function getUnitFilterLabel(
   return `已选 ${selectedIds.length} 个单位`
 }
 
+function getMonthFilterLabel(
+  selectedIds: string[],
+  monthOptions: Array<{ value: string; label: string }>,
+): string {
+  if (selectedIds.length === 0 || selectedIds.length === monthOptions.length) {
+    return '全部月份'
+  }
+  if (selectedIds.length === 1) {
+    return monthOptions.find((m) => m.value === selectedIds[0])?.label
+      || '已选 1 个月'
+  }
+  return `已选 ${selectedIds.length} 个月`
+}
+
 export default function MPerformanceEstimateSheet({
   open,
   onOpenChange,
@@ -89,10 +105,12 @@ export default function MPerformanceEstimateSheet({
   salesUnits,
   getSummary,
 }: Props) {
-  const [estimateMonth, setEstimateMonth] = useState(initialMonth)
+  /** 空数组 = 全部月份（monthOptions） */
+  const [estimateMonths, setEstimateMonths] = useState<string[]>([initialMonth])
   const [estimateUnitIds, setEstimateUnitIds] = useState<string[]>(
     normalizeUnitIds(initialUnitIds, salesUnits.length),
   )
+  const [monthPickerOpen, setMonthPickerOpen] = useState(false)
   const [unitPickerOpen, setUnitPickerOpen] = useState(false)
   const [summary, setSummary] = useState<EstimateSummaryInput | null>(null)
   const [snapshot, setSnapshot] = useState<EstimateSnapshot | null>(null)
@@ -104,10 +122,15 @@ export default function MPerformanceEstimateSheet({
   const [importedAt, setImportedAt] = useState('')
   const [costHint, setCostHint] = useState('')
 
+  const isAllMonths =
+    estimateMonths.length === 0
+    || estimateMonths.length === monthOptions.length
+
   const isAllUnits =
     estimateUnitIds.length === 0
     || estimateUnitIds.length === salesUnits.length
 
+  const monthFilterLabel = getMonthFilterLabel(estimateMonths, monthOptions)
   const unitFilterLabel = getUnitFilterLabel(estimateUnitIds, salesUnits)
 
   const settlementRatio = useMemo(
@@ -181,7 +204,7 @@ export default function MPerformanceEstimateSheet({
     const salary = nextSummary.salaryCost ?? 0
     const salaryWithoutCommission = Math.max(0, salary - commission)
     setCostHint(
-      `固定成本已扣当月提成 ${formatCurrency(commission)}`
+      `固定成本已扣所选期间提成 ${formatCurrency(commission)}`
         + `（录入 ${formatCurrency(manual)}`
         + ` + 人力非提成 ${formatCurrency(salaryWithoutCommission)}）`,
     )
@@ -189,42 +212,63 @@ export default function MPerformanceEstimateSheet({
   }
 
   function handleImportCostAndIncome(
-    month = estimateMonth,
+    months = estimateMonths,
     unitIds = estimateUnitIds,
   ) {
-    const normalized = normalizeUnitIds(unitIds, salesUnits.length)
-    applySummary(getSummary(month, normalized))
+    const normalizedMonths = normalizeMonthIds(months, monthOptions.length)
+    const normalizedUnits = normalizeUnitIds(unitIds, salesUnits.length)
+    applySummary(getSummary(normalizedMonths, normalizedUnits))
   }
 
-  function handleChangeMonth(month: string) {
-    setEstimateMonth(month)
-    handleImportCostAndIncome(month, estimateUnitIds)
+  function handleSelectAllMonths() {
+    setEstimateMonths([])
+    handleImportCostAndIncome([], estimateUnitIds)
+  }
+
+  function handleToggleMonth(month: string, checked: boolean) {
+    if (isAllMonths) {
+      if (!checked) return
+      const next = [month]
+      setEstimateMonths(next)
+      handleImportCostAndIncome(next, estimateUnitIds)
+      return
+    }
+    let next = checked
+      ? Array.from(new Set([...estimateMonths, month]))
+      : estimateMonths.filter((id) => id !== month)
+    next = normalizeMonthIds(next, monthOptions.length)
+    setEstimateMonths(next)
+    handleImportCostAndIncome(next, estimateUnitIds)
   }
 
   function handleSelectAllUnits() {
     setEstimateUnitIds([])
-    handleImportCostAndIncome(estimateMonth, [])
+    handleImportCostAndIncome(estimateMonths, [])
   }
 
   function handleToggleUnit(unitId: string, checked: boolean) {
-    const current = isAllUnits
-      ? salesUnits.map((u) => u.id)
-      : [...estimateUnitIds]
+    if (isAllUnits) {
+      if (!checked) return
+      const next = [unitId]
+      setEstimateUnitIds(next)
+      handleImportCostAndIncome(estimateMonths, next)
+      return
+    }
     let next = checked
-      ? Array.from(new Set([...current, unitId]))
-      : current.filter((id) => id !== unitId)
-    if (next.length === 0) next = []
+      ? Array.from(new Set([...estimateUnitIds, unitId]))
+      : estimateUnitIds.filter((id) => id !== unitId)
     next = normalizeUnitIds(next, salesUnits.length)
     setEstimateUnitIds(next)
-    handleImportCostAndIncome(estimateMonth, next)
+    handleImportCostAndIncome(estimateMonths, next)
   }
 
   useEffect(() => {
     if (!open) return
-    const normalized = normalizeUnitIds(initialUnitIds, salesUnits.length)
-    setEstimateMonth(initialMonth)
-    setEstimateUnitIds(normalized)
-    applySummary(getSummary(initialMonth, normalized))
+    const normalizedUnits = normalizeUnitIds(initialUnitIds, salesUnits.length)
+    const nextMonths = [initialMonth]
+    setEstimateMonths(nextMonths)
+    setEstimateUnitIds(normalizedUnits)
+    applySummary(getSummary(nextMonths, normalizedUnits))
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 打开时同步页面筛选并带入
   }, [open])
 
@@ -252,6 +296,16 @@ export default function MPerformanceEstimateSheet({
     })
   }, [workingSnapshot, predictedSales, settlementRatio, commissionRatio])
 
+  const periodSalesLabel = isAllMonths || estimateMonths.length > 1
+    ? '所选期间实收'
+    : '当前实收'
+  const periodSettlementLabel = isAllMonths || estimateMonths.length > 1
+    ? '所选期间结算收入'
+    : '当前结算收入'
+  const periodProfitLabel = isAllMonths || estimateMonths.length > 1
+    ? '所选期间净利润（系统）'
+    : '当前净利润（系统）'
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
@@ -264,7 +318,7 @@ export default function MPerformanceEstimateSheet({
             业绩测算
           </SheetTitle>
           <SheetDescription>
-            带入固定成本与其他收入，填写结算比例与提成比例，倒推到盈亏线还需多少实收。
+            带入所选月份与单位的实收、结算、成本，按期间业绩倒推盈亏线与预测。
           </SheetDescription>
         </SheetHeader>
 
@@ -272,22 +326,56 @@ export default function MPerformanceEstimateSheet({
           <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label>测算月份</Label>
-                <Select value={estimateMonth} onValueChange={handleChangeMonth}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="选择月份" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {monthOptions.map((m) => (
-                      <SelectItem key={m.value} value={m.value}>
-                        {m.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label>测算月份（可单选/多选）</Label>
+                <Popover open={monthPickerOpen} onOpenChange={setMonthPickerOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 w-full justify-between font-normal"
+                    >
+                      <span className="truncate">{monthFilterLabel}</span>
+                      <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-72 p-2" align="start">
+                    <div className="max-h-72 space-y-1 overflow-y-auto">
+                      <p className="px-2 pb-1 text-xs text-muted-foreground">
+                        点选月份可看当月；可多选做期间预测
+                      </p>
+                      <button
+                        type="button"
+                        className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
+                        onClick={handleSelectAllMonths}
+                      >
+                        <Checkbox checked={isAllMonths} />
+                        <span>全部月份</span>
+                      </button>
+                      <div className="my-1 border-t" />
+                      {monthOptions.map((m) => {
+                        const checked =
+                          !isAllMonths && estimateMonths.includes(m.value)
+                        return (
+                          <label
+                            key={m.value}
+                            className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted"
+                          >
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={(v) =>
+                                handleToggleMonth(m.value, v === true)
+                              }
+                            />
+                            <span className="truncate">{m.label}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
               <div className="space-y-1.5">
-                <Label>测算单位（可多选）</Label>
+                <Label>测算单位（可单选/多选）</Label>
                 <Popover open={unitPickerOpen} onOpenChange={setUnitPickerOpen}>
                   <PopoverTrigger asChild>
                     <Button
@@ -301,6 +389,9 @@ export default function MPerformanceEstimateSheet({
                   </PopoverTrigger>
                   <PopoverContent className="w-72 p-2" align="start">
                     <div className="max-h-72 space-y-1 overflow-y-auto">
+                      <p className="px-2 pb-1 text-xs text-muted-foreground">
+                        点选单位可单选；可继续勾选多个
+                      </p>
                       <button
                         type="button"
                         className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
@@ -311,8 +402,9 @@ export default function MPerformanceEstimateSheet({
                       </button>
                       <div className="my-1 border-t" />
                       {salesUnits.map((u) => {
+                        // 全部时只勾「全部单位」，各单位不勾，便于点选单单位
                         const checked =
-                          isAllUnits || estimateUnitIds.includes(u.id)
+                          !isAllUnits && estimateUnitIds.includes(u.id)
                         return (
                           <label
                             key={u.id}
@@ -337,7 +429,7 @@ export default function MPerformanceEstimateSheet({
               <p className="text-xs text-muted-foreground">
                 {importedAt
                   ? `已带入 ${importedAt}`
-                  : '切换月份/单位后会自动重新带入'}
+                  : '切换月份/单位后会按所选期间自动重新带入'}
               </p>
               <Button
                 type="button"
@@ -382,19 +474,21 @@ export default function MPerformanceEstimateSheet({
                 </p>
                 <div className="grid grid-cols-2 gap-2 border-t pt-2 text-sm sm:grid-cols-3">
                   <div>
-                    <p className="text-xs text-muted-foreground">当前实收</p>
+                    <p className="text-xs text-muted-foreground">{periodSalesLabel}</p>
                     <p className="font-medium">
                       {formatCurrency(snapshot.salesAmount)}
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">当前结算收入</p>
+                    <p className="text-xs text-muted-foreground">
+                      {periodSettlementLabel}
+                    </p>
                     <p className="font-medium">
                       {formatCurrency(snapshot.settlementIncome)}
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">当前净利润（系统）</p>
+                    <p className="text-xs text-muted-foreground">{periodProfitLabel}</p>
                     <p
                       className={`font-medium ${
                         snapshot.settlementIncome
@@ -457,7 +551,7 @@ export default function MPerformanceEstimateSheet({
                         )
                       }
                     >
-                      结算用本月参考
+                      结算用所选期间参考
                       {(snapshot.suggestedRatio * 100).toFixed(1)}%
                     </Button>
                   ) : null}
@@ -474,7 +568,7 @@ export default function MPerformanceEstimateSheet({
                         )
                       }
                     >
-                      提成用本月参考
+                      提成用所选期间参考
                       {(snapshot.suggestedCommissionRatio * 100).toFixed(1)}%
                     </Button>
                   ) : null}
@@ -585,7 +679,7 @@ export default function MPerformanceEstimateSheet({
             </>
           ) : (
             <p className="text-sm text-muted-foreground">
-              点击「一键带入成本与收入」从盈亏分析载入所选月份数据。
+              点击「一键带入成本与收入」按所选月份与单位载入业绩数据。
             </p>
           )}
         </div>

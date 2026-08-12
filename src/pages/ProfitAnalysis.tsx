@@ -91,12 +91,15 @@ export default function ProfitAnalysis() {
   }
 
   function handleToggleFilterUnit(unitId: string, checked: boolean) {
-    const current = isAllFilterUnits
-      ? salesUnits.map((u) => u.id)
-      : [...filterUnitIds];
+    // 全部模式下勾选某一单位 → 只选该单位（支持单选）
+    if (isAllFilterUnits) {
+      if (checked) setFilterUnitIds([unitId]);
+      return;
+    }
     let next = checked
-      ? Array.from(new Set([...current, unitId]))
-      : current.filter((id) => id !== unitId);
+      ? Array.from(new Set([...filterUnitIds, unitId]))
+      : filterUnitIds.filter((id) => id !== unitId);
+    // 取消到空或勾满全部 → 回到全部
     if (next.length === 0 || next.length === salesUnits.length) {
       next = [];
     }
@@ -507,55 +510,71 @@ unitIds,
 
   /** 业绩测算：按弹窗内所选月份/单位汇总（unitIds 为空表示全部单位） */
   const getEstimateSummary = useCallback(
-    (month: string, unitIds: string[]) => {
+    (months: string[], unitIds: string[]) => {
+      const monthList = months.length > 0
+        ? months
+        : monthOptions.map((m) => m.value);
       const unitIdSet = unitIds.length > 0 ? new Set(unitIds) : null;
       const matchUnit = (salesUnitId: string) =>
         !unitIdSet || unitIdSet.has(salesUnitId);
 
-      const monthSales = filterByMonth(salesRecords, month).filter((s) =>
-        matchUnit(s.salesUnitId),
-      );
-      const monthCosts = costRecords.filter(
-        (c) =>
-          matchesRecurringYearMonth(c, month) && matchUnit(c.salesUnitId),
-      );
-      const targetM = parseInt(month.slice(5, 7), 10);
-      const monthIncomes = incomeRecords.filter((r) => {
-        if (!matchUnit(r.salesUnitId)) return false;
-        if (r.isRecurring) {
-          const months = r.recurringMonths || [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-          if (!months.includes(targetM)) return false;
-          if (r.recurringStartDate && month < r.recurringStartDate.slice(0, 7)) {
-            return false;
-          }
-          if (r.recurringEndDate && month > r.recurringEndDate.slice(0, 7)) {
-            return false;
-          }
-          return true;
-        }
-        return getYearMonth(r.date) === month;
-      });
-
-      const salesAmount = monthSales.reduce((sum, s) => sum + s.totalAmount, 0);
-      const settlementIncome = monthSales.reduce(
-        (sum, s) => sum + calcSaleSettlementIncome(s, visibleUnitProductSettlements),
-        0,
-      );
-      const otherIncome = monthIncomes.reduce((sum, r) => sum + r.totalAmount, 0);
+      let salesAmount = 0;
+      let settlementIncome = 0;
+      let otherIncome = 0;
+      let manualCost = 0;
+      let salaryCost = 0;
+      let totalCommission = 0;
       const resolvedUnitIds =
         unitIds.length > 0 ? unitIds : salesUnits.map((u) => u.id);
-      const salaryData = getTotalSalaryCost(
-        resolvedUnitIds,
-        personnel,
-        salesRecords,
-        products,
-        month,
-        monthlyAdjustments,
-        productPersonCommissions,
-        teamMgmtContext,
-      );
-      const manualCost = monthCosts.reduce((sum, c) => sum + c.totalCost, 0);
-      const salaryCost = salaryData.grandTotal;
+
+      for (const month of monthList) {
+        const monthSales = filterByMonth(salesRecords, month).filter((s) =>
+          matchUnit(s.salesUnitId),
+        );
+        const monthCosts = costRecords.filter(
+          (c) =>
+            matchesRecurringYearMonth(c, month) && matchUnit(c.salesUnitId),
+        );
+        const targetM = parseInt(month.slice(5, 7), 10);
+        const monthIncomes = incomeRecords.filter((r) => {
+          if (!matchUnit(r.salesUnitId)) return false;
+          if (r.isRecurring) {
+            const monthsCfg = r.recurringMonths || [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+            if (!monthsCfg.includes(targetM)) return false;
+            if (r.recurringStartDate && month < r.recurringStartDate.slice(0, 7)) {
+              return false;
+            }
+            if (r.recurringEndDate && month > r.recurringEndDate.slice(0, 7)) {
+              return false;
+            }
+            return true;
+          }
+          return getYearMonth(r.date) === month;
+        });
+
+        salesAmount += monthSales.reduce((sum, s) => sum + s.totalAmount, 0);
+        settlementIncome += monthSales.reduce(
+          (sum, s) =>
+            sum + calcSaleSettlementIncome(s, visibleUnitProductSettlements),
+          0,
+        );
+        otherIncome += monthIncomes.reduce((sum, r) => sum + r.totalAmount, 0);
+        manualCost += monthCosts.reduce((sum, c) => sum + c.totalCost, 0);
+
+        const salaryData = getTotalSalaryCost(
+          resolvedUnitIds,
+          personnel,
+          salesRecords,
+          products,
+          month,
+          monthlyAdjustments,
+          productPersonCommissions,
+          teamMgmtContext,
+        );
+        salaryCost += salaryData.grandTotal;
+        totalCommission += salaryData.grandSalesCommission;
+      }
+
       return {
         salesAmount,
         settlementIncome,
@@ -563,7 +582,7 @@ unitIds,
         totalCost: manualCost + salaryCost,
         manualCost,
         salaryCost,
-        totalCommission: salaryData.grandSalesCommission,
+        totalCommission,
       };
     },
     [
@@ -577,6 +596,7 @@ unitIds,
       productPersonCommissions,
       teamMgmtContext,
       visibleUnitProductSettlements,
+      monthOptions,
     ],
   );
 
@@ -606,6 +626,9 @@ unitIds,
               </PopoverTrigger>
               <PopoverContent className="w-72 p-2" align="end">
                 <div className="max-h-72 space-y-1 overflow-y-auto">
+                  <p className="px-2 pb-1 text-xs text-muted-foreground">
+                    点选单位可单选；可继续勾选多个
+                  </p>
                   <button
                     type="button"
                     className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
@@ -617,7 +640,7 @@ unitIds,
                   <div className="my-1 border-t" />
                   {salesUnits.map((u) => {
                     const checked =
-                      isAllFilterUnits || filterUnitIds.includes(u.id);
+                      !isAllFilterUnits && filterUnitIds.includes(u.id);
                     return (
                       <label
                         key={u.id}
