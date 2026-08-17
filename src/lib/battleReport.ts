@@ -1,11 +1,11 @@
 /**
- * 单位战报计算（与 SalesBattleReport 页同口径）
+ * 单位战报计算
+ * 业绩唯一凭证：本单位当月销售记录全量归集；团队总业绩 = 各行个人业绩之和
  */
 import {
   filterByMonth,
-  getPersonalSales,
-  shouldShowOnBattleReport,
   wasEmployedInMonth,
+  isSalesBattlePosition,
   EMPTY_SALARY,
 } from '@/lib/salary'
 import { personBelongsToUnitInMonth } from '@/lib/unitAssignment'
@@ -44,26 +44,127 @@ export type UnitBattleReport = {
 
 export type MatchPositionFn = (position: string) => PositionGroupMatch
 
-function getUnitPersonnel(
+const UNATTRIBUTED_ID = 'unattributed'
+const UNATTRIBUTED_NAME = '未归集（无销售员）'
+
+type SalesAgg = {
+  personId: string
+  name: string
+  position: string
+  isExternalPerson: boolean
+  amount: number
+}
+
+function getUnitRosterPersonnel(
   personnel: Personnel[],
-  salesRecords: SalesRecord[],
-  unitId: string,
+  salesUnitId: string,
   yearMonth: string,
 ): Personnel[] {
-  const monthUnitSales = filterByMonth(salesRecords, yearMonth).filter(
-    (r) => r.salesUnitId === unitId,
-  )
   return personnel.filter((p) => {
-    const belongs = personBelongsToUnitInMonth(p, unitId, yearMonth)
-    const hasSales = getPersonalSales(p.id, monthUnitSales, p.name) > 0
-    if (!belongs && !hasSales) return false
+    const belongs = personBelongsToUnitInMonth(p, salesUnitId, yearMonth)
     if (belongs && wasEmployedInMonth(p, yearMonth)) return true
-    return hasSales
+    return false
   })
 }
 
+function findPersonByName(
+  name: string,
+  personnel: Personnel[],
+  salesUnitId: string,
+  yearMonth: string,
+): Personnel | undefined {
+  const hits = personnel.filter((p) => (p.name || '').trim() === name)
+  if (hits.length === 0) return undefined
+  const inUnit = hits.find((p) => personBelongsToUnitInMonth(p, salesUnitId, yearMonth))
+  return inUnit || hits[0]
+}
+
 /**
- * 计算单个销售单位的战报表数据
+ * 按销售记录归集到人：
+ * 1) personnelId 能命中系统人员 → 该人
+ * 2) 否则按 salesPersonName 命中系统人员 → 该人（有错误 id 时仍以销售姓名为准）
+ * 3) 否则按姓名记外援行
+ * 4) 姓名也没有 → 未归集行（仍计入团队总业绩）
+ */
+function aggregateSalesByPerson(
+  monthUnitSales: SalesRecord[],
+  personnel: Personnel[],
+  salesUnitId: string,
+  yearMonth: string,
+): Map<string, SalesAgg> {
+  const personnelById = new Map(personnel.map((p) => [p.id, p]))
+  const agg = new Map<string, SalesAgg>()
+
+  function add(row: Omit<SalesAgg, 'amount'>, amount: number) {
+    const prev = agg.get(row.personId)
+    if (prev) {
+      prev.amount += amount
+      return
+    }
+    agg.set(row.personId, { ...row, amount })
+  }
+
+  for (const r of monthUnitSales) {
+    const amount = Number(r.totalAmount) || 0
+    const pid = (r.personnelId || '').trim()
+    const sname = (r.salesPersonName || '').trim()
+    const byId = pid ? personnelById.get(pid) : undefined
+
+    if (byId) {
+      add(
+        {
+          personId: byId.id,
+          name: byId.name,
+          position: byId.position || '',
+          isExternalPerson: false,
+        },
+        amount,
+      )
+      continue
+    }
+
+    if (sname) {
+      const byName = findPersonByName(sname, personnel, salesUnitId, yearMonth)
+      if (byName) {
+        add(
+          {
+            personId: byName.id,
+            name: byName.name,
+            position: byName.position || '',
+            isExternalPerson: false,
+          },
+          amount,
+        )
+      } else {
+        add(
+          {
+            personId: `ext_${sname}`,
+            name: sname,
+            position: '外援',
+            isExternalPerson: true,
+          },
+          amount,
+        )
+      }
+      continue
+    }
+
+    add(
+      {
+        personId: UNATTRIBUTED_ID,
+        name: UNATTRIBUTED_NAME,
+        position: '',
+        isExternalPerson: true,
+      },
+      amount,
+    )
+  }
+
+  return agg
+}
+
+/**
+ * 计算单个销售单位的战报表数据（业绩以销售记录为唯一凭证）
  */
 export function buildUnitBattleReport(options: {
   salesUnitId: string
@@ -84,16 +185,33 @@ export function buildUnitBattleReport(options: {
     matchPositionLabel,
   } = options
 
-  const unitPersonnel = getUnitPersonnel(personnel, salesRecords, salesUnitId, yearMonth)
   const monthUnitSales = filterByMonth(salesRecords, yearMonth).filter(
     (r) => r.salesUnitId === salesUnitId,
   )
-  // 销售岗 + 当月有业绩的其他岗位（如服务中心）
-  const battlePersonnel = unitPersonnel.filter((p) =>
-    shouldShowOnBattleReport(p, monthUnitSales),
+  const teamTotal = monthUnitSales.reduce((sum, r) => sum + (Number(r.totalAmount) || 0), 0)
+
+  const salesAgg = aggregateSalesByPerson(
+    monthUnitSales,
+    personnel,
+    salesUnitId,
+    yearMonth,
   )
-  const unitMonthlyRecords = monthUnitSales
-  const teamTotal = unitMonthlyRecords.reduce((sum, r) => sum + r.totalAmount, 0)
+
+  // 本单位在职销售岗：无成交也保留行，便于录目标
+  const roster = getUnitRosterPersonnel(personnel, salesUnitId, yearMonth)
+  for (const p of roster) {
+    if (salesAgg.has(p.id)) continue
+    if (!isSalesBattlePosition(p.position)) continue
+    salesAgg.set(p.id, {
+      personId: p.id,
+      name: p.name,
+      position: p.position || '',
+      isExternalPerson: false,
+      amount: 0,
+    })
+  }
+
+  // 本单位其他岗：当月有业绩已在 salesAgg；无业绩不展示
 
   const personnelTargets = new Map<string, number>()
   performanceTargets.forEach((t) => {
@@ -102,53 +220,36 @@ export function buildUnitBattleReport(options: {
     }
   })
 
-  const rows: BattleReportRow[] = battlePersonnel.map((p) => {
-    const personalSales = getPersonalSales(p.id, unitMonthlyRecords, p.name)
-    const targetAmount = personnelTargets.get(p.id)
-    const hasTarget = targetAmount !== undefined
-    const diff = hasTarget ? personalSales - (targetAmount as number) : 0
-    const completionRate =
-      hasTarget && (targetAmount as number) > 0
-        ? (personalSales / (targetAmount as number)) * 100
-        : 0
-    return {
-      personId: p.id,
-      name: p.name,
-      position: p.position || '',
-      targetAmount: hasTarget ? (targetAmount as number) : null,
-      personalSales,
-      diff,
-      completionRate,
-      positionMatch: matchPositionLabel(p.position || ''),
-      isExternalPerson: false,
-    }
-  })
-
-  const externalRecords = unitMonthlyRecords.filter(
-    (r) => !r.personnelId && r.salesPersonName && r.salesPersonName.trim(),
-  )
-  const externalMap = new Map<string, number>()
-  externalRecords.forEach((r) => {
-    const name = r.salesPersonName!.trim()
-    if (battlePersonnel.some((p) => p.name === name)) return
-    externalMap.set(name, (externalMap.get(name) || 0) + r.totalAmount)
-  })
-
-  const existingNames = new Set(unitPersonnel.map((p) => p.name))
-  externalMap.forEach((sales, name) => {
-    if (existingNames.has(name)) return
-    rows.push({
-      personId: `ext_${name}`,
-      name,
-      position: '外援',
-      targetAmount: null,
-      personalSales: sales,
-      diff: 0,
-      completionRate: 0,
-      positionMatch: matchPositionLabel('外援'),
-      isExternalPerson: true,
+  const rows: BattleReportRow[] = Array.from(salesAgg.values())
+    .sort((a, b) => {
+      if (a.personId === UNATTRIBUTED_ID) return 1
+      if (b.personId === UNATTRIBUTED_ID) return -1
+      if (a.isExternalPerson !== b.isExternalPerson) {
+        return a.isExternalPerson ? 1 : -1
+      }
+      return a.name.localeCompare(b.name, 'zh-CN')
     })
-  })
+    .map((item) => {
+      const targetAmount = item.isExternalPerson
+        ? undefined
+        : personnelTargets.get(item.personId)
+      const hasTarget = targetAmount !== undefined
+      const amt = targetAmount || 0
+      const personalSales = item.amount
+      const diff = hasTarget ? personalSales - amt : 0
+      const completionRate = hasTarget && amt > 0 ? (personalSales / amt) * 100 : 0
+      return {
+        personId: item.personId,
+        name: item.name,
+        position: item.position,
+        targetAmount: hasTarget ? amt : null,
+        personalSales,
+        diff,
+        completionRate,
+        positionMatch: matchPositionLabel(item.position || ''),
+        isExternalPerson: item.isExternalPerson,
+      }
+    })
 
   const totalTarget = rows.reduce((sum, row) => sum + (row.targetAmount || 0), 0)
   const battlePersonalSalesTotal = rows.reduce((sum, row) => sum + row.personalSales, 0)
@@ -170,5 +271,25 @@ export function buildUnitBattleReport(options: {
     effectiveTeamTarget,
     teamDiff,
     effectiveTeamCompletionRate,
+  }
+}
+
+/** 供页面构造伪 Personnel（外援/未归集） */
+export function toBattlePersonStub(
+  row: BattleReportRow,
+  salesUnitId: string,
+): Personnel {
+  return {
+    id: row.personId,
+    name: row.name,
+    salesUnitId,
+    position: row.position,
+    phone: '',
+    email: '',
+    salary: EMPTY_SALARY,
+    socialInsurance: 0,
+    housingFund: 0,
+    hireDate: '',
+    status: 'active',
   }
 }

@@ -1,5 +1,6 @@
 /**
- * 单位战报计算（服务端，口径对齐前端 SalesBattleReport）
+ * 单位战报计算（服务端）
+ * 业绩唯一凭证：本单位当月销售记录全量归集；团队总业绩 = 各行个人业绩之和
  */
 
 const NON_SALES_POSITION_KEYWORDS = [
@@ -11,6 +12,15 @@ const SALES_POSITION_KEYWORDS = [
   '销售', '顾问', '业务员', '业务经理', '客户经理', '外援',
 ] as const
 
+const UNATTRIBUTED_ID = 'unattributed'
+const UNATTRIBUTED_NAME = '未归集（无销售员）'
+
+export type BattleUnitAssignment = {
+  salesUnitId: string
+  startDate: string
+  endDate?: string
+}
+
 export type BattlePerson = {
   id: string
   name: string
@@ -19,6 +29,7 @@ export type BattlePerson = {
   hireDate?: string
   resignDate?: string
   status?: string
+  unitAssignments?: BattleUnitAssignment[]
 }
 
 export type BattleSale = {
@@ -67,6 +78,60 @@ export type UnitBattleReport = {
   effectiveTeamCompletionRate: number
 }
 
+type SalesAgg = {
+  personId: string
+  name: string
+  position: string
+  isExternalPerson: boolean
+  amount: number
+}
+
+function toDateOnly(value?: string): string {
+  return (value || '').slice(0, 10)
+}
+
+function eachDateInMonth(yearMonth: string): string[] {
+  const [y, m] = yearMonth.split('-').map(Number)
+  if (!y || !m) return []
+  const last = new Date(y, m, 0).getDate()
+  const out: string[] = []
+  for (let day = 1; day <= last; day += 1) {
+    out.push(`${yearMonth}-${String(day).padStart(2, '0')}`)
+  }
+  return out
+}
+
+function isAssignmentActiveOn(a: BattleUnitAssignment, day: string): boolean {
+  const d = toDateOnly(day)
+  if (!d) return false
+  const start = toDateOnly(a.startDate)
+  if (!start || d < start) return false
+  const end = toDateOnly(a.endDate)
+  if (end && d >= end) return false
+  return true
+}
+
+function resolveUnitIdAt(person: BattlePerson, asOfDate: string): string {
+  const d = toDateOnly(asOfDate) || asOfDate
+  const list = person.unitAssignments || []
+  if (list.length > 0) {
+    const hit = list.find((a) => isAssignmentActiveOn(a, d))
+    if (hit?.salesUnitId) return hit.salesUnitId
+  }
+  return person.salesUnitId || ''
+}
+
+function personBelongsToUnitInMonth(
+  person: BattlePerson,
+  unitId: string,
+  yearMonth: string,
+): boolean {
+  const list = person.unitAssignments || []
+  if (list.length === 0) return person.salesUnitId === unitId
+  const days = eachDateInMonth(yearMonth)
+  return days.some((d) => resolveUnitIdAt(person, d) === unitId)
+}
+
 function filterByMonth(records: BattleSale[], yearMonth: string): BattleSale[] {
   return records.filter((s) => (s.saleDate || '').startsWith(yearMonth))
 }
@@ -96,27 +161,101 @@ function isSalesBattlePosition(position?: string): boolean {
   return SALES_POSITION_KEYWORDS.some((k) => pos.includes(k.toLowerCase()))
 }
 
-function getPersonalSales(
-  personId: string,
-  salesRecords: BattleSale[],
-  personName?: string,
-): number {
-  const name = (personName || '').trim()
-  return salesRecords
-    .filter((s) => {
-      if (s.personnelId === personId) return true
-      if (!s.personnelId && name && (s.salesPersonName || '').trim() === name) return true
-      return false
-    })
-    .reduce((sum, s) => sum + (s.totalAmount || 0), 0)
-}
-
 function matchPositionLabel(
   position: string,
   labels: PositionGroupLabel[],
 ): PositionGroupLabel | null {
   const pos = (position || '').toLowerCase()
   return labels.find((l) => pos.includes((l.keyword || '').toLowerCase())) || null
+}
+
+function findPersonByName(
+  name: string,
+  personnel: BattlePerson[],
+  salesUnitId: string,
+  yearMonth: string,
+): BattlePerson | undefined {
+  const hits = personnel.filter((p) => (p.name || '').trim() === name)
+  if (hits.length === 0) return undefined
+  const inUnit = hits.find((p) => personBelongsToUnitInMonth(p, salesUnitId, yearMonth))
+  return inUnit || hits[0]
+}
+
+function aggregateSalesByPerson(
+  monthUnitSales: BattleSale[],
+  personnel: BattlePerson[],
+  salesUnitId: string,
+  yearMonth: string,
+): Map<string, SalesAgg> {
+  const personnelById = new Map(personnel.map((p) => [p.id, p]))
+  const agg = new Map<string, SalesAgg>()
+
+  function add(row: Omit<SalesAgg, 'amount'>, amount: number) {
+    const prev = agg.get(row.personId)
+    if (prev) {
+      prev.amount += amount
+      return
+    }
+    agg.set(row.personId, { ...row, amount })
+  }
+
+  for (const r of monthUnitSales) {
+    const amount = Number(r.totalAmount) || 0
+    const pid = (r.personnelId || '').trim()
+    const sname = (r.salesPersonName || '').trim()
+    const byId = pid ? personnelById.get(pid) : undefined
+
+    if (byId) {
+      add(
+        {
+          personId: byId.id,
+          name: byId.name,
+          position: byId.position || '',
+          isExternalPerson: false,
+        },
+        amount,
+      )
+      continue
+    }
+
+    if (sname) {
+      const byName = findPersonByName(sname, personnel, salesUnitId, yearMonth)
+      if (byName) {
+        add(
+          {
+            personId: byName.id,
+            name: byName.name,
+            position: byName.position || '',
+            isExternalPerson: false,
+          },
+          amount,
+        )
+      } else {
+        add(
+          {
+            personId: `ext_${sname}`,
+            name: sname,
+            position: '外援',
+            isExternalPerson: true,
+          },
+          amount,
+        )
+      }
+      continue
+    }
+
+    add(
+      {
+        personId: UNATTRIBUTED_ID,
+        name: UNATTRIBUTED_NAME,
+        position: '',
+        isExternalPerson: true,
+      },
+      amount,
+    )
+  }
+
+  return agg
 }
 
 export function buildUnitBattleReport(options: {
@@ -141,22 +280,28 @@ export function buildUnitBattleReport(options: {
   const monthUnitSales = filterByMonth(salesRecords, yearMonth).filter(
     (r) => r.salesUnitId === salesUnitId,
   )
+  const teamTotal = monthUnitSales.reduce((sum, r) => sum + (Number(r.totalAmount) || 0), 0)
 
-  const unitPersonnel = personnel.filter((p) => {
-    if (p.salesUnitId !== salesUnitId) return false
-    if (wasEmployedInMonth(p, yearMonth)) return true
-    return getPersonalSales(p.id, monthUnitSales, p.name) > 0
-  })
+  const salesAgg = aggregateSalesByPerson(
+    monthUnitSales,
+    personnel,
+    salesUnitId,
+    yearMonth,
+  )
 
-  const battlePersonnel = unitPersonnel.filter(
-    (p) =>
-      isSalesBattlePosition(p.position) ||
-      getPersonalSales(p.id, monthUnitSales, p.name) > 0,
-  )
-  const unitMonthlyRecords = filterByMonth(salesRecords, yearMonth).filter(
-    (r) => r.salesUnitId === salesUnitId,
-  )
-  const teamTotal = unitMonthlyRecords.reduce((sum, r) => sum + (r.totalAmount || 0), 0)
+  for (const p of personnel) {
+    if (salesAgg.has(p.id)) continue
+    if (!personBelongsToUnitInMonth(p, salesUnitId, yearMonth)) continue
+    if (!wasEmployedInMonth(p, yearMonth)) continue
+    if (!isSalesBattlePosition(p.position)) continue
+    salesAgg.set(p.id, {
+      personId: p.id,
+      name: p.name,
+      position: p.position || '',
+      isExternalPerson: false,
+      amount: 0,
+    })
+  }
 
   const personnelTargets = new Map<string, number>()
   performanceTargets.forEach((t) => {
@@ -165,49 +310,36 @@ export function buildUnitBattleReport(options: {
     }
   })
 
-  const rows: BattleReportRow[] = battlePersonnel.map((p) => {
-    const personalSales = getPersonalSales(p.id, unitMonthlyRecords, p.name)
-    const targetAmount = personnelTargets.get(p.id)
-    const hasTarget = targetAmount !== undefined
-    const amt = targetAmount || 0
-    const diff = hasTarget ? personalSales - amt : 0
-    const completionRate = hasTarget && amt > 0 ? (personalSales / amt) * 100 : 0
-    return {
-      personId: p.id,
-      name: p.name,
-      position: p.position || '',
-      targetAmount: hasTarget ? amt : null,
-      personalSales,
-      diff,
-      completionRate,
-      positionMatch: matchPositionLabel(p.position || '', positionGroupLabels),
-      isExternalPerson: false,
-    }
-  })
-
-  const externalMap = new Map<string, number>()
-  unitMonthlyRecords.forEach((r) => {
-    if (r.personnelId || !r.salesPersonName?.trim()) return
-    const name = r.salesPersonName.trim()
-    if (battlePersonnel.some((p) => p.name === name)) return
-    externalMap.set(name, (externalMap.get(name) || 0) + r.totalAmount)
-  })
-
-  const existingNames = new Set(unitPersonnel.map((p) => p.name))
-  externalMap.forEach((sales, name) => {
-    if (existingNames.has(name)) return
-    rows.push({
-      personId: `ext_${name}`,
-      name,
-      position: '外援',
-      targetAmount: null,
-      personalSales: sales,
-      diff: 0,
-      completionRate: 0,
-      positionMatch: matchPositionLabel('外援', positionGroupLabels),
-      isExternalPerson: true,
+  const rows: BattleReportRow[] = Array.from(salesAgg.values())
+    .sort((a, b) => {
+      if (a.personId === UNATTRIBUTED_ID) return 1
+      if (b.personId === UNATTRIBUTED_ID) return -1
+      if (a.isExternalPerson !== b.isExternalPerson) {
+        return a.isExternalPerson ? 1 : -1
+      }
+      return a.name.localeCompare(b.name, 'zh-CN')
     })
-  })
+    .map((item) => {
+      const targetAmount = item.isExternalPerson
+        ? undefined
+        : personnelTargets.get(item.personId)
+      const hasTarget = targetAmount !== undefined
+      const amt = targetAmount || 0
+      const personalSales = item.amount
+      const diff = hasTarget ? personalSales - amt : 0
+      const completionRate = hasTarget && amt > 0 ? (personalSales / amt) * 100 : 0
+      return {
+        personId: item.personId,
+        name: item.name,
+        position: item.position,
+        targetAmount: hasTarget ? amt : null,
+        personalSales,
+        diff,
+        completionRate,
+        positionMatch: matchPositionLabel(item.position || '', positionGroupLabels),
+        isExternalPerson: item.isExternalPerson,
+      }
+    })
 
   const totalTarget = rows.reduce((sum, row) => sum + (row.targetAmount || 0), 0)
   const battlePersonalSalesTotal = rows.reduce((sum, row) => sum + row.personalSales, 0)

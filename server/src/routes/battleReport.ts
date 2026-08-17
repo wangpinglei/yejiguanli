@@ -17,9 +17,13 @@ const API_KEY =
   'eco-sync-2026-secret'
 
 function getCurrentYearMonth(): string {
-  const d = new Date()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  return `${d.getFullYear()}-${m}`
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+  })
+    .format(new Date())
+    .slice(0, 7)
 }
 
 function validateApiKey(req: Request, res: Response): boolean {
@@ -55,7 +59,25 @@ router.get('/battle-report', (req, res) => {
     .map(rowToSalesUnit)
     .filter((u: { id: string }) => !filterUnitId || u.id === filterUnitId)
 
-  const personnel = db.prepare('SELECT * FROM personnel').all().map(rowToPersonnel)
+  // 人员 + 单位归属时间轴（与前端 personBelongsToUnitInMonth 一致）
+  const personnelRows = db.prepare('SELECT * FROM personnel').all() as Array<{
+    id: string
+  }>
+  const assignRows = db
+    .prepare(
+      `SELECT * FROM personnel_unit_assignments
+       ORDER BY start_date ASC, created_at ASC`,
+    )
+    .all() as Array<{ personnel_id: string }>
+  const assignMap = new Map<string, typeof assignRows>()
+  for (const row of assignRows) {
+    const list = assignMap.get(row.personnel_id) || []
+    list.push(row)
+    assignMap.set(row.personnel_id, list)
+  }
+  const personnel = personnelRows.map((r) =>
+    rowToPersonnel(r, assignMap.get(r.id) || []),
+  )
   const salesRecords = db
     .prepare('SELECT * FROM sales_records')
     .all()

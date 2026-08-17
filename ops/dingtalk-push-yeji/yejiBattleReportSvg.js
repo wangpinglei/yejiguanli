@@ -47,7 +47,7 @@ function fmtPercent(n) {
 function buildYejiBattleSvg(report) {
   const rows = report.rows || []
   const tip =
-    '展示所选月份在职期间的销售相关岗位，以及当月有业绩的其他岗位（如服务中心）。个人业绩按本单位销售记录归集。'
+    '展示所选月份销售记录归集结果：团队总业绩等于各人个人业绩之和（含外援/未归集）。销售岗无成交也会列出以便对照目标。'
   const title = `${report.salesUnitName || ''} ${report.yearMonth || ''} 单位战报`
 
   const bodyH = Math.max(rows.length, 1) * ROW_H

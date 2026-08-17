@@ -5,13 +5,9 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, formatPercent, getYearMonth, getCurrentYearMonth } from "@/lib/format";
 import {
-  filterByMonth,
-  getPersonalSales,
-  shouldShowOnBattleReport,
-  wasEmployedInMonth,
-  EMPTY_SALARY,
-} from "@/lib/salary";
-import { personBelongsToUnitInMonth } from "@/lib/unitAssignment";
+  buildUnitBattleReport,
+  toBattlePersonStub,
+} from "@/lib/battleReport";
 import type { Personnel } from "@/types";
 import {
   CalendarDays,
@@ -87,44 +83,68 @@ export default function SalesBattleReport() {
     }
   }, [salesUnits, unitId]);
 
-  // 该单位在「战报所选月份」处于在职期间的人员（含当月后才离职的）
-  const unitPersonnel = useMemo(() => {
-    const monthUnitSales = filterByMonth(salesRecords, yearMonth).filter(
-      (r) => r.salesUnitId === unitId
-    );
-    return personnel.filter((p) => {
-      const belongs = personBelongsToUnitInMonth(p, unitId, yearMonth);
-      const hasSales = getPersonalSales(p.id, monthUnitSales, p.name) > 0;
-      if (!belongs && !hasSales) return false;
-      if (belongs && wasEmployedInMonth(p, yearMonth)) return true;
-      return hasSales;
+  const selectedUnit = useMemo(
+    () => salesUnits.find((u) => u.id === unitId),
+    [salesUnits, unitId],
+  );
+
+  // 业绩以销售记录为唯一凭证（与推送 API 同口径）
+  const unitReport = useMemo(() => {
+    if (!unitId || !selectedUnit) return null;
+    return buildUnitBattleReport({
+      salesUnitId: unitId,
+      salesUnitName: selectedUnit.name,
+      yearMonth,
+      personnel,
+      salesRecords,
+      performanceTargets,
+      matchPositionLabel,
     });
-  }, [personnel, unitId, yearMonth, salesRecords]);
+  }, [
+    unitId,
+    selectedUnit,
+    yearMonth,
+    personnel,
+    salesRecords,
+    performanceTargets,
+    matchPositionLabel,
+  ]);
 
-  // 战报：销售相关岗位 + 当月本单位有业绩的其他岗位（如服务中心）
-  const battlePersonnel = useMemo(() => {
-    const monthUnitSales = filterByMonth(salesRecords, yearMonth).filter(
-      (r) => r.salesUnitId === unitId,
-    );
-    return unitPersonnel.filter((p) => shouldShowOnBattleReport(p, monthUnitSales));
-  }, [unitPersonnel, salesRecords, yearMonth, unitId]);
+  const teamTotal = unitReport?.teamTotal ?? 0;
+  const totalTarget = unitReport?.totalTarget ?? 0;
+  const battlePersonalSalesTotal = unitReport?.battlePersonalSalesTotal ?? 0;
+  const effectiveTeamTarget = unitReport?.effectiveTeamTarget ?? 0;
+  const teamDiff = unitReport?.teamDiff ?? 0;
+  const effectiveTeamCompletionRate = unitReport?.effectiveTeamCompletionRate ?? 0;
 
-  // 当月销售记录
-  const monthlyRecords = useMemo(() => {
-    return filterByMonth(salesRecords, yearMonth);
-  }, [salesRecords, yearMonth]);
+  const battleRows = useMemo(() => {
+    if (!unitReport || !unitId) return [];
+    const personById = new Map(personnel.map((p) => [p.id, p]));
+    return unitReport.rows.map((row) => {
+      const person =
+        (!row.isExternalPerson && personById.get(row.personId)) ||
+        toBattlePersonStub(row, unitId);
+      return {
+        person,
+        targetAmount: row.targetAmount,
+        personalSales: row.personalSales,
+        diff: row.diff,
+        completionRate: row.completionRate,
+        positionMatch: row.positionMatch,
+        isExternalPerson: row.isExternalPerson,
+      };
+    });
+  }, [unitReport, personnel, unitId]);
 
-  // 当月单位的所有销售记录（按销售单位汇总，个人业绩再按任命人员归集）
-  const unitMonthlyRecords = useMemo(() => {
-    return monthlyRecords.filter((r) => r.salesUnitId === unitId);
-  }, [monthlyRecords, unitId]);
+  // 可录入目标的系统人员（不含外援/未归集）
+  const battlePersonnel = useMemo(
+    () =>
+      battleRows
+        .filter((r) => !r.isExternalPerson)
+        .map((r) => r.person),
+    [battleRows],
+  );
 
-  // 团队总业绩
-  const teamTotal = useMemo(() => {
-    return unitMonthlyRecords.reduce((sum, r) => sum + r.totalAmount, 0);
-  }, [unitMonthlyRecords]);
-
-  // 各人员业绩目标
   const personnelTargets = useMemo(() => {
     const map = new Map<string, number>();
     performanceTargets.forEach((t) => {
@@ -134,89 +154,6 @@ export default function SalesBattleReport() {
     });
     return map;
   }, [performanceTargets, unitId, yearMonth]);
-
-  // 计算每个人员的战报行
-  const battleRows = useMemo(() => {
-    // 1. 系统内在职销售岗，以及当月有业绩的其他岗位；个人业绩按任命人员汇总
-    const rows = battlePersonnel.map((p) => {
-      const personalSales = getPersonalSales(p.id, unitMonthlyRecords, p.name);
-      const targetAmount = personnelTargets.get(p.id);
-      const hasTarget = targetAmount !== undefined;
-      const diff = hasTarget ? personalSales - targetAmount : 0;
-      const completionRate = hasTarget && targetAmount > 0
-        ? (personalSales / targetAmount) * 100
-        : 0;
-
-      // 按岗位匹配特殊分组（如外援团）
-      const positionMatch = matchPositionLabel(p.position || "");
-
-      return {
-        person: p,
-        targetAmount: hasTarget ? targetAmount! : null,
-        personalSales,
-        diff,
-        completionRate,
-        positionMatch,
-        isExternalPerson: false,
-      };
-    });
-
-    // 2. 外部人员（生态圈同步/表格导入但未匹配到系统人员的）
-    //    personnelId 为空但有 salesPersonName 的记录，按人员名聚合
-    const externalRecords = unitMonthlyRecords.filter(
-      (r) => !r.personnelId && r.salesPersonName && r.salesPersonName.trim()
-    );
-    const externalMap = new Map<string, number>();
-    externalRecords.forEach((r) => {
-      const name = r.salesPersonName!.trim();
-      // 已能按姓名归到战报人员的，不重复算外部行
-      if (battlePersonnel.some((p) => p.name === name)) return;
-      externalMap.set(name, (externalMap.get(name) || 0) + r.totalAmount);
-    });
-
-    // 确保不与系统人员重名（重名的外部人员业绩已通过 personnelId / 姓名匹配到系统人员）
-    const existingNames = new Set(unitPersonnel.map((p) => p.name));
-    externalMap.forEach((sales, name) => {
-      if (existingNames.has(name)) return; // 重名跳过
-      // 构造伪 Personnel，position 设为"外援"以自动命中默认"外援团"规则
-      const fakePerson: Personnel = {
-        id: `ext_${name}`,
-        name,
-        salesUnitId: unitId,
-        position: "外援",
-        phone: "",
-        email: "",
-        salary: EMPTY_SALARY,
-        socialInsurance: 0,
-        housingFund: 0,
-        hireDate: "",
-        status: "active",
-      };
-      const positionMatch = matchPositionLabel("外援");
-      rows.push({
-        person: fakePerson,
-        targetAmount: null,
-        personalSales: sales,
-        diff: 0,
-        completionRate: 0,
-        positionMatch,
-        isExternalPerson: true,
-      });
-    });
-
-    return rows;
-  }, [
-    battlePersonnel, unitPersonnel, unitMonthlyRecords, personnelTargets,
-    yearMonth, matchPositionLabel, unitId]);
-
-  // 团队合计（仅战报表内人员目标）
-  const totalTarget = useMemo(() => {
-    return battleRows.reduce((sum, row) => sum + (row.targetAmount || 0), 0);
-  }, [battleRows]);
-
-  const battlePersonalSalesTotal = useMemo(() => {
-    return battleRows.reduce((sum, row) => sum + row.personalSales, 0);
-  }, [battleRows]);
 
   // 人员目标行内编辑
   const [editingPersonId, setEditingPersonId] = useState<string | null>(null);
@@ -339,26 +276,14 @@ export default function SalesBattleReport() {
     }
   };
 
-  // 列出当前单位中所有命中的岗位，供配置参考
+  // 列出当前单位战报中出现的岗位，供配置参考
   const unitPositions = useMemo(() => {
     const set = new Set<string>();
-    unitPersonnel.forEach((p) => {
-      if (p.position) set.add(p.position);
+    battleRows.forEach((r) => {
+      if (r.person.position) set.add(r.person.position);
     });
     return Array.from(set);
-  }, [unitPersonnel]);
-
-  // 团队目标 = 人员个人目标合计
-  const effectiveTeamTarget = totalTarget;
-
-  // 团队完成率
-  const effectiveTeamCompletionRate = useMemo(() => {
-    if (effectiveTeamTarget <= 0) return 0;
-    return (teamTotal / effectiveTeamTarget) * 100;
-  }, [teamTotal, effectiveTeamTarget]);
-
-  // 团队差额
-  const teamDiff = effectiveTeamTarget > 0 ? teamTotal - effectiveTeamTarget : 0;
+  }, [battleRows]);
 
   // 生成可选月份（最近12个月）
   const monthOptions = useMemo(() => {
@@ -520,8 +445,8 @@ export default function SalesBattleReport() {
       {/* 战报表格 */}
       <Card className="overflow-hidden">
         <div className="border-b bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
-          展示所选月份在职期间的销售相关岗位（含当月后才离职人员）；
-          销售岗默认展示；其他岗位当月有业绩也会显示（如服务中心）。个人业绩按本单位销售记录归集。
+          业绩以本单位当月销售记录为唯一凭证：团队总业绩 = 销售记录合计 = 表内个人业绩之和。
+          按人员ID归集；ID无效时按销售员姓名；仍无法匹配则记为外援/未归集。销售岗无成交也会展示以便录入目标。
         </div>
         <div className="overflow-x-auto">
           <Table>
@@ -587,14 +512,17 @@ export default function SalesBattleReport() {
                       ) : targetAmount !== null ? (
                         <button
                           type="button"
-                          onClick={() => startEditPersonTarget(person.id, targetAmount)}
-                          disabled={!canEditTargets}
-                          className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm transition-colors ${!canEditTargets ? 'cursor-default' : 'hover:bg-muted'} ${targetAmount > 0 ? 'font-medium' : 'text-muted-foreground'}`}
+                          onClick={() => {
+                            if (isExternalPerson) return
+                            startEditPersonTarget(person.id, targetAmount)
+                          }}
+                          disabled={!canEditTargets || isExternalPerson}
+                          className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm transition-colors ${!canEditTargets || isExternalPerson ? 'cursor-default' : 'hover:bg-muted'} ${targetAmount > 0 ? 'font-medium' : 'text-muted-foreground'}`}
                         >
                           {targetAmount > 0 ? formatCurrency(targetAmount) : '—'}
-                          {canEditTargets && <Edit3 className="h-3 w-3 opacity-40 hover:opacity-100" />}
+                          {canEditTargets && !isExternalPerson && <Edit3 className="h-3 w-3 opacity-40 hover:opacity-100" />}
                         </button>
-                      ) : canEditTargets ? (
+                      ) : canEditTargets && !isExternalPerson ? (
                         <button
                           type="button"
                           onClick={() => startEditPersonTarget(person.id, undefined)}

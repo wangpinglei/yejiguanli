@@ -67,8 +67,29 @@ function saveSent(obj) {
   fs.writeFileSync(SENT_FILE, JSON.stringify(obj, null, 2), 'utf-8')
 }
 
+/** 上海时区当月 YYYY-MM（避免 UTC 跨日导致月份错位） */
+function getShanghaiYearMonth() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+  })
+    .format(new Date())
+    .slice(0, 7)
+}
+
+/** 上海时区当天 YYYY-MM-DD（用于图片防缓存文件名） */
+function getShanghaiDayKey() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+}
+
 function getDateKey(month) {
-  return month || new Date().toISOString().slice(0, 7)
+  return month || getShanghaiYearMonth()
 }
 
 /** 去重用日历日（上海时区），避免整月只推一次 */
@@ -163,14 +184,17 @@ async function renderPng(report) {
   ensureDirs()
   const svg = buildYejiBattleSvg(report)
   const safeUnit = String(report.salesUnitId || 'unit').replace(/[^\w-]/g, '_')
-  const fileName = `yeji-battle-${safeUnit}-${report.yearMonth || getDateKey()}.png`
+  const month = report.yearMonth || getDateKey()
+  // 文件名带日期，避免钉钉/CDN 缓存整月同一张旧图
+  const fileName = `yeji-battle-${safeUnit}-${month}-${getShanghaiDayKey()}.png`
   const filePath = path.join(PUBLIC_DIR, fileName)
   const latestPath = path.join(PUBLIC_DIR, `yeji-battle-${safeUnit}-latest.png`)
   const pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer()
   fs.writeFileSync(filePath, pngBuffer)
   fs.writeFileSync(latestPath, pngBuffer)
   const publicBase = getPublicBase()
-  const imageUrl = `${publicBase}${PUBLIC_PATH_PREFIX}/${fileName}`
+  const cacheBust = Date.now()
+  const imageUrl = `${publicBase}${PUBLIC_PATH_PREFIX}/${fileName}?t=${cacheBust}`
   addLog(`图片已保存: ${filePath}`)
   addLog(`公网地址: ${imageUrl}`)
   return { filePath, imageUrl, fileName, latestPath }
