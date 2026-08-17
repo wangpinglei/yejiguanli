@@ -300,7 +300,7 @@ export interface CostItem {
 export interface CostRecord {
   id: string;
   salesUnitId: string;
-  date: string; // 录入日期（月度固定模式下表示起始日期）
+  date: string; // 发生月份（存 YYYY-MM-01；月度固定模式下表示起始月份）
   items: CostItem[];
   totalCost: number;
   remark: string;
@@ -326,7 +326,7 @@ export interface IncomeItem {
 export interface IncomeRecord {
   id: string;
   salesUnitId: string;
-  date: string; // 录入日期（月度固定模式下表示起始日期）
+  date: string; // 发生月份（存 YYYY-MM-01；月度固定模式下表示起始月份）
   items: IncomeItem[];
   totalAmount: number;
   remark: string;

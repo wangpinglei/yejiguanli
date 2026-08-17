@@ -41,6 +41,16 @@ import MTeamMgmtCommissionPanel from "./CostManagement/components/m-team-mgmt-co
 const costCategories = ["人力成本", "办公租金", "营销推广", "差旅交通", "运营杂费", "设备采购", "其他"];
 const incomeCategories = ["服务费收入", "咨询费收入", "技术支持费", "培训费收入", "退款收入", "其他收入"];
 
+/** 表单月份选择器：YYYY-MM → 存库用该月 1 日 */
+function monthInputToDate(yearMonth: string): string {
+  if (/^\d{4}-\d{2}$/.test(yearMonth)) return `${yearMonth}-01`;
+  return new Date().toISOString().slice(0, 10);
+}
+
+function dateToMonthInput(date: string): string {
+  return (date || "").slice(0, 7);
+}
+
 export default function CostManagement() {
   const { addCostRecord, updateCostRecord, deleteCostRecord, costChangeLogs, products, monthlyAdjustments, upsertMonthlyAdjustment, addIncomeRecord, updateIncomeRecord, deleteIncomeRecord, productPersonCommissions, teamMgmtCommissionRules, performanceTargets, unitProductSettlements } = useData();
   const { user } = useAuth();
@@ -257,7 +267,7 @@ export default function CostManagement() {
     setEditingRecord(null);
     setForm({
       salesUnitId: salesUnits[0]?.id || "",
-      date: new Date().toISOString().slice(0, 10),
+      date: monthInputToDate(selectedMonth),
       remark: "",
       changeReason: "",
       isRecurring: false,
@@ -358,7 +368,7 @@ export default function CostManagement() {
     setEditingIncome(null);
     setIncomeForm({
       salesUnitId: salesUnits[0]?.id || "",
-      date: new Date().toISOString().slice(0, 10),
+      date: monthInputToDate(selectedMonth),
       remark: "",
       isRecurring: false,
       recurringMonths: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
@@ -824,7 +834,7 @@ export default function CostManagement() {
                 <TableRow>
                   <TableHead className="w-8"></TableHead>
                   <TableHead>周期</TableHead>
-                  <TableHead>记录/起始日期</TableHead>
+                  <TableHead>发生/起始月份</TableHead>
                   <TableHead>销售单位</TableHead>
                   <TableHead className="text-right">成本项数</TableHead>
                   <TableHead className="text-right">总成本</TableHead>
@@ -854,7 +864,9 @@ export default function CostManagement() {
                             <Badge variant="secondary">单次</Badge>
                           )}
                         </TableCell>
-                        <TableCell className="font-medium">{formatDate(record.date)}</TableCell>
+                        <TableCell className="font-medium">
+                          {getYearMonth(record.date)}
+                        </TableCell>
                         <TableCell><Badge variant="outline">{getUnitName(record.salesUnitId)}</Badge></TableCell>
                         <TableCell className="text-right">{record.items.length}</TableCell>
                         <TableCell className="text-right font-bold text-orange-600">{formatCurrency(record.totalCost)}</TableCell>
@@ -954,7 +966,7 @@ export default function CostManagement() {
                 <TableRow>
                   <TableHead className="w-8"></TableHead>
                   <TableHead>周期</TableHead>
-                  <TableHead>记录/起始日期</TableHead>
+                  <TableHead>发生/起始月份</TableHead>
                   <TableHead>销售单位</TableHead>
                   <TableHead className="text-right">收入项数</TableHead>
                   <TableHead className="text-right">总收入</TableHead>
@@ -988,7 +1000,7 @@ export default function CostManagement() {
                         <TableCell className="font-medium">
                           {record.isRecurring ? (
                             <div>
-                              <div className="text-sm">{formatDate(record.date)} 起</div>
+                              <div className="text-sm">{getYearMonth(record.date)} 起</div>
                               {monthCount > 0 && monthCount < 12 && (
                                 <div className="text-[10px] text-violet-600 mt-0.5">
                                   {record.recurringMonths!.map((m) => `${m}月`).join("、")}
@@ -999,7 +1011,7 @@ export default function CostManagement() {
                               )}
                             </div>
                           ) : (
-                            formatDate(record.date)
+                            getYearMonth(record.date)
                           )}
                         </TableCell>
                         <TableCell><Badge variant="outline">{getUnitName(record.salesUnitId)}</Badge></TableCell>
@@ -1038,7 +1050,7 @@ export default function CostManagement() {
                                 <div className="rounded-md bg-violet-50 px-3 py-2 text-xs text-violet-800">
                                   <Repeat className="inline mr-1 h-3 w-3" />
                                   <strong>月度固定收入：</strong>
-                                  自 {formatDate(record.date)} 起
+                                  自 {getYearMonth(record.date)} 起
                                   {record.recurringEndDate ? `至 ${formatDate(record.recurringEndDate)} 止` : "永久生效"}
                                   ，每月
                                   {record.recurringMonths?.length === 12 ? "（全年）" :
@@ -1098,8 +1110,19 @@ export default function CostManagement() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>{form.isRecurring ? "生效起始日期" : "记录日期"}</Label>
-                <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+                <Label>{form.isRecurring ? "生效起始月份" : "成本发生月份"}</Label>
+                <Input
+                  type="month"
+                  value={dateToMonthInput(form.date)}
+                  onChange={(e) =>
+                    setForm({ ...form, date: monthInputToDate(e.target.value) })
+                  }
+                />
+                {!form.isRecurring && (
+                  <p className="text-xs text-muted-foreground">
+                    选择月份后，该笔成本计入对应月份（默认与上方筛选月份一致）
+                  </p>
+                )}
               </div>
             </div>
 
@@ -1297,8 +1320,22 @@ export default function CostManagement() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>{incomeForm.isRecurring ? "生效起始日期" : "记录日期"}</Label>
-                <Input type="date" value={incomeForm.date} onChange={(e) => setIncomeForm({ ...incomeForm, date: e.target.value })} />
+                <Label>{incomeForm.isRecurring ? "生效起始月份" : "收入发生月份"}</Label>
+                <Input
+                  type="month"
+                  value={dateToMonthInput(incomeForm.date)}
+                  onChange={(e) =>
+                    setIncomeForm({
+                      ...incomeForm,
+                      date: monthInputToDate(e.target.value),
+                    })
+                  }
+                />
+                {!incomeForm.isRecurring && (
+                  <p className="text-xs text-muted-foreground">
+                    选择月份后，该笔收入计入对应月份（默认与上方筛选月份一致）
+                  </p>
+                )}
               </div>
             </div>
 
