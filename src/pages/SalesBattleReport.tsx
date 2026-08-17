@@ -8,7 +8,6 @@ import {
   buildUnitBattleReport,
   toBattlePersonStub,
 } from "@/lib/battleReport";
-import type { Personnel } from "@/types";
 import {
   CalendarDays,
   Building2,
