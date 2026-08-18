@@ -135,6 +135,57 @@ function buildSalesImportFingerprint(r: {
   ].join("|");
 }
 
+function getSalesRecordFingerprint(
+  s: SalesRecord,
+  idToProductName: Map<string, string>,
+): string {
+  return buildSalesImportFingerprint({
+    customerName: s.customerName,
+    productName: s.productName || idToProductName.get(s.productId || "") || "",
+    productId: s.productId,
+    orderAmount: s.orderAmount,
+    totalAmount: s.totalAmount,
+    orderType: s.orderType,
+    salesUnitId: s.salesUnitId,
+    salesUnitName: s.salesUnitName,
+    personnelId: s.personnelId,
+    salesPersonName: s.salesPersonName,
+    saleDate: s.saleDate,
+    activityName: s.activityName,
+  });
+}
+
+/** 每组完全相同的记录保留 1 笔（优先留同步单），返回可删的多余 id */
+function pickDeletableDuplicateIds(
+  records: SalesRecord[],
+  idToProductName: Map<string, string>,
+): string[] {
+  const groups = new Map<string, SalesRecord[]>();
+  for (const s of records) {
+    const key = getSalesRecordFingerprint(s, idToProductName);
+    const list = groups.get(key);
+    if (list) list.push(s);
+    else groups.set(key, [s]);
+  }
+  const extraIds: string[] = [];
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const syncedList = group.filter((s) => s.synced);
+    const manualList = group.filter((s) => !s.synced);
+    if (syncedList.length > 0) {
+      extraIds.push(...manualList.map((s) => s.id));
+      continue;
+    }
+    const sorted = [...manualList].sort((a, b) => {
+      const dateDiff = (a.saleDate || "").localeCompare(b.saleDate || "");
+      if (dateDiff !== 0) return dateDiff;
+      return a.id.localeCompare(b.id);
+    });
+    extraIds.push(...sorted.slice(1).map((s) => s.id));
+  }
+  return extraIds;
+}
+
 function markDuplicateImportRows(
   rows: ImportRow[],
   existing: SalesRecord[],
@@ -498,26 +549,17 @@ export default function SalesRecords() {
     activityName: "",
   });
 
+  const idToProductName = useMemo(
+    () => new Map(products.map((p) => [p.id, p.name || ""])),
+    [products],
+  );
+
   /** 系统中「内容完全相同」的销售记录 id（出现次数 > 1） */
   const duplicateRecordIdSet = useMemo(() => {
-    const idToProductName = new Map(products.map((p) => [p.id, p.name || ""]));
     const keyCounts = new Map<string, number>();
     const idToKey = new Map<string, string>();
     for (const s of salesRecords) {
-      const key = buildSalesImportFingerprint({
-        customerName: s.customerName,
-        productName: s.productName || idToProductName.get(s.productId || "") || "",
-        productId: s.productId,
-        orderAmount: s.orderAmount,
-        totalAmount: s.totalAmount,
-        orderType: s.orderType,
-        salesUnitId: s.salesUnitId,
-        salesUnitName: s.salesUnitName,
-        personnelId: s.personnelId,
-        salesPersonName: s.salesPersonName,
-        saleDate: s.saleDate,
-        activityName: s.activityName,
-      });
+      const key = getSalesRecordFingerprint(s, idToProductName);
       idToKey.set(s.id, key);
       keyCounts.set(key, (keyCounts.get(key) || 0) + 1);
     }
@@ -526,7 +568,7 @@ export default function SalesRecords() {
       if ((keyCounts.get(key) || 0) > 1) set.add(id);
     });
     return set;
-  }, [salesRecords, products]);
+  }, [salesRecords, idToProductName]);
 
   const domainOptions = useMemo(() => {
     const set = new Set<string>();
@@ -610,8 +652,20 @@ export default function SalesRecords() {
     () => pagedRecords.filter((s) => !s.synced),
     [pagedRecords],
   );
-  const allSelected = selectableRecords.length > 0 && selectableRecords.every((s) => selectedIds.has(s.id));
-  const someSelected = selectableRecords.some((s) => selectedIds.has(s.id));
+  /** 重复筛选下：每组保留 1 笔后，其余可删 id */
+  const duplicateExtraDeletableIdSet = useMemo(
+    () => new Set(pickDeletableDuplicateIds(filteredRecords, idToProductName)),
+    [filteredRecords, idToProductName],
+  );
+  const pageSelectTargets = useMemo(
+    () => (filterDuplicate === "duplicate"
+      ? selectableRecords.filter((s) => duplicateExtraDeletableIdSet.has(s.id))
+      : selectableRecords),
+    [filterDuplicate, selectableRecords, duplicateExtraDeletableIdSet],
+  );
+  const allSelected = pageSelectTargets.length > 0
+    && pageSelectTargets.every((s) => selectedIds.has(s.id));
+  const someSelected = pageSelectTargets.some((s) => selectedIds.has(s.id));
 
   // 根据筛选单位过滤人员
   const availablePersonnel = useMemo(() => {
@@ -725,7 +779,7 @@ export default function SalesRecords() {
     });
   };
   const toggleSelectAll = (select: boolean) => {
-    setSelectedIds(select ? new Set(selectableRecords.map((s) => s.id)) : new Set());
+    setSelectedIds(select ? new Set(pageSelectTargets.map((s) => s.id)) : new Set());
   };
   const clearSelection = () => setSelectedIds(new Set());
 
@@ -740,11 +794,11 @@ export default function SalesRecords() {
     clearSelection();
   }
 
-  /** 全选当前筛选结果中可删除的记录（跨页，不含生态圈同步） */
+  /** 自动勾选每组重复中的多余记录（每组留 1 笔，跨页；同步单不可删会优先保留） */
   function handleSelectAllFilteredDeletable() {
-    const ids = filteredRecords.filter((s) => !s.synced).map((s) => s.id);
+    const ids = pickDeletableDuplicateIds(filteredRecords, idToProductName);
     if (ids.length === 0) {
-      alert("当前筛选结果中没有可删除的记录（生态圈同步记录不可删）");
+      alert("没有可删除的多余重复（每组需至少保留 1 笔；生态圈同步记录不可删）");
       return;
     }
     setSelectedIds(new Set(ids));
@@ -753,10 +807,18 @@ export default function SalesRecords() {
   // 批量删除（同步记录跳过）
   const handleBatchDelete = async () => {
     try {
+      const extraSet = new Set(pickDeletableDuplicateIds(salesRecords, idToProductName));
       const ids = Array.from(selectedIds).filter((id) => {
         const r = salesRecords.find((s) => s.id === id);
-        return r && !r.synced;
+        if (!r || r.synced) return false;
+        if (duplicateRecordIdSet.has(id) && !extraSet.has(id)) return false;
+        return true;
       });
+      if (ids.length === 0) {
+        alert("已自动跳过每组需保留的 1 笔，没有可删除的记录");
+        setBatchDeleteOpen(false);
+        return;
+      }
       for (const id of ids) {
         await deleteSalesRecord(id);
       }
@@ -1187,7 +1249,7 @@ export default function SalesRecords() {
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-orange-200 bg-orange-50/60 px-4 py-2.5">
           <Badge className="bg-orange-100 text-orange-800">重复记录筛选中</Badge>
           <span className="text-sm text-orange-900">
-            当前 {filteredRecords.length} 笔重复，可勾选后批量删除
+            当前 {filteredRecords.length} 笔重复，每组自动保留 1 笔，其余可勾选删除
           </span>
           <div className="flex-1" />
           {canEditSales && !isReadOnly && (
@@ -1198,8 +1260,9 @@ export default function SalesRecords() {
                 size="sm"
                 className="h-8 border-orange-300"
                 onClick={handleSelectAllFilteredDeletable}
+                title="每组完全相同的记录保留 1 笔，自动勾选其余可删项"
               >
-                全选可删除重复
+                全选多余重复
               </Button>
               {selectedIds.size > 0 && (
                 <>
@@ -1251,7 +1314,9 @@ export default function SalesRecords() {
                       ref={(el) => { if (el) el.indeterminate = someSelected && !allSelected; }}
                       onChange={(e) => toggleSelectAll(e.target.checked)}
                       className="h-4 w-4 cursor-pointer"
-                      aria-label="全选本页"
+                      aria-label={
+                        filterDuplicate === "duplicate" ? "全选本页多余重复" : "全选本页"
+                      }
                     />
                   </TableHead>
                   <TableHead className="w-[9.5rem]">客户姓名</TableHead>
@@ -1873,7 +1938,10 @@ export default function SalesRecords() {
           <AlertDialogHeader>
             <AlertDialogTitle>确认批量删除</AlertDialogTitle>
             <AlertDialogDescription>
-              确定要删除选中的 {selectedIds.size} 条销售记录吗？此操作不可撤销。（生态圈同步记录不可删除）
+              确定要删除选中的 {selectedIds.size} 条销售记录吗？此操作不可撤销。
+              {filterDuplicate === "duplicate"
+                ? "每组完全相同的记录会自动保留 1 笔。"
+                : "生态圈同步记录不可删除。"}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
