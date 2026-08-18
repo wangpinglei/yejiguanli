@@ -3,7 +3,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useData } from "@/context/DataContext";
 import type {
   SalesUnit, Personnel, SalesRecord, CostRecord, IncomeRecord,
-  RevenueSettlement, UnitProductSettlement,
+  RevenueSettlement, CostSettlement, UnitProductSettlement,
 } from "@/types";
 import {
   hasModuleEdit,
@@ -16,7 +16,7 @@ export function usePermissions() {
   const { user } = useAuth();
   const {
     salesUnits, personnel, allSalesRecords: salesRecords, costRecords,
-    incomeRecords, revenueSettlements, unitProductSettlements,
+    incomeRecords, revenueSettlements, costSettlements, unitProductSettlements,
   } = useData();
 
   const role = user?.role;
@@ -62,6 +62,11 @@ export function usePermissions() {
     [revenueSettlements]
   );
 
+  const visibleCostSettlements = useMemo<CostSettlement[]>(
+    () => costSettlements,
+    [costSettlements]
+  );
+
   const visibleUnitProductSettlements = useMemo<UnitProductSettlement[]>(
     () => unitProductSettlements,
     [unitProductSettlements]
@@ -104,6 +109,7 @@ export function usePermissions() {
     visibleCostRecords,
     visibleIncomeRecords,
     visibleRevenueSettlements,
+    visibleCostSettlements,
     visibleUnitProductSettlements,
     canEditUnit,
     canEditPersonnel,

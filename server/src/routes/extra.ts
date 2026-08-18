@@ -1,7 +1,7 @@
 import { Router } from "express";
 import {
   getDb, generateId, runInTransaction,
-  rowToIncomeRecord, rowToRevenueSettlement, rowToUnitProductSettlement,
+  rowToIncomeRecord, rowToRevenueSettlement, rowToCostSettlement, rowToUnitProductSettlement,
   rowToProductPersonCommission, rowToCostChangeLog, rowToNotification,
   rowToMonthlyAdjustment, rowToPerformanceTarget, rowToPositionGroupLabel,
   rowToTeamMgmtCommissionRule,
@@ -124,6 +124,68 @@ router.post("/revenue-settlements/upsert", requireEditPermission, (req, res) => 
 router.delete("/revenue-settlements/:id", requireEditPermission, (req, res) => {
   const db = getDb();
   const result = db.prepare("DELETE FROM revenue_settlements WHERE id=?").run(req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: "记录不存在" });
+  res.json({ message: "删除成功" });
+});
+
+// ---------- cost settlements（手工成本预估 vs 实际确认）----------
+router.get("/cost-settlements", (req, res) => {
+  const db = getDb();
+  let rows = db.prepare("SELECT * FROM cost_settlements ORDER BY year_month DESC").all();
+  rows = filterByUnit(rows, req.user);
+  res.json(rows.map(rowToCostSettlement));
+});
+
+router.post("/cost-settlements/upsert", requireEditPermission, (req, res) => {
+  const {
+    salesUnitId, yearMonth, estimatedAmount, actualAmount,
+    isAdjusted, remark, adjustedBy, adjustedAt,
+  } = req.body;
+  if (!salesUnitId || !yearMonth) {
+    return res.status(400).json({ error: "单位和月份不能为空" });
+  }
+  const db = getDb();
+  const existing = db.prepare(
+    "SELECT * FROM cost_settlements WHERE sales_unit_id=? AND year_month=?",
+  ).get(salesUnitId, yearMonth) as { id: string } | undefined;
+  if (existing) {
+    db.prepare(`
+      UPDATE cost_settlements SET estimated_amount=?, actual_amount=?, is_adjusted=?,
+        remark=?, adjusted_by=?, adjusted_at=?
+      WHERE id=?
+    `).run(
+      estimatedAmount ?? 0,
+      actualAmount !== undefined ? actualAmount : null,
+      isAdjusted ? 1 : 0,
+      remark || "",
+      adjustedBy || null,
+      adjustedAt || null,
+      existing.id,
+    );
+    return res.json(
+      rowToCostSettlement(
+        db.prepare("SELECT * FROM cost_settlements WHERE id=?").get(existing.id),
+      ),
+    );
+  }
+  const id = generateId("cs");
+  db.prepare(`
+    INSERT INTO cost_settlements (
+      id, sales_unit_id, year_month, estimated_amount, actual_amount,
+      is_adjusted, remark, adjusted_by, adjusted_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id, salesUnitId, yearMonth, estimatedAmount || 0, actualAmount ?? null,
+    isAdjusted ? 1 : 0, remark || "", adjustedBy || null, adjustedAt || null,
+  );
+  res.json(
+    rowToCostSettlement(db.prepare("SELECT * FROM cost_settlements WHERE id=?").get(id)),
+  );
+});
+
+router.delete("/cost-settlements/:id", requireEditPermission, (req, res) => {
+  const db = getDb();
+  const result = db.prepare("DELETE FROM cost_settlements WHERE id=?").run(req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: "记录不存在" });
   res.json({ message: "删除成功" });
 });

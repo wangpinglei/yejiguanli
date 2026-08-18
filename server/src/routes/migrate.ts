@@ -219,6 +219,20 @@ router.post("/", (req, res) => {
       })
     );
 
+    upsertSimple("costSettlements", "cost_settlements", body.costSettlements || [],
+      (r) => ({
+        sql: `INSERT INTO cost_settlements (id, sales_unit_id, year_month, estimated_amount, actual_amount, is_adjusted, remark, adjusted_by, adjusted_at, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [r.id, r.salesUnitId, r.yearMonth, r.estimatedAmount || 0, r.actualAmount ?? null, r.isAdjusted ? 1 : 0,
+          r.remark || "", r.adjustedBy || null, r.adjustedAt || null, r.createdAt || new Date().toISOString()],
+      }),
+      (r) => ({
+        sql: `UPDATE cost_settlements SET sales_unit_id=?, year_month=?, estimated_amount=?, actual_amount=?, is_adjusted=?, remark=?, adjusted_by=?, adjusted_at=? WHERE id=?`,
+        args: [r.salesUnitId, r.yearMonth, r.estimatedAmount || 0, r.actualAmount ?? null, r.isAdjusted ? 1 : 0,
+          r.remark || "", r.adjustedBy || null, r.adjustedAt || null, r.id],
+      })
+    );
+
     upsertSimple("unitProductSettlements", "unit_product_settlements", body.unitProductSettlements || [],
       (r) => ({
         sql: `INSERT INTO unit_product_settlements (

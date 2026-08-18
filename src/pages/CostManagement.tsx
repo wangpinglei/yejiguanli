@@ -8,6 +8,7 @@ import { matchesRecurringYearMonth, RECURRING_ALL_MONTHS } from "@/utils/recurri
 import { getTotalSalaryCost, calcLeaveDeduction, MONTHLY_WORK_DAYS, isPersonnelOnDutyInMonth, filterByMonth } from "@/lib/salary";
 import { calcSalePersonCommissionPreview } from "@/lib/commissionReward";
 import { calcSaleSettlementIncome } from "@/lib/settlement";
+import { getEffectiveConfirmAmount, getEffectiveManualCost } from "@/lib/confirmAmount";
 import type { CostRecord, CostItem, IncomeRecord, IncomeItem } from "@/types";
 import {
   Plus, Search, Pencil, Trash2, Wallet, X, ChevronDown, ChevronRight, Clock,
@@ -54,7 +55,7 @@ function dateToMonthInput(date: string): string {
 export default function CostManagement() {
   const { addCostRecord, updateCostRecord, deleteCostRecord, costChangeLogs, products, monthlyAdjustments, upsertMonthlyAdjustment, addIncomeRecord, updateIncomeRecord, deleteIncomeRecord, productPersonCommissions, teamMgmtCommissionRules, performanceTargets, unitProductSettlements } = useData();
   const { user } = useAuth();
-  const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleCostRecords: costRecords, visibleIncomeRecords: incomeRecords, visibleSalesRecords: salesRecords, canEditCost, isReadOnly, role } = usePermissions();
+  const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleCostRecords: costRecords, visibleIncomeRecords: incomeRecords, visibleSalesRecords: salesRecords, visibleRevenueSettlements: revenueSettlements, visibleCostSettlements: costSettlements, canEditCost, isReadOnly, role } = usePermissions();
   const [search, setSearch] = useState("");
   const [filterUnit, setFilterUnit] = useState("all");
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // "2026-08"
@@ -165,16 +166,33 @@ export default function CostManagement() {
   // 销售提成合计 = 个人（按销售明细）+ 团队管理提成
   const productCommissionTotal = personalCommissionFromSales + teamMgmtCommissionTotal;
 
-  // 结算收入：与收支利润页同一口径（当月销售 × 产品结算配置）
+  // 结算收入：与收支利润页同一口径（确认后以实际为准）
   const settlementIncomeTotal = useMemo(() => {
-    const monthly = filterByMonth(salesRecords, selectedMonth).filter(
-      (s) => filterUnit === "all" || s.salesUnitId === filterUnit,
-    );
-    return monthly.reduce(
-      (sum, s) => sum + calcSaleSettlementIncome(s, unitProductSettlements),
-      0,
-    );
-  }, [salesRecords, selectedMonth, filterUnit, unitProductSettlements]);
+    const unitIds = filterUnit === "all"
+      ? salesUnits.map((u) => u.id)
+      : [filterUnit];
+    return unitIds.reduce((sum, uid) => {
+      const estimated = filterByMonth(salesRecords, selectedMonth)
+        .filter((s) => s.salesUnitId === uid)
+        .reduce(
+          (acc, s) => acc + calcSaleSettlementIncome(s, unitProductSettlements),
+          0,
+        );
+      return sum + getEffectiveConfirmAmount(
+        revenueSettlements,
+        uid,
+        selectedMonth,
+        estimated,
+      );
+    }, 0);
+  }, [
+    salesRecords,
+    selectedMonth,
+    filterUnit,
+    salesUnits,
+    unitProductSettlements,
+    revenueSettlements,
+  ]);
 
   const onDutyCount = useMemo(
     () => salaryCosts.units.reduce((sum, u) => sum + u.activeCount, 0),
@@ -212,7 +230,15 @@ export default function CostManagement() {
   const leaveDeductionTotal = salaryCosts.grandLeaveDeduction;
   const otherAdjustmentTotal = salaryCosts.grandOtherAdjustment;
 
-  const grandTotal = manualCostTotal + salaryCosts.grandTotal;
+  const costUnitIds = filterUnit === "all"
+    ? salesUnits.map((u) => u.id)
+    : [filterUnit];
+  const effectiveManualCostTotal = costUnitIds.reduce(
+    (sum, uid) =>
+      sum + getEffectiveManualCost(costSettlements, costRecords, uid, selectedMonth),
+    0,
+  );
+  const grandTotal = effectiveManualCostTotal + salaryCosts.grandTotal;
 
   // 选中单位和月份下的在岗人员（用于月度调整面板；按入离职日判定）
   const adjustmentPersonnel = useMemo(() => {
@@ -589,7 +615,7 @@ export default function CostManagement() {
             <div className="min-w-0">
               <p className="text-sm text-muted-foreground">结算收入</p>
               <p className="text-xl font-bold text-cyan-600">{formatCurrency(settlementIncomeTotal)}</p>
-              <p className="text-[10px] text-muted-foreground">销售结算口径 · 与盈亏分析一致</p>
+              <p className="text-[10px] text-muted-foreground">销售结算口径 · 已确认优先</p>
             </div>
           </CardContent>
         </Card>
@@ -630,9 +656,10 @@ export default function CostManagement() {
             </div>
             <div className="min-w-0">
               <p className="text-sm text-muted-foreground">支出</p>
-              <p className="text-xl font-bold text-orange-600">{formatCurrency(manualCostTotal)}</p>
+              <p className="text-xl font-bold text-orange-600">{formatCurrency(effectiveManualCostTotal)}</p>
               <p className="text-[10px] text-muted-foreground">
-                来源：录入成本 · 合计成本 {formatCurrency(grandTotal)}
+                录入预估 {formatCurrency(manualCostTotal)}
+                · 合计成本 {formatCurrency(grandTotal)}
               </p>
             </div>
           </CardContent>

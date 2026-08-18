@@ -8,10 +8,15 @@ import { formatCurrency, formatDate, getYearMonth } from "@/lib/format";
 import { getTotalSalaryCost, filterByMonth } from "@/lib/salary";
 import { calcSaleSettlementIncome } from "@/lib/settlement";
 import {
+  getEffectiveConfirmAmount,
+  getEstimatedManualCost,
+  getEffectiveManualCost,
+} from "@/lib/confirmAmount";
+import {
   listRecurringYearMonths,
   matchesRecurringYearMonth,
 } from "@/utils/recurringRecord";
-import type { RevenueSettlement } from "@/types";
+import type { CostSettlement, RevenueSettlement } from "@/types";
 import {
   TrendingUp, DollarSign, Award, AlertTriangle,
   ChevronDown, ChevronRight, Pencil, Receipt, CheckCircle2, Clock,
@@ -50,9 +55,9 @@ import MPerformanceEstimateSheet from "./ProfitAnalysis/components/m-performance
 const COLORS = ["#3b82f6", "#f97316", "#10b981", "#8b5cf6", "#ef4444", "#06b6d4", "#eab308"];
 
 export default function ProfitAnalysis() {
-  const { products, monthlyAdjustments, upsertRevenueSettlement, productPersonCommissions, teamMgmtCommissionRules, performanceTargets } = useData();
+  const { products, monthlyAdjustments, upsertRevenueSettlement, upsertCostSettlement, productPersonCommissions, teamMgmtCommissionRules, performanceTargets } = useData();
   const { user } = useAuth();
-  const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleSalesRecords: salesRecords, visibleCostRecords: costRecords, visibleIncomeRecords: incomeRecords, visibleRevenueSettlements: revenueSettlements, visibleUnitProductSettlements, canEditCost, isReadOnly } = usePermissions();
+  const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleSalesRecords: salesRecords, visibleCostRecords: costRecords, visibleIncomeRecords: incomeRecords, visibleRevenueSettlements: revenueSettlements, visibleCostSettlements: costSettlements, visibleUnitProductSettlements, canEditCost, isReadOnly } = usePermissions();
   const teamMgmtContext = useMemo(() => ({
     rules: teamMgmtCommissionRules,
     targets: performanceTargets,
@@ -68,6 +73,12 @@ export default function ProfitAnalysis() {
   // 结算调整弹窗
   const [settlementDialog, setSettlementDialog] = useState<{ unitId: string; unitName: string; estimated: number } | null>(null);
   const [settlementForm, setSettlementForm] = useState({ actualAmount: 0, remark: "" });
+  const [costConfirmDialog, setCostConfirmDialog] = useState<{
+    unitId: string
+    unitName: string
+    estimated: number
+  } | null>(null);
+  const [costConfirmForm, setCostConfirmForm] = useState({ actualAmount: 0, remark: "" });
   const [estimateOpen, setEstimateOpen] = useState(false);
 
   const isAllFilterUnits = filterUnitIds.length === 0;
@@ -122,13 +133,23 @@ export default function ProfitAnalysis() {
     return monthlyCosts.filter((c) => matchFilterUnit(c.salesUnitId));
   }, [monthlyCosts, filterUnitIds, isAllFilterUnits]);
 
-  // 结算收入（按单位×产品结算规则：生效区间 + 特殊奖励）
-  const calcSettlementIncome = (sales: typeof filteredSales) => {
-    return sales.reduce(
-      (sum, s) => sum + calcSaleSettlementIncome(s, visibleUnitProductSettlements),
-      0,
+  function getEstimatedSettlement(unitId: string, yearMonth: string): number {
+    return filterByMonth(salesRecords, yearMonth)
+      .filter((s) => s.salesUnitId === unitId)
+      .reduce(
+        (sum, s) => sum + calcSaleSettlementIncome(s, visibleUnitProductSettlements),
+        0,
+      );
+  }
+
+  function getEffectiveSettlement(unitId: string, yearMonth: string): number {
+    return getEffectiveConfirmAmount(
+      revenueSettlements,
+      unitId,
+      yearMonth,
+      getEstimatedSettlement(unitId, yearMonth),
     );
-  };
+  }
 
   // 销售提成 = 单位×人员的管理提成 + 个人提成（来自成本管理配置，计入成本）
   function getSalesCommission(unitIds: string[], yearMonth: string): number {
@@ -164,22 +185,30 @@ unitIds,
   // 汇总（按月度）
   const summary = useMemo(() => {
     const totalSalesAmount = filteredSales.reduce((sum, s) => sum + s.totalAmount, 0); // 实收总额
-    const totalSettlementIncome = calcSettlementIncome(filteredSales); // 结算收入
     const unitIds = resolvedFilterUnitIds;
     const salaryData = getTotalSalaryCost(
-unitIds,
+      unitIds,
       personnel,
       salesRecords,
       products,
       selectedMonth,
-      monthlyAdjustments,productPersonCommissions,
+      monthlyAdjustments,
+      productPersonCommissions,
       teamMgmtContext,
+    );
+    const totalSettlementIncome = unitIds.reduce(
+      (sum, uid) => sum + getEffectiveSettlement(uid, selectedMonth),
+      0,
     );
     const totalCommission = salaryData.grandSalesCommission; // 销售提成（按人）
     const totalOtherIncome = monthlyIncomeRecords.reduce((sum, r) => sum + r.totalAmount, 0)
     const totalRevenue = totalSettlementIncome + totalOtherIncome
     const productProfit = totalSettlementIncome - totalCommission; // 产品利润 = 结算收入 - 提成
-    const manualCost = filteredCosts.reduce((sum, c) => sum + c.totalCost, 0);
+    const manualCost = unitIds.reduce(
+      (sum, uid) =>
+        sum + getEffectiveManualCost(costSettlements, costRecords, uid, selectedMonth),
+      0,
+    );
     const salaryCost = salaryData.grandTotal;
     const totalCost = manualCost + salaryCost;
     // 净利润 =（结算收入 + 其他收入）- 总成本（总成本已含人员提成）
@@ -211,6 +240,9 @@ unitIds,
     productPersonCommissions,
     teamMgmtContext,
     monthlyIncomeRecords,
+    revenueSettlements,
+    costSettlements,
+    costRecords,
   ]);
 
   // 月度趋势
@@ -255,17 +287,27 @@ unitIds,
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([month, data]) => {
         const monthSalaryData = getTotalSalaryCost(
-unitIds,
+          unitIds,
           personnel,
           salesRecords,
           products,
           month,
-          monthlyAdjustments,productPersonCommissions,
-      teamMgmtContext,
-    );
+          monthlyAdjustments,
+          productPersonCommissions,
+          teamMgmtContext,
+        );
         const monthSalary = monthSalaryData.grandTotal;
-        const revenue = data.settlementIncome + data.otherIncome
-        const cost = data.cost + monthSalary
+        const settlementIncome = unitIds.reduce(
+          (sum, uid) => sum + getEffectiveSettlement(uid, month),
+          0,
+        );
+        const manualCost = unitIds.reduce(
+          (sum, uid) =>
+            sum + getEffectiveManualCost(costSettlements, costRecords, uid, month),
+          0,
+        );
+        const revenue = settlementIncome + data.otherIncome
+        const cost = manualCost + monthSalary
         const profit = revenue - cost
         return {
           month: month.split("-")[1] + "月",
@@ -275,7 +317,7 @@ unitIds,
           margin: revenue > 0 ? (profit / revenue) * 100 : 0,
         };
       });
-  }, [filterUnitIds, isAllFilterUnits, resolvedFilterUnitIds, salesUnits, personnel, salesRecords, products, costRecords, incomeRecords, monthlyAdjustments, visibleUnitProductSettlements, productPersonCommissions, teamMgmtContext, selectedMonth]);
+  }, [filterUnitIds, isAllFilterUnits, resolvedFilterUnitIds, salesUnits, personnel, salesRecords, products, costRecords, incomeRecords, monthlyAdjustments, visibleUnitProductSettlements, productPersonCommissions, teamMgmtContext, selectedMonth, revenueSettlements, costSettlements]);
 
   // 各单位对比（按月度；跟随顶部单位筛选）
   const unitComparison = useMemo(() => {
@@ -286,7 +328,7 @@ unitIds,
     return unitsToShow.map((unit) => {
       const unitSales = monthlySales.filter((s) => s.salesUnitId === unit.id);
       const salesAmount = unitSales.reduce((sum, s) => sum + s.totalAmount, 0);
-      const settlementIncome = calcSettlementIncome(unitSales);
+      const settlementIncome = getEffectiveSettlement(unit.id, selectedMonth);
       const unitSalary = getTotalSalaryCost(
         [unit.id],
         personnel,
@@ -302,9 +344,12 @@ unitIds,
       const otherIncome = monthlyIncomeRecords
         .filter((r) => r.salesUnitId === unit.id)
         .reduce((sum, r) => sum + r.totalAmount, 0)
-      const manualCost = monthlyCosts
-        .filter((c) => c.salesUnitId === unit.id)
-        .reduce((sum, c) => sum + c.totalCost, 0);
+      const manualCost = getEffectiveManualCost(
+        costSettlements,
+        costRecords,
+        unit.id,
+        selectedMonth,
+      );
       const salaryCost = unitSalary.grandTotal;
       const cost = manualCost + salaryCost;
       const revenue = settlementIncome + otherIncome
@@ -326,7 +371,7 @@ unitIds,
   }, [
     salesUnits, filterUnitIds, isAllFilterUnits, monthlySales, monthlyCosts, monthlyIncomeRecords, personnel, salesRecords,
     products, selectedMonth, monthlyAdjustments, visibleUnitProductSettlements,
-    productPersonCommissions, teamMgmtContext,
+    productPersonCommissions, teamMgmtContext, revenueSettlements, costSettlements, costRecords,
   ]);
 
   // 成本结构（按月度）
@@ -461,6 +506,77 @@ unitIds,
     setSettlementDialog(null);
   };
 
+  const costDetail = useMemo(() => {
+    const unitsToShow = isAllFilterUnits
+      ? salesUnits
+      : salesUnits.filter((u) => filterUnitIds.includes(u.id));
+    return unitsToShow.map((unit) => {
+      const estimatedAmount = getEstimatedManualCost(costRecords, unit.id, selectedMonth);
+      const settlement = costSettlements.find(
+        (r) => r.salesUnitId === unit.id && r.yearMonth === selectedMonth,
+      );
+      const isAdjusted = settlement?.isAdjusted || false;
+      const actualAmount = getEffectiveManualCost(
+        costSettlements,
+        costRecords,
+        unit.id,
+        selectedMonth,
+      );
+      const diff = actualAmount - estimatedAmount;
+      return {
+        unit,
+        estimatedAmount,
+        actualAmount,
+        isAdjusted,
+        settlement,
+        diff,
+      };
+    });
+  }, [
+    salesUnits,
+    filterUnitIds,
+    isAllFilterUnits,
+    selectedMonth,
+    costSettlements,
+    costRecords,
+  ]);
+
+  const costTotals = useMemo(() => {
+    const totalEstimated = costDetail.reduce((sum, d) => sum + d.estimatedAmount, 0);
+    const totalActual = costDetail.reduce((sum, d) => sum + d.actualAmount, 0);
+    const adjustedCount = costDetail.filter((d) => d.isAdjusted).length;
+    return { totalEstimated, totalActual, adjustedCount };
+  }, [costDetail]);
+
+  function openCostConfirm(
+    unitId: string,
+    unitName: string,
+    estimated: number,
+    existing?: CostSettlement,
+  ) {
+    setCostConfirmDialog({ unitId, unitName, estimated });
+    setCostConfirmForm({
+      actualAmount: existing?.actualAmount ?? estimated,
+      remark: existing?.remark || "",
+    });
+  }
+
+  async function handleCostConfirmSubmit() {
+    if (!costConfirmDialog) return;
+    const isAdjusted = true;
+    await upsertCostSettlement({
+      salesUnitId: costConfirmDialog.unitId,
+      yearMonth: selectedMonth,
+      estimatedAmount: costConfirmDialog.estimated,
+      actualAmount: costConfirmForm.actualAmount,
+      isAdjusted,
+      remark: costConfirmForm.remark || (isAdjusted ? "确认实际成本金额" : ""),
+      adjustedBy: user?.name,
+      adjustedAt: new Date().toISOString(),
+    });
+    setCostConfirmDialog(null);
+  }
+
   const summaryCards = [
     {
       title: "结算收入",
@@ -468,7 +584,7 @@ unitIds,
       icon: DollarSign,
       color: "text-cyan-600",
       bg: "bg-cyan-50",
-      hint: `实收 ${formatCurrency(summary.totalSalesAmount)}`,
+      hint: `实收 ${formatCurrency(summary.totalSalesAmount)} · 已确认优先`,
     },
     {
       title: "其他收入",
@@ -484,7 +600,7 @@ unitIds,
       icon: Award,
       color: "text-orange-600",
       bg: "bg-orange-50",
-      hint: `含提成 ${formatCurrency(summary.totalCommission)}`,
+      hint: `含提成 ${formatCurrency(summary.totalCommission)} · 手工成本已确认优先`,
     },
     {
       title: "净利润",
@@ -531,10 +647,6 @@ unitIds,
         const monthSales = filterByMonth(salesRecords, month).filter((s) =>
           matchUnit(s.salesUnitId),
         );
-        const monthCosts = costRecords.filter(
-          (c) =>
-            matchesRecurringYearMonth(c, month) && matchUnit(c.salesUnitId),
-        );
         const targetM = parseInt(month.slice(5, 7), 10);
         const monthIncomes = incomeRecords.filter((r) => {
           if (!matchUnit(r.salesUnitId)) return false;
@@ -553,13 +665,16 @@ unitIds,
         });
 
         salesAmount += monthSales.reduce((sum, s) => sum + s.totalAmount, 0);
-        settlementIncome += monthSales.reduce(
-          (sum, s) =>
-            sum + calcSaleSettlementIncome(s, visibleUnitProductSettlements),
+        settlementIncome += resolvedUnitIds.reduce(
+          (sum, uid) => sum + getEffectiveSettlement(uid, month),
           0,
         );
         otherIncome += monthIncomes.reduce((sum, r) => sum + r.totalAmount, 0);
-        manualCost += monthCosts.reduce((sum, c) => sum + c.totalCost, 0);
+        manualCost += resolvedUnitIds.reduce(
+          (sum, uid) =>
+            sum + getEffectiveManualCost(costSettlements, costRecords, uid, month),
+          0,
+        );
 
         const salaryData = getTotalSalaryCost(
           resolvedUnitIds,
@@ -597,6 +712,8 @@ unitIds,
       teamMgmtContext,
       visibleUnitProductSettlements,
       monthOptions,
+      revenueSettlements,
+      costSettlements,
     ],
   );
 
@@ -681,6 +798,7 @@ unitIds,
           { id: 'section-profit-trend', label: '月度趋势' },
           { id: 'section-profit-units', label: '单位对比' },
           { id: 'section-profit-income', label: '收入构成' },
+          { id: 'section-profit-cost', label: '成本确认' },
         ].map((item) => (
           <Button
             key={item.id}
@@ -765,7 +883,7 @@ unitIds,
         <Card>
           <CardHeader>
             <CardTitle className="text-base">成本结构分析</CardTitle>
-            <CardDescription>各类成本占比分布</CardDescription>
+            <CardDescription>按录入明细拆分（确认差额不拆类，总额以确认后为准）</CardDescription>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={280}>
@@ -1111,6 +1229,118 @@ unitIds,
         </CardContent>
       </Card>
 
+      <Card id="section-profit-cost" className="mb-6 scroll-mt-20">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Calculator className="h-5 w-5 text-orange-600" />
+            成本明细与确认
+          </CardTitle>
+          <CardDescription>
+            手工录入为预估成本；确认实际发生金额后，盈亏、趋势、测算均以确认为准（人力成本仍按薪酬自动计算）
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>销售单位</TableHead>
+                  <TableHead className="text-right">预估成本（录入）</TableHead>
+                  <TableHead className="text-right">实际成本</TableHead>
+                  <TableHead className="text-right">差额</TableHead>
+                  <TableHead>状态</TableHead>
+                  <TableHead className="text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {costDetail.map((d) => (
+                  <TableRow key={d.unit.id}>
+                    <TableCell className="font-medium">{d.unit.name}</TableCell>
+                    <TableCell className="text-right text-orange-600">
+                      {formatCurrency(d.estimatedAmount)}
+                    </TableCell>
+                    <TableCell
+                      className={`text-right font-bold ${
+                        d.isAdjusted ? 'text-amber-600' : 'text-orange-600'
+                      }`}
+                    >
+                      {formatCurrency(d.actualAmount)}
+                    </TableCell>
+                    <TableCell
+                      className={`text-right ${
+                        d.diff > 0
+                          ? 'text-red-600'
+                          : d.diff < 0
+                            ? 'text-emerald-600'
+                            : 'text-muted-foreground'
+                      }`}
+                    >
+                      {d.diff > 0 ? '+' : ''}{formatCurrency(d.diff)}
+                    </TableCell>
+                    <TableCell>
+                      {d.isAdjusted ? (
+                        <Badge className="bg-amber-100 text-amber-700 text-xs">
+                          <CheckCircle2 className="mr-1 h-3 w-3" />已确认
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-xs">待确认</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {canEditCost && !isReadOnly ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() =>
+                            openCostConfirm(
+                              d.unit.id,
+                              d.unit.name,
+                              d.estimatedAmount,
+                              d.settlement,
+                            )
+                          }
+                        >
+                          <Pencil className="mr-1 h-3.5 w-3.5" />
+                          {d.isAdjusted ? '重新确认' : '确认成本'}
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">仅查看</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+                <TableRow className="border-t-2 bg-muted/30 font-bold">
+                  <TableCell>合计</TableCell>
+                  <TableCell className="text-right text-orange-600">
+                    {formatCurrency(costTotals.totalEstimated)}
+                  </TableCell>
+                  <TableCell className="text-right text-amber-600">
+                    {formatCurrency(costTotals.totalActual)}
+                  </TableCell>
+                  <TableCell className="text-right text-muted-foreground">
+                    {costTotals.totalActual - costTotals.totalEstimated > 0 ? '+' : ''}
+                    {formatCurrency(costTotals.totalActual - costTotals.totalEstimated)}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="text-xs">
+                      {costTotals.adjustedCount} 个已确认
+                    </Badge>
+                  </TableCell>
+                  <TableCell></TableCell>
+                </TableRow>
+                {costDetail.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="py-12 text-center text-muted-foreground">
+                      暂无数据
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Personnel Ranking */}
       <Card>
         <CardHeader>
@@ -1212,6 +1442,78 @@ unitIds,
             <Button variant="outline" onClick={() => setSettlementDialog(null)}>取消</Button>
             <Button onClick={handleSettlementSubmit}>
               <Clock className="mr-1 h-4 w-4" />保存结算
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!costConfirmDialog}
+        onOpenChange={(open) => { if (!open) setCostConfirmDialog(null) }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Calculator className="h-5 w-5 text-orange-600" />
+              确认实际成本金额
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="flex items-center justify-between rounded-lg bg-muted/50 px-4 py-3">
+              <div>
+                <p className="text-sm text-muted-foreground">{costConfirmDialog?.unitName}</p>
+                <p className="text-xs text-muted-foreground">{selectedMonth}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-muted-foreground">预估成本（手工录入合计）</p>
+                <p className="text-lg font-bold text-orange-600">
+                  {costConfirmDialog && formatCurrency(costConfirmDialog.estimated)}
+                </p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>实际发生成本（¥）</Label>
+              <Input
+                type="number"
+                value={costConfirmForm.actualAmount}
+                onChange={(e) =>
+                  setCostConfirmForm({
+                    ...costConfirmForm,
+                    actualAmount: Number(e.target.value),
+                  })
+                }
+                placeholder="输入最终实际成本"
+              />
+              <p className="text-xs text-muted-foreground">
+                保存后即锁定实际成本，盈亏口径以该金额为准；可随时重新确认
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label>确认说明</Label>
+              <Textarea
+                value={costConfirmForm.remark}
+                onChange={(e) =>
+                  setCostConfirmForm({ ...costConfirmForm, remark: e.target.value })
+                }
+                placeholder="如：发票差额、补记、冲回等"
+                rows={2}
+              />
+            </div>
+            {costConfirmDialog
+              && costConfirmForm.actualAmount !== costConfirmDialog.estimated && (
+              <div className="flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                <AlertTriangle className="h-4 w-4" />
+                差额: {costConfirmForm.actualAmount > costConfirmDialog.estimated ? '+' : ''}
+                {formatCurrency(
+                  costConfirmForm.actualAmount - costConfirmDialog.estimated,
+                )}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCostConfirmDialog(null)}>取消</Button>
+            <Button onClick={handleCostConfirmSubmit}>
+              <Clock className="mr-1 h-4 w-4" />保存确认
             </Button>
           </DialogFooter>
         </DialogContent>

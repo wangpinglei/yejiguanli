@@ -3,6 +3,7 @@ import { useData } from "@/context/DataContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { formatCurrency, formatPercent, getYearMonth } from "@/lib/format";
 import { getTotalSalaryCost, filterByMonth } from "@/lib/salary";
+import { getEffectiveManualCost } from "@/lib/confirmAmount";
 import {
   listRecurringYearMonths,
   matchesRecurringYearMonth,
@@ -71,6 +72,7 @@ export default function Dashboard() {
     visiblePersonnel: personnel,
     visibleSalesRecords: salesRecords,
     visibleCostRecords: costRecords,
+    visibleCostSettlements: costSettlements,
   } = usePermissions();
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
   // null = 全部单位；[] = 全不选；非空 = 仅这些单位
@@ -150,7 +152,11 @@ export default function Dashboard() {
   // 计算统计（按月度）
   const stats = useMemo(() => {
     const totalRevenue = monthlySales.reduce((sum, s) => sum + s.totalAmount, 0);
-    const manualCost = monthlyCosts.reduce((sum, c) => sum + c.totalCost, 0);
+    const manualCost = filterUnitIds.reduce(
+      (sum, uid) =>
+        sum + getEffectiveManualCost(costSettlements, monthlyCosts, uid, selectedMonth),
+      0,
+    );
     const salaryData = getTotalSalaryCost(
 filterUnitIds,
       filteredPersonnel,
@@ -187,7 +193,8 @@ filterUnitIds,
   }, [
     monthlySales, monthlyCosts, filterUnitIds, filteredUnits, filteredPersonnel,
     filteredSalesRecords, products, selectedMonth, monthlyAdjustments, productPersonCommissions,
-  , teamMgmtContext]);
+    teamMgmtContext, costSettlements,
+  ]);
 
   // 月度趋势
   const monthlyTrend = useMemo(() => {
@@ -204,7 +211,6 @@ filterUnitIds,
       const yearMonths = listRecurringYearMonths(c, selectedMonth);
       yearMonths.forEach((ym) => {
         const existing = monthMap.get(ym) || { revenue: 0, cost: 0 };
-        existing.cost += c.totalCost;
         monthMap.set(ym, existing);
       });
     });
@@ -221,17 +227,28 @@ filterUnitIds,
           monthlyAdjustments,productPersonCommissions,
       teamMgmtContext,
     ).grandTotal;
+        const manualCost = filterUnitIds.reduce(
+          (sum, uid) =>
+            sum + getEffectiveManualCost(
+              costSettlements,
+              filteredCostRecords,
+              uid,
+              month,
+            ),
+          0,
+        );
         return {
           month: month.split("-")[1] + "月",
           revenue: data.revenue,
-          cost: data.cost + monthSalary,
-          profit: data.revenue - data.cost - monthSalary,
+          cost: manualCost + monthSalary,
+          profit: data.revenue - manualCost - monthSalary,
         };
       });
   }, [
     filteredSalesRecords, filteredCostRecords, filterUnitIds,
     filteredPersonnel, products, monthlyAdjustments, productPersonCommissions,
-  , teamMgmtContext]);
+    teamMgmtContext, costSettlements, selectedMonth,
+  ]);
 
   // 各单位销售（按月度）
   const unitSales = useMemo(() => {
@@ -239,9 +256,12 @@ filterUnitIds,
       const revenue = monthlySales
         .filter((s) => s.salesUnitId === unit.id)
         .reduce((sum, s) => sum + s.totalAmount, 0);
-      const manualCost = monthlyCosts
-        .filter((c) => c.salesUnitId === unit.id)
-        .reduce((sum, c) => sum + c.totalCost, 0);
+      const manualCost = getEffectiveManualCost(
+        costSettlements,
+        monthlyCosts,
+        unit.id,
+        selectedMonth,
+      );
       const salaryCost = getTotalSalaryCost(
 [unit.id],
         filteredPersonnel,
@@ -262,7 +282,8 @@ filterUnitIds,
   }, [
     filteredUnits, monthlySales, monthlyCosts, filteredPersonnel,
     filteredSalesRecords, products, selectedMonth, monthlyAdjustments, productPersonCommissions,
-  , teamMgmtContext]);
+    teamMgmtContext, costSettlements,
+  ]);
 
   // 成本分类（按月度）
   const costByCategory = useMemo(() => {

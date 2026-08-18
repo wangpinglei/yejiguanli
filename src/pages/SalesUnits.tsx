@@ -7,7 +7,10 @@ import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, getYearMonth } from "@/lib/format";
 import { filterByMonth, getTotalSalaryCost } from "@/lib/salary";
 import { calcSaleSettlementIncome } from "@/lib/settlement";
-import { matchesRecurringYearMonth } from "@/utils/recurringRecord";
+import {
+  getEffectiveConfirmAmount,
+  getEffectiveManualCost,
+} from "@/lib/confirmAmount";
 import type { SalesUnit } from "@/types";
 import {
   Plus,
@@ -106,6 +109,8 @@ export default function SalesUnits() {
     visibleCostRecords: costRecords,
     visibleIncomeRecords: incomeRecords,
     visibleUnitProductSettlements,
+    visibleRevenueSettlements: revenueSettlements,
+    visibleCostSettlements: costSettlements,
   } = usePermissions();
   const [search, setSearch] = useState("");
   /** none | desc | asc — 利润排序 */
@@ -196,9 +201,15 @@ export default function SalesUnits() {
     for (const u of salesUnits) {
       const unitPersonnel = personnel.filter((p) => p.salesUnitId === u.id)
       const unitSales = monthSales.filter((s) => s.salesUnitId === u.id)
-      const settlementIncome = unitSales.reduce(
+      const estimatedSettlement = unitSales.reduce(
         (sum, s) => sum + calcSaleSettlementIncome(s, visibleUnitProductSettlements),
         0,
+      )
+      const settlementIncome = getEffectiveConfirmAmount(
+        revenueSettlements,
+        u.id,
+        selectedMonth,
+        estimatedSettlement,
       )
       const otherIncome = incomeRecords
         .filter((r) => {
@@ -217,9 +228,12 @@ export default function SalesUnits() {
           return getYearMonth(r.date) === selectedMonth
         })
         .reduce((sum, r) => sum + (r.totalAmount || 0), 0)
-      const manualCost = costRecords
-        .filter((c) => c.salesUnitId === u.id && matchesRecurringYearMonth(c, selectedMonth))
-        .reduce((sum, c) => sum + c.totalCost, 0)
+      const manualCost = getEffectiveManualCost(
+        costSettlements,
+        costRecords,
+        u.id,
+        selectedMonth,
+      )
       const salaryCost = getTotalSalaryCost(
         [u.id],
         personnel,
@@ -252,6 +266,8 @@ export default function SalesUnits() {
     productPersonCommissions,
     visibleUnitProductSettlements,
     teamMgmtContext,
+    revenueSettlements,
+    costSettlements,
   ])
 
   function getUnitStats(unitId: string) {
@@ -476,7 +492,7 @@ export default function SalesUnits() {
                         className={`text-right font-semibold ${
                           stats.profit >= 0 ? 'text-emerald-600' : 'text-red-600'
                         }`}
-                        title={`结算 ${formatCurrency(stats.settlementIncome)} + 其他 ${formatCurrency(stats.otherIncome)} - 录入成本 ${formatCurrency(stats.manualCost)} - 人力 ${formatCurrency(stats.salaryCost)}`}
+                        title={`结算 ${formatCurrency(stats.settlementIncome)} + 其他 ${formatCurrency(stats.otherIncome)} - 成本 ${formatCurrency(stats.manualCost)} - 人力 ${formatCurrency(stats.salaryCost)}`}
                       >
                         {formatCurrency(stats.profit)}
                       </TableCell>

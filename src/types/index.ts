@@ -354,6 +354,22 @@ export interface RevenueSettlement {
   createdAt: string;
 }
 
+/** 成本确认（单位×月度）：手工录入为预估，确认后利润口径以实际为准 */
+export interface CostSettlement {
+  id: string;
+  salesUnitId: string;
+  yearMonth: string;
+  /** 系统预估（当月手工成本合计） */
+  estimatedAmount: number;
+  /** 确认后的实际成本 */
+  actualAmount?: number;
+  isAdjusted: boolean;
+  remark?: string;
+  adjustedBy?: string;
+  adjustedAt?: string;
+  createdAt: string;
+}
+
 // 单位×产品结算设置（每个销售单位对每个产品的结算比例/金额）
 export interface UnitProductSettlement {
   id: string;

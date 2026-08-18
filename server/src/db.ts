@@ -250,6 +250,20 @@ function initSchema() {
       UNIQUE(sales_unit_id, year_month)
     );
 
+    CREATE TABLE IF NOT EXISTS cost_settlements (
+      id TEXT PRIMARY KEY,
+      sales_unit_id TEXT NOT NULL,
+      year_month TEXT NOT NULL,
+      estimated_amount REAL DEFAULT 0,
+      actual_amount REAL,
+      is_adjusted INTEGER DEFAULT 0,
+      remark TEXT DEFAULT '',
+      adjusted_by TEXT,
+      adjusted_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(sales_unit_id, year_month)
+    );
+
     CREATE TABLE IF NOT EXISTS unit_product_settlements (
       id TEXT PRIMARY KEY,
       sales_unit_id TEXT NOT NULL,
@@ -1269,6 +1283,21 @@ export function rowToIncomeRecord(row: any) {
 }
 
 export function rowToRevenueSettlement(row: any) {
+  return {
+    id: row.id,
+    salesUnitId: row.sales_unit_id,
+    yearMonth: row.year_month,
+    estimatedAmount: row.estimated_amount || 0,
+    actualAmount: row.actual_amount ?? undefined,
+    isAdjusted: Boolean(row.is_adjusted),
+    remark: row.remark || undefined,
+    adjustedBy: row.adjusted_by || undefined,
+    adjustedAt: row.adjusted_at || undefined,
+    createdAt: row.created_at,
+  };
+}
+
+export function rowToCostSettlement(row: any) {
   return {
     id: row.id,
     salesUnitId: row.sales_unit_id,

@@ -252,6 +252,12 @@ export const revenueSettlementsApi = {
   delete: (id: string) => api.delete(`/revenue-settlements/${id}`),
 };
 
+export const costSettlementsApi = {
+  list: () => api.get<any[]>("/cost-settlements"),
+  upsert: (data: any) => api.post<any>("/cost-settlements/upsert", data),
+  delete: (id: string) => api.delete(`/cost-settlements/${id}`),
+};
+
 export const unitProductSettlementsApi = {
   list: () => api.get<any[]>("/unit-product-settlements"),
   upsert: (data: any) => api.post<any>("/unit-product-settlements/upsert", data),
