@@ -7,8 +7,8 @@ import { formatCurrency, formatDate, formatDateTime, getYearMonth } from "@/lib/
 import { matchesRecurringYearMonth, RECURRING_ALL_MONTHS } from "@/utils/recurringRecord";
 import { getTotalSalaryCost, calcLeaveDeduction, MONTHLY_WORK_DAYS, isPersonnelOnDutyInMonth, filterByMonth } from "@/lib/salary";
 import { calcSalePersonCommissionPreview } from "@/lib/commissionReward";
-import { calcSaleSettlementIncome } from "@/lib/settlement";
-import { getEffectiveConfirmAmount, getEffectiveManualCost } from "@/lib/confirmAmount";
+import { getEffectiveUnitSettlementTotal } from "@/lib/revenueSettlementConfirm";
+import { getEffectiveManualCost } from "@/lib/confirmAmount";
 import type { CostRecord, CostItem, IncomeRecord, IncomeItem } from "@/types";
 import {
   Plus, Search, Pencil, Trash2, Wallet, X, ChevronDown, ChevronRight, Clock,
@@ -55,7 +55,7 @@ function dateToMonthInput(date: string): string {
 export default function CostManagement() {
   const { addCostRecord, updateCostRecord, deleteCostRecord, costChangeLogs, products, monthlyAdjustments, upsertMonthlyAdjustment, addIncomeRecord, updateIncomeRecord, deleteIncomeRecord, productPersonCommissions, teamMgmtCommissionRules, performanceTargets, unitProductSettlements } = useData();
   const { user } = useAuth();
-  const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleCostRecords: costRecords, visibleIncomeRecords: incomeRecords, visibleSalesRecords: salesRecords, visibleRevenueSettlements: revenueSettlements, visibleCostSettlements: costSettlements, canEditCost, isReadOnly, role } = usePermissions();
+  const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleCostRecords: costRecords, visibleIncomeRecords: incomeRecords, visibleSalesRecords: salesRecords, visibleRevenueSettlements: revenueSettlements, visibleRevenueProductSettlements: revenueProductSettlements, visibleCostSettlements: costSettlements, canEditCost, isReadOnly, role } = usePermissions();
   const [search, setSearch] = useState("");
   const [filterUnit, setFilterUnit] = useState("all");
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // "2026-08"
@@ -166,25 +166,30 @@ export default function CostManagement() {
   // 销售提成合计 = 个人（按销售明细）+ 团队管理提成
   const productCommissionTotal = personalCommissionFromSales + teamMgmtCommissionTotal;
 
-  // 结算收入：与收支利润页同一口径（确认后以实际为准）
+  const productNameMap = useMemo(
+    () => new Map(products.map((p) => [p.id, p.name || ""])),
+    [products],
+  );
+
+  // 结算收入：与收支利润页同一口径（产品确认后以实际为准）
   const settlementIncomeTotal = useMemo(() => {
     const unitIds = filterUnit === "all"
       ? salesUnits.map((u) => u.id)
       : [filterUnit];
-    return unitIds.reduce((sum, uid) => {
-      const estimated = filterByMonth(salesRecords, selectedMonth)
-        .filter((s) => s.salesUnitId === uid)
-        .reduce(
-          (acc, s) => acc + calcSaleSettlementIncome(s, unitProductSettlements),
-          0,
-        );
-      return sum + getEffectiveConfirmAmount(
-        revenueSettlements,
-        uid,
-        selectedMonth,
-        estimated,
-      );
-    }, 0);
+    return unitIds.reduce(
+      (sum, uid) =>
+        sum
+        + getEffectiveUnitSettlementTotal(
+          uid,
+          selectedMonth,
+          salesRecords,
+          unitProductSettlements,
+          revenueProductSettlements,
+          revenueSettlements,
+          productNameMap,
+        ),
+      0,
+    );
   }, [
     salesRecords,
     selectedMonth,
@@ -192,6 +197,8 @@ export default function CostManagement() {
     salesUnits,
     unitProductSettlements,
     revenueSettlements,
+    revenueProductSettlements,
+    productNameMap,
   ]);
 
   const onDutyCount = useMemo(

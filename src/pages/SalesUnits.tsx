@@ -5,12 +5,9 @@ import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, getYearMonth } from "@/lib/format";
-import { filterByMonth, getTotalSalaryCost } from "@/lib/salary";
-import { calcSaleSettlementIncome } from "@/lib/settlement";
-import {
-  getEffectiveConfirmAmount,
-  getEffectiveManualCost,
-} from "@/lib/confirmAmount";
+import { getTotalSalaryCost } from "@/lib/salary";
+import { getEffectiveUnitSettlementTotal } from "@/lib/revenueSettlementConfirm";
+import { getEffectiveManualCost } from "@/lib/confirmAmount";
 import type { SalesUnit } from "@/types";
 import {
   Plus,
@@ -110,6 +107,7 @@ export default function SalesUnits() {
     visibleIncomeRecords: incomeRecords,
     visibleUnitProductSettlements,
     visibleRevenueSettlements: revenueSettlements,
+    visibleRevenueProductSettlements: revenueProductSettlements,
     visibleCostSettlements: costSettlements,
   } = usePermissions();
   const [search, setSearch] = useState("");
@@ -182,6 +180,11 @@ export default function SalesUnits() {
     return options
   }, [])
 
+  const productNameMap = useMemo(
+    () => new Map(products.map((p) => [p.id, p.name || ""])),
+    [products],
+  );
+
   /** 与「盈亏分析」同口径：净利润 = 结算收入 + 其他收入 -（录入成本 + 人力成本） */
   const unitStatsById = useMemo(() => {
     const map: Record<
@@ -195,21 +198,18 @@ export default function SalesUnits() {
         profit: number
       }
     > = {}
-    const monthSales = filterByMonth(salesRecords, selectedMonth)
     const monthNum = parseInt(selectedMonth.slice(5, 7), 10)
 
     for (const u of salesUnits) {
       const unitPersonnel = personnel.filter((p) => p.salesUnitId === u.id)
-      const unitSales = monthSales.filter((s) => s.salesUnitId === u.id)
-      const estimatedSettlement = unitSales.reduce(
-        (sum, s) => sum + calcSaleSettlementIncome(s, visibleUnitProductSettlements),
-        0,
-      )
-      const settlementIncome = getEffectiveConfirmAmount(
-        revenueSettlements,
+      const settlementIncome = getEffectiveUnitSettlementTotal(
         u.id,
         selectedMonth,
-        estimatedSettlement,
+        salesRecords,
+        visibleUnitProductSettlements,
+        revenueProductSettlements,
+        revenueSettlements,
+        productNameMap,
       )
       const otherIncome = incomeRecords
         .filter((r) => {
@@ -267,6 +267,8 @@ export default function SalesUnits() {
     visibleUnitProductSettlements,
     teamMgmtContext,
     revenueSettlements,
+    revenueProductSettlements,
+    productNameMap,
     costSettlements,
   ])
 

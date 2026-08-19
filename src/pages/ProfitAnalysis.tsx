@@ -7,16 +7,14 @@ import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, formatDate, getYearMonth } from "@/lib/format";
 import { getTotalSalaryCost, filterByMonth } from "@/lib/salary";
 import { calcSaleSettlementIncome } from "@/lib/settlement";
-import {
-  getEffectiveConfirmAmount,
-  getEstimatedManualCost,
-  getEffectiveManualCost,
-} from "@/lib/confirmAmount";
+import { getEstimatedManualCost, getEffectiveManualCost } from "@/lib/confirmAmount";
+import { getEffectiveUnitSettlementTotal } from "@/lib/revenueSettlementConfirm";
+import { resolveUnitSettlementIncome } from "@/lib/revenueSettlementConfirm";
 import {
   listRecurringYearMonths,
   matchesRecurringYearMonth,
 } from "@/utils/recurringRecord";
-import type { CostSettlement, RevenueSettlement } from "@/types";
+import type { CostSettlement, RevenueProductSettlement } from "@/types";
 import {
   TrendingUp, DollarSign, Award, AlertTriangle,
   ChevronDown, ChevronRight, Pencil, Receipt, CheckCircle2, Clock,
@@ -55,9 +53,9 @@ import MPerformanceEstimateSheet from "./ProfitAnalysis/components/m-performance
 const COLORS = ["#3b82f6", "#f97316", "#10b981", "#8b5cf6", "#ef4444", "#06b6d4", "#eab308"];
 
 export default function ProfitAnalysis() {
-  const { products, monthlyAdjustments, upsertRevenueSettlement, upsertCostSettlement, productPersonCommissions, teamMgmtCommissionRules, performanceTargets } = useData();
+  const { products, monthlyAdjustments, upsertRevenueProductSettlement, upsertCostSettlement, productPersonCommissions, teamMgmtCommissionRules, performanceTargets } = useData();
   const { user } = useAuth();
-  const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleSalesRecords: salesRecords, visibleCostRecords: costRecords, visibleIncomeRecords: incomeRecords, visibleRevenueSettlements: revenueSettlements, visibleCostSettlements: costSettlements, visibleUnitProductSettlements, canEditCost, isReadOnly } = usePermissions();
+  const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleSalesRecords: salesRecords, visibleCostRecords: costRecords, visibleIncomeRecords: incomeRecords, visibleRevenueSettlements: revenueSettlements, visibleRevenueProductSettlements: revenueProductSettlements, visibleCostSettlements: costSettlements, visibleUnitProductSettlements, canEditCost, isReadOnly } = usePermissions();
   const teamMgmtContext = useMemo(() => ({
     rules: teamMgmtCommissionRules,
     targets: performanceTargets,
@@ -71,8 +69,14 @@ export default function ProfitAnalysis() {
   // 收入明细展开状态
   const [expandedIncomeRows, setExpandedIncomeRows] = useState<Set<string>>(new Set());
   // 结算调整弹窗
-  const [settlementDialog, setSettlementDialog] = useState<{ unitId: string; unitName: string; estimated: number } | null>(null);
-  const [settlementForm, setSettlementForm] = useState({ actualAmount: 0, remark: "" });
+  const [productSettlementDialog, setProductSettlementDialog] = useState<{
+    unitId: string
+    unitName: string
+    productId: string
+    productName: string
+    estimated: number
+  } | null>(null);
+  const [productSettlementForm, setProductSettlementForm] = useState({ actualAmount: 0, remark: "" });
   const [costConfirmDialog, setCostConfirmDialog] = useState<{
     unitId: string
     unitName: string
@@ -133,21 +137,20 @@ export default function ProfitAnalysis() {
     return monthlyCosts.filter((c) => matchFilterUnit(c.salesUnitId));
   }, [monthlyCosts, filterUnitIds, isAllFilterUnits]);
 
-  function getEstimatedSettlement(unitId: string, yearMonth: string): number {
-    return filterByMonth(salesRecords, yearMonth)
-      .filter((s) => s.salesUnitId === unitId)
-      .reduce(
-        (sum, s) => sum + calcSaleSettlementIncome(s, visibleUnitProductSettlements),
-        0,
-      );
-  }
+  const productNameMap = useMemo(
+    () => new Map(products.map((p) => [p.id, p.name || ""])),
+    [products],
+  );
 
   function getEffectiveSettlement(unitId: string, yearMonth: string): number {
-    return getEffectiveConfirmAmount(
-      revenueSettlements,
+    return getEffectiveUnitSettlementTotal(
       unitId,
       yearMonth,
-      getEstimatedSettlement(unitId, yearMonth),
+      salesRecords,
+      visibleUnitProductSettlements,
+      revenueProductSettlements,
+      revenueSettlements,
+      productNameMap,
     );
   }
 
@@ -241,6 +244,7 @@ unitIds,
     teamMgmtContext,
     monthlyIncomeRecords,
     revenueSettlements,
+    revenueProductSettlements,
     costSettlements,
     costRecords,
   ]);
@@ -317,7 +321,7 @@ unitIds,
           margin: revenue > 0 ? (profit / revenue) * 100 : 0,
         };
       });
-  }, [filterUnitIds, isAllFilterUnits, resolvedFilterUnitIds, salesUnits, personnel, salesRecords, products, costRecords, incomeRecords, monthlyAdjustments, visibleUnitProductSettlements, productPersonCommissions, teamMgmtContext, selectedMonth, revenueSettlements, costSettlements]);
+  }, [filterUnitIds, isAllFilterUnits, resolvedFilterUnitIds, salesUnits, personnel, salesRecords, products, costRecords, incomeRecords, monthlyAdjustments, visibleUnitProductSettlements, productPersonCommissions, teamMgmtContext, selectedMonth, revenueSettlements, revenueProductSettlements, costSettlements]);
 
   // 各单位对比（按月度；跟随顶部单位筛选）
   const unitComparison = useMemo(() => {
@@ -371,7 +375,7 @@ unitIds,
   }, [
     salesUnits, filterUnitIds, isAllFilterUnits, monthlySales, monthlyCosts, monthlyIncomeRecords, personnel, salesRecords,
     products, selectedMonth, monthlyAdjustments, visibleUnitProductSettlements,
-    productPersonCommissions, teamMgmtContext, revenueSettlements, costSettlements, costRecords,
+    productPersonCommissions, teamMgmtContext, revenueSettlements, revenueProductSettlements, costSettlements, costRecords,
   ]);
 
   // 成本结构（按月度）
@@ -438,27 +442,50 @@ unitIds,
       ? salesUnits
       : salesUnits.filter((u) => filterUnitIds.includes(u.id));
     return unitsToShow.map((unit) => {
-      // 预估业绩收入：根据单位×产品结算规则（含生效期与奖励）
       const unitSales = monthlySales.filter((s) => s.salesUnitId === unit.id);
-      const estimatedAmount = unitSales.reduce(
-        (sum, s) => sum + calcSaleSettlementIncome(s, visibleUnitProductSettlements),
-        0,
+      const legacySettlement = revenueSettlements.find(
+        (r) => r.salesUnitId === unit.id && r.yearMonth === selectedMonth,
       );
-      // 查找收入结算记录
-      const settlement = revenueSettlements.find((r) => r.salesUnitId === unit.id && r.yearMonth === selectedMonth);
-      const isAdjusted = settlement?.isAdjusted || false;
-      const actualAmount = isAdjusted && settlement?.actualAmount != null ? settlement.actualAmount : estimatedAmount;
-      // 其他收入
+      const settlementSummary = resolveUnitSettlementIncome(
+        unit.id,
+        selectedMonth,
+        unitSales,
+        visibleUnitProductSettlements,
+        revenueProductSettlements,
+        legacySettlement,
+        productNameMap,
+      );
+      const { estimatedAmount, actualAmount, isAdjusted, productGroups } = settlementSummary;
       const unitIncomeRecords = monthlyIncomeRecords.filter((r) => r.salesUnitId === unit.id);
       const otherIncome = unitIncomeRecords.reduce((sum, r) => sum + r.totalAmount, 0);
       const totalIncome = actualAmount + otherIncome;
       const diff = actualAmount - estimatedAmount;
       return {
-        unit, estimatedAmount, actualAmount, isAdjusted, settlement,
-        unitSales, unitIncomeRecords, otherIncome, totalIncome, diff,
+        unit,
+        estimatedAmount,
+        actualAmount,
+        isAdjusted,
+        legacySettlement,
+        productGroups,
+        unitSales,
+        unitIncomeRecords,
+        otherIncome,
+        totalIncome,
+        diff,
       };
     });
-  }, [salesUnits, filterUnitIds, isAllFilterUnits, monthlySales, revenueSettlements, selectedMonth, monthlyIncomeRecords, visibleUnitProductSettlements]);
+  }, [
+    salesUnits,
+    filterUnitIds,
+    isAllFilterUnits,
+    monthlySales,
+    revenueSettlements,
+    revenueProductSettlements,
+    selectedMonth,
+    monthlyIncomeRecords,
+    visibleUnitProductSettlements,
+    productNameMap,
+  ]);
 
   // 收入合计
   const incomeTotals = useMemo(() => {
@@ -480,31 +507,42 @@ unitIds,
     });
   };
 
-  // 打开结算调整弹窗
-  const openSettlement = (unitId: string, unitName: string, estimated: number, existing?: RevenueSettlement) => {
-    setSettlementDialog({ unitId, unitName, estimated });
-    setSettlementForm({
+  function openProductSettlement(
+    unitId: string,
+    unitName: string,
+    productId: string,
+    productName: string,
+    estimated: number,
+    existing?: RevenueProductSettlement,
+  ) {
+    setProductSettlementDialog({
+      unitId,
+      unitName,
+      productId,
+      productName,
+      estimated,
+    });
+    setProductSettlementForm({
       actualAmount: existing?.actualAmount ?? estimated,
       remark: existing?.remark || "",
     });
-  };
+  }
 
-  // 保存结算调整
-  const handleSettlementSubmit = async () => {
-    if (!settlementDialog) return;
-    const isAdjusted = settlementForm.actualAmount !== settlementDialog.estimated;
-    await upsertRevenueSettlement({
-      salesUnitId: settlementDialog.unitId,
+  async function handleProductSettlementSubmit() {
+    if (!productSettlementDialog) return;
+    await upsertRevenueProductSettlement({
+      salesUnitId: productSettlementDialog.unitId,
+      productId: productSettlementDialog.productId,
       yearMonth: selectedMonth,
-      estimatedAmount: settlementDialog.estimated,
-      actualAmount: settlementForm.actualAmount,
-      isAdjusted,
-      remark: settlementForm.remark || (isAdjusted ? "手动调整实际结算金额" : ""),
+      estimatedAmount: productSettlementDialog.estimated,
+      actualAmount: productSettlementForm.actualAmount,
+      isAdjusted: true,
+      remark: productSettlementForm.remark || "确认产品实际结算金额",
       adjustedBy: user?.name,
       adjustedAt: new Date().toISOString(),
     });
-    setSettlementDialog(null);
-  };
+    setProductSettlementDialog(null);
+  }
 
   const costDetail = useMemo(() => {
     const unitsToShow = isAllFilterUnits
@@ -713,7 +751,8 @@ unitIds,
       visibleUnitProductSettlements,
       monthOptions,
       revenueSettlements,
-      costSettlements,
+      revenueProductSettlements,
+      productNameMap,
     ],
   );
 
@@ -994,7 +1033,7 @@ unitIds,
             收入明细与结算
           </CardTitle>
           <CardDescription>
-            业绩结算可在此调整；其他收入请在「成本与收入录入」记账，本表只汇总
+            展开单位后按产品确认实际结算；其他收入请在「成本与收入录入」记账，本表只汇总
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -1010,7 +1049,6 @@ unitIds,
                   <TableHead className="text-right">其他收入</TableHead>
                   <TableHead className="text-right">收入合计</TableHead>
                   <TableHead>状态</TableHead>
-                  <TableHead className="text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1037,27 +1075,111 @@ unitIds,
                         <TableCell>
                           {d.isAdjusted ? (
                             <Badge className="bg-amber-100 text-amber-700 text-xs">
-                              <CheckCircle2 className="mr-1 h-3 w-3" />已调整
+                              <CheckCircle2 className="mr-1 h-3 w-3" />已确认
                             </Badge>
                           ) : (
                             <Badge variant="outline" className="text-xs">待确认</Badge>
                           )}
                         </TableCell>
-                        <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                          {canEditCost && !isReadOnly ? (
-                            <Button variant="ghost" size="sm" onClick={() => openSettlement(d.unit.id, d.unit.name, d.estimatedAmount, d.settlement)}>
-                              <Pencil className="mr-1 h-3.5 w-3.5" />
-                              {d.isAdjusted ? "重新调整" : "调整结算"}
-                            </Button>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">仅查看</span>
-                          )}
-                        </TableCell>
                       </TableRow>
                       {isExp && (
                         <TableRow key={d.unit.id + "-detail"} className="bg-emerald-50/20">
-                          <TableCell colSpan={9} className="py-3">
+                          <TableCell colSpan={8} className="py-3">
                             <div className="ml-4 space-y-4">
+                              {/* 按产品汇总结算 */}
+                              <div>
+                                <div className="mb-2 flex items-center gap-2 text-sm font-medium text-emerald-800">
+                                  <Receipt className="h-4 w-4" />
+                                  按产品结算汇总（展开后调整实际结算）
+                                </div>
+                                {d.legacySettlement?.isAdjusted && !d.productGroups.some((g) => g.isAdjusted) && (
+                                  <p className="mb-2 text-xs text-amber-700">
+                                    本单位沿用旧版单位级调整；下方按产品确认后将切换为产品合计口径
+                                  </p>
+                                )}
+                                {d.productGroups.length > 0 ? (
+                                  <div className="overflow-hidden rounded-lg border">
+                                    <Table>
+                                      <TableHeader>
+                                        <TableRow className="bg-muted/50">
+                                          <TableHead>产品</TableHead>
+                                          <TableHead className="text-right">笔数</TableHead>
+                                          <TableHead className="text-right">订单金额</TableHead>
+                                          <TableHead className="text-right">预估结算</TableHead>
+                                          <TableHead className="text-right">实际结算</TableHead>
+                                          <TableHead className="text-right">差额</TableHead>
+                                          <TableHead>状态</TableHead>
+                                          <TableHead className="text-right">操作</TableHead>
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody>
+                                        {d.productGroups.map((g) => (
+                                          <TableRow key={g.productId}>
+                                            <TableCell className="text-sm font-medium">{g.productName}</TableCell>
+                                            <TableCell className="text-right text-sm">{g.salesCount}</TableCell>
+                                            <TableCell className="text-right text-sm text-muted-foreground">
+                                              {formatCurrency(g.orderAmount)}
+                                            </TableCell>
+                                            <TableCell className="text-right text-sm text-blue-600">
+                                              {formatCurrency(g.estimatedSettlement)}
+                                            </TableCell>
+                                            <TableCell className={`text-right text-sm font-medium ${g.isAdjusted ? "text-amber-600" : "text-blue-600"}`}>
+                                              {formatCurrency(g.actualAmount)}
+                                            </TableCell>
+                                            <TableCell className={`text-right text-sm ${g.diff > 0 ? "text-emerald-600" : g.diff < 0 ? "text-red-600" : "text-muted-foreground"}`}>
+                                              {g.diff > 0 ? "+" : ""}{formatCurrency(g.diff)}
+                                            </TableCell>
+                                            <TableCell>
+                                              {g.isAdjusted ? (
+                                                <Badge className="bg-amber-100 text-amber-700 text-xs">已确认</Badge>
+                                              ) : (
+                                                <Badge variant="outline" className="text-xs">待确认</Badge>
+                                              )}
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                              {canEditCost && !isReadOnly ? (
+                                                <Button
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  onClick={() => openProductSettlement(
+                                                    d.unit.id,
+                                                    d.unit.name,
+                                                    g.productId,
+                                                    g.productName,
+                                                    g.estimatedSettlement,
+                                                    g.settlement,
+                                                  )}
+                                                >
+                                                  <Pencil className="mr-1 h-3.5 w-3.5" />
+                                                  {g.isAdjusted ? "重新确认" : "确认结算"}
+                                                </Button>
+                                              ) : (
+                                                <span className="text-xs text-muted-foreground">仅查看</span>
+                                              )}
+                                            </TableCell>
+                                          </TableRow>
+                                        ))}
+                                        <TableRow className="bg-muted/30 font-medium">
+                                          <TableCell colSpan={3} className="text-right text-sm">合计</TableCell>
+                                          <TableCell className="text-right text-sm text-blue-600">
+                                            {formatCurrency(d.estimatedAmount)}
+                                          </TableCell>
+                                          <TableCell className="text-right text-sm font-bold text-amber-600">
+                                            {formatCurrency(d.actualAmount)}
+                                          </TableCell>
+                                          <TableCell className={`text-right text-sm ${d.diff > 0 ? "text-emerald-600" : d.diff < 0 ? "text-red-600" : ""}`}>
+                                            {d.diff > 0 ? "+" : ""}{formatCurrency(d.diff)}
+                                          </TableCell>
+                                          <TableCell colSpan={2}></TableCell>
+                                        </TableRow>
+                                      </TableBody>
+                                    </Table>
+                                  </div>
+                                ) : (
+                                  <p className="text-sm text-muted-foreground py-2">本月暂无销售业绩，无需产品结算</p>
+                                )}
+                              </div>
+
                               {/* 业绩收入明细 */}
                               <div>
                                 <div className="mb-2 flex items-center gap-2 text-sm font-medium text-blue-700">
@@ -1389,59 +1511,78 @@ unitIds,
         </CardContent>
       </Card>
 
-      {/* ===================== 结算调整弹窗 ===================== */}
-      <Dialog open={!!settlementDialog} onOpenChange={(open) => { if (!open) setSettlementDialog(null); }}>
+      {/* ===================== 产品结算确认弹窗 ===================== */}
+      <Dialog
+        open={!!productSettlementDialog}
+        onOpenChange={(open) => { if (!open) setProductSettlementDialog(null) }}
+      >
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Receipt className="h-5 w-5 text-emerald-600" />
-              调整实际结算金额
+              确认产品实际结算
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="flex items-center justify-between rounded-lg bg-muted/50 px-4 py-3">
               <div>
-                <p className="text-sm text-muted-foreground">{settlementDialog?.unitName}</p>
-                <p className="text-xs text-muted-foreground">{selectedMonth}</p>
+                <p className="text-sm font-medium">{productSettlementDialog?.productName}</p>
+                <p className="text-xs text-muted-foreground">
+                  {productSettlementDialog?.unitName} · {selectedMonth}
+                </p>
               </div>
               <div className="text-right">
-                <p className="text-xs text-muted-foreground">预估结算收入（按结算比例）</p>
-                <p className="text-lg font-bold text-blue-600">{settlementDialog && formatCurrency(settlementDialog.estimated)}</p>
+                <p className="text-xs text-muted-foreground">预估结算（按结算比例）</p>
+                <p className="text-lg font-bold text-blue-600">
+                  {productSettlementDialog && formatCurrency(productSettlementDialog.estimated)}
+                </p>
               </div>
             </div>
             <div className="space-y-2">
               <Label>实际结算金额（¥）</Label>
               <Input
                 type="number"
-                value={settlementForm.actualAmount}
-                onChange={(e) => setSettlementForm({ ...settlementForm, actualAmount: Number(e.target.value) })}
+                value={productSettlementForm.actualAmount}
+                onChange={(e) =>
+                  setProductSettlementForm({
+                    ...productSettlementForm,
+                    actualAmount: Number(e.target.value),
+                  })
+                }
                 placeholder="输入实际结算金额"
               />
               <p className="text-xs text-muted-foreground">
-                如与预估金额一致则标记为"待确认"，不一致则标记为"已调整"
+                保存后本单位实际结算 = 各产品确认金额合计
               </p>
             </div>
             <div className="space-y-2">
-              <Label>调整说明</Label>
+              <Label>确认说明</Label>
               <Textarea
-                value={settlementForm.remark}
-                onChange={(e) => setSettlementForm({ ...settlementForm, remark: e.target.value })}
+                value={productSettlementForm.remark}
+                onChange={(e) =>
+                  setProductSettlementForm({ ...productSettlementForm, remark: e.target.value })
+                }
                 placeholder="如：退款扣除、折扣调整、补差等"
                 rows={2}
               />
             </div>
-            {settlementDialog && settlementForm.actualAmount !== settlementDialog.estimated && (
+            {productSettlementDialog
+              && productSettlementForm.actualAmount !== productSettlementDialog.estimated && (
               <div className="flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
                 <AlertTriangle className="h-4 w-4" />
-                差额: {settlementForm.actualAmount > settlementDialog.estimated ? "+" : ""}
-                {formatCurrency(settlementForm.actualAmount - settlementDialog.estimated)}
+                差额:
+                {" "}
+                {productSettlementForm.actualAmount > productSettlementDialog.estimated ? "+" : ""}
+                {formatCurrency(
+                  productSettlementForm.actualAmount - productSettlementDialog.estimated,
+                )}
               </div>
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSettlementDialog(null)}>取消</Button>
-            <Button onClick={handleSettlementSubmit}>
-              <Clock className="mr-1 h-4 w-4" />保存结算
+            <Button variant="outline" onClick={() => setProductSettlementDialog(null)}>取消</Button>
+            <Button onClick={handleProductSettlementSubmit}>
+              <Clock className="mr-1 h-4 w-4" />保存确认
             </Button>
           </DialogFooter>
         </DialogContent>
