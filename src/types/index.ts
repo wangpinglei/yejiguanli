@@ -354,21 +354,6 @@ export interface RevenueSettlement {
   createdAt: string;
 }
 
-/** 收入结算确认（单位×产品×月度）：按产品调整实际结算，单位合计为各产品之和 */
-export interface RevenueProductSettlement {
-  id: string;
-  salesUnitId: string;
-  productId: string;
-  yearMonth: string;
-  estimatedAmount: number;
-  actualAmount?: number;
-  isAdjusted: boolean;
-  remark?: string;
-  adjustedBy?: string;
-  adjustedAt?: string;
-  createdAt: string;
-}
-
 /** 成本确认（单位×月度）：手工录入为预估，确认后利润口径以实际为准 */
 export interface CostSettlement {
   id: string;

@@ -250,21 +250,6 @@ function initSchema() {
       UNIQUE(sales_unit_id, year_month)
     );
 
-    CREATE TABLE IF NOT EXISTS revenue_product_settlements (
-      id TEXT PRIMARY KEY,
-      sales_unit_id TEXT NOT NULL,
-      product_id TEXT NOT NULL,
-      year_month TEXT NOT NULL,
-      estimated_amount REAL DEFAULT 0,
-      actual_amount REAL,
-      is_adjusted INTEGER DEFAULT 0,
-      remark TEXT DEFAULT '',
-      adjusted_by TEXT,
-      adjusted_at TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      UNIQUE(sales_unit_id, product_id, year_month)
-    );
-
     CREATE TABLE IF NOT EXISTS cost_settlements (
       id TEXT PRIMARY KEY,
       sales_unit_id TEXT NOT NULL,
@@ -519,6 +504,9 @@ function initSchema() {
     { name: "last_operator_id", ddl: "last_operator_id TEXT DEFAULT ''" },
     { name: "last_operated_at", ddl: "last_operated_at TEXT DEFAULT ''" },
   ]);
+
+  // 已废弃按产品确认结算，启动时清理旧表
+  db.exec("DROP TABLE IF EXISTS revenue_product_settlements");
 
   // 尽早把身份证/银行卡等超大整数改成 TEXT，避免后续任意 SELECT * 崩溃
   normalizeHrLongNumberColumnsAsText();
@@ -1301,22 +1289,6 @@ export function rowToRevenueSettlement(row: any) {
   return {
     id: row.id,
     salesUnitId: row.sales_unit_id,
-    yearMonth: row.year_month,
-    estimatedAmount: row.estimated_amount || 0,
-    actualAmount: row.actual_amount ?? undefined,
-    isAdjusted: Boolean(row.is_adjusted),
-    remark: row.remark || undefined,
-    adjustedBy: row.adjusted_by || undefined,
-    adjustedAt: row.adjusted_at || undefined,
-    createdAt: row.created_at,
-  };
-}
-
-export function rowToRevenueProductSettlement(row: any) {
-  return {
-    id: row.id,
-    salesUnitId: row.sales_unit_id,
-    productId: row.product_id,
     yearMonth: row.year_month,
     estimatedAmount: row.estimated_amount || 0,
     actualAmount: row.actual_amount ?? undefined,

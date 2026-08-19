@@ -21,7 +21,6 @@ import type {
   PositionGroupLabel,
   IncomeRecord,
   RevenueSettlement,
-  RevenueProductSettlement,
   CostSettlement,
   UnitProductSettlement,
   ProductPersonCommission,
@@ -37,7 +36,6 @@ import {
   costRecordsApi,
   incomeRecordsApi,
   revenueSettlementsApi,
-  revenueProductSettlementsApi,
   costSettlementsApi,
   unitProductSettlementsApi,
   productPersonCommissionsApi,
@@ -98,7 +96,6 @@ interface DataContextType {
   costRecords: CostRecord[];
   incomeRecords: IncomeRecord[];
   revenueSettlements: RevenueSettlement[];
-  revenueProductSettlements: RevenueProductSettlement[];
   costSettlements: CostSettlement[];
   unitProductSettlements: UnitProductSettlement[];
   productPersonCommissions: ProductPersonCommission[];
@@ -185,11 +182,6 @@ interface DataContextType {
   upsertRevenueSettlement: (s: Omit<RevenueSettlement, "id" | "createdAt">) => Promise<void>;
   deleteRevenueSettlement: (id: string) => Promise<void>;
 
-  upsertRevenueProductSettlement: (
-    s: Omit<RevenueProductSettlement, "id" | "createdAt">,
-  ) => Promise<void>;
-  deleteRevenueProductSettlement: (id: string) => Promise<void>;
-
   upsertCostSettlement: (s: Omit<CostSettlement, "id" | "createdAt">) => Promise<void>;
   deleteCostSettlement: (id: string) => Promise<void>;
 
@@ -243,9 +235,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [costRecords, setCostRecords] = useState<CostRecord[]>([]);
   const [incomeRecords, setIncomeRecords] = useState<IncomeRecord[]>([]);
   const [revenueSettlements, setRevenueSettlements] = useState<RevenueSettlement[]>([]);
-  const [revenueProductSettlements, setRevenueProductSettlements] = useState<
-    RevenueProductSettlement[]
-  >([]);
   const [costSettlements, setCostSettlements] = useState<CostSettlement[]>([]);
   const [unitProductSettlements, setUnitProductSettlements] = useState<UnitProductSettlement[]>([]);
   const [productPersonCommissions, setProductPersonCommissions] = useState<ProductPersonCommission[]>([]);
@@ -290,7 +279,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
         positionGroupLabelsApi.list(),
         teamMgmtCommissionRulesApi.list(),
         costSettlementsApi.list(),
-        revenueProductSettlementsApi.list(),
       ]);
 
       function value<T>(i: number, fallback: T): T {
@@ -317,7 +305,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setPositionGroupLabels(labels.length ? labels : []);
       setTeamMgmtCommissionRules(value(14, []));
       setCostSettlements(value(15, []));
-      setRevenueProductSettlements(value(16, []));
       await refreshSyncedOrders();
     } catch (e) {
       console.error("[DataContext] refreshAll failed", e);
@@ -340,7 +327,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setCostRecords([]);
       setIncomeRecords([]);
       setRevenueSettlements([]);
-      setRevenueProductSettlements([]);
       setCostSettlements([]);
       setUnitProductSettlements([]);
       setProductPersonCommissions([]);
@@ -700,30 +686,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setRevenueSettlements((prev) => prev.filter((x) => x.id !== id));
   }, []);
 
-  const upsertRevenueProductSettlement = useCallback(async (
-    s: Omit<RevenueProductSettlement, "id" | "createdAt">,
-  ) => {
-    const saved = await revenueProductSettlementsApi.upsert(s);
-    setRevenueProductSettlements((prev) => {
-      const idx = prev.findIndex(
-        (x) =>
-          x.salesUnitId === saved.salesUnitId
-          && x.productId === saved.productId
-          && x.yearMonth === saved.yearMonth,
-      );
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = saved;
-        return next;
-      }
-      return [...prev, saved];
-    });
-  }, []);
-  const deleteRevenueProductSettlement = useCallback(async (id: string) => {
-    await revenueProductSettlementsApi.delete(id);
-    setRevenueProductSettlements((prev) => prev.filter((x) => x.id !== id));
-  }, []);
-
   const upsertCostSettlement = useCallback(async (s: Omit<CostSettlement, "id" | "createdAt">) => {
     const saved = await costSettlementsApi.upsert(s);
     setCostSettlements((prev) => {
@@ -887,7 +849,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const value: DataContextType = {
     salesUnits, personnel, products, salesRecords, allSalesRecords, syncedOrders, syncedLoading,
-    costRecords, incomeRecords, revenueSettlements, revenueProductSettlements, costSettlements, unitProductSettlements, productPersonCommissions,
+    costRecords, incomeRecords, revenueSettlements, costSettlements, unitProductSettlements, productPersonCommissions,
     teamMgmtCommissionRules,
     costChangeLogs, notifications, monthlyAdjustments, loading,
     addSalesUnit, updateSalesUnit, deleteSalesUnit,
@@ -897,7 +859,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
     addCostRecord, updateCostRecord, deleteCostRecord,
     addIncomeRecord, updateIncomeRecord, deleteIncomeRecord,
     upsertRevenueSettlement, deleteRevenueSettlement,
-    upsertRevenueProductSettlement, deleteRevenueProductSettlement,
     upsertCostSettlement, deleteCostSettlement,
     upsertUnitProductSettlement, batchUpsertUnitProductSettlements, deleteUnitProductSettlement,
     upsertProductPersonCommission, batchUpsertProductPersonCommissions, deleteProductPersonCommission,
