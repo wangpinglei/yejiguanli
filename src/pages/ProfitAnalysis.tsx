@@ -212,6 +212,8 @@ unitIds,
         sum + getEffectiveManualCost(costSettlements, costRecords, uid, selectedMonth),
       0,
     );
+    const salaryPayCost = salaryData.grandSalary;
+    const socialHousingFundCost = salaryData.grandSocialHousingFund;
     const salaryCost = salaryData.grandTotal;
     const totalCost = manualCost + salaryCost;
     // 净利润 =（结算收入 + 其他收入）- 总成本（总成本已含人员提成）
@@ -227,6 +229,8 @@ unitIds,
       totalCost,
       manualCost,
       salaryCost,
+      salaryPayCost,
+      socialHousingFundCost,
       totalProfit,
       profitMargin,
     };
@@ -386,7 +390,7 @@ unitIds,
         catMap.set(item.category, (catMap.get(item.category) || 0) + item.amount);
       });
     });
-    // 添加自动薪酬成本
+    // 自动人力成本拆成两项，不与手工录入混为一谈
     const salaryData = getTotalSalaryCost(
       resolvedFilterUnitIds,
       personnel,
@@ -394,12 +398,16 @@ unitIds,
       products,
       selectedMonth,
       monthlyAdjustments,
-      productPersonCommissions
+      productPersonCommissions,
+      teamMgmtContext,
     );
-    if (salaryData.grandTotal > 0) {
-      catMap.set("人力成本（薪酬+社保+公积金）", salaryData.grandTotal);
+    if (salaryData.grandSalary > 0) {
+      catMap.set("薪酬成本", salaryData.grandSalary);
     }
-    // 销售提成（管理+个人，按单位×人员配置）单独展示便于核对
+    if (salaryData.grandSocialHousingFund > 0) {
+      catMap.set("社保公积金成本", salaryData.grandSocialHousingFund);
+    }
+    // 销售提成（管理+个人）单独展示便于核对（已含在薪酬成本中）
     if (salaryData.grandSalesCommission > 0) {
       catMap.set("销售提成（单位×人员）", salaryData.grandSalesCommission);
     }
@@ -638,7 +646,10 @@ unitIds,
       icon: Award,
       color: "text-orange-600",
       bg: "bg-orange-50",
-      hint: `含提成 ${formatCurrency(summary.totalCommission)} · 手工成本已确认优先`,
+      hint:
+        `薪酬 ${formatCurrency(summary.salaryPayCost)}`
+        + ` · 社保公积金 ${formatCurrency(summary.socialHousingFundCost)}`
+        + ` · 手工 ${formatCurrency(summary.manualCost)}`,
     },
     {
       title: "净利润",
@@ -676,6 +687,8 @@ unitIds,
       let settlementIncome = 0;
       let otherIncome = 0;
       let manualCost = 0;
+      let salaryPayCost = 0;
+      let socialHousingFundCost = 0;
       let salaryCost = 0;
       let totalCommission = 0;
       const resolvedUnitIds =
@@ -724,6 +737,8 @@ unitIds,
           productPersonCommissions,
           teamMgmtContext,
         );
+        salaryPayCost += salaryData.grandSalary;
+        socialHousingFundCost += salaryData.grandSocialHousingFund;
         salaryCost += salaryData.grandTotal;
         totalCommission += salaryData.grandSalesCommission;
       }
@@ -735,6 +750,8 @@ unitIds,
         totalCost: manualCost + salaryCost,
         manualCost,
         salaryCost,
+        salaryPayCost,
+        socialHousingFundCost,
         totalCommission,
       };
     },
@@ -1358,7 +1375,7 @@ unitIds,
             成本明细与确认
           </CardTitle>
           <CardDescription>
-            手工录入为预估成本；确认实际发生金额后，盈亏、趋势、测算均以确认为准（人力成本仍按薪酬自动计算）
+            手工录入为预估成本；确认实际发生金额后，盈亏、趋势、测算均以确认为准（薪酬与社保公积金仍按人员档案自动计算）
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">

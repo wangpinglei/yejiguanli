@@ -194,6 +194,8 @@ export default function SalesUnits() {
         settlementIncome: number
         otherIncome: number
         manualCost: number
+        salaryPayCost: number
+        socialHousingFundCost: number
         salaryCost: number
         profit: number
       }
@@ -234,7 +236,7 @@ export default function SalesUnits() {
         u.id,
         selectedMonth,
       )
-      const salaryCost = getTotalSalaryCost(
+      const salaryData = getTotalSalaryCost(
         [u.id],
         personnel,
         salesRecords,
@@ -243,12 +245,17 @@ export default function SalesUnits() {
         monthlyAdjustments,
         productPersonCommissions,
         teamMgmtContext,
-      ).grandTotal
+      )
+      const salaryPayCost = salaryData.grandSalary
+      const socialHousingFundCost = salaryData.grandSocialHousingFund
+      const salaryCost = salaryData.grandTotal
       map[u.id] = {
         personnelCount: unitPersonnel.length,
         settlementIncome,
         otherIncome,
         manualCost,
+        salaryPayCost,
+        socialHousingFundCost,
         salaryCost,
         profit: settlementIncome + otherIncome - manualCost - salaryCost,
       }
@@ -279,6 +286,8 @@ export default function SalesUnits() {
         settlementIncome: 0,
         otherIncome: 0,
         manualCost: 0,
+        salaryPayCost: 0,
+        socialHousingFundCost: 0,
         salaryCost: 0,
         profit: 0,
       }
@@ -423,7 +432,7 @@ export default function SalesUnits() {
         <Badge variant="secondary">共 {filteredUnits.length} 个单位</Badge>
       </div>
       <p className="mb-4 text-xs text-muted-foreground">
-        利润与「盈亏分析」同口径：结算收入 + 其他收入 −（录入成本 + 人力成本，含提成），按所选月份计算。
+        利润与「盈亏分析」同口径：结算收入 + 其他收入 −（录入成本 + 薪酬成本 + 社保公积金成本），按所选月份计算。
       </p>
 
       {/* Table */}
@@ -494,7 +503,7 @@ export default function SalesUnits() {
                         className={`text-right font-semibold ${
                           stats.profit >= 0 ? 'text-emerald-600' : 'text-red-600'
                         }`}
-                        title={`结算 ${formatCurrency(stats.settlementIncome)} + 其他 ${formatCurrency(stats.otherIncome)} - 成本 ${formatCurrency(stats.manualCost)} - 人力 ${formatCurrency(stats.salaryCost)}`}
+                        title={`结算 ${formatCurrency(stats.settlementIncome)} + 其他 ${formatCurrency(stats.otherIncome)} - 录入 ${formatCurrency(stats.manualCost)} - 薪酬 ${formatCurrency(stats.salaryPayCost)} - 社保公积金 ${formatCurrency(stats.socialHousingFundCost)}`}
                       >
                         {formatCurrency(stats.profit)}
                       </TableCell>

@@ -37,6 +37,10 @@ export type EstimateSummaryInput = {
   totalCost: number
   manualCost?: number
   salaryCost?: number
+  /** 薪酬成本（不含社保公积金） */
+  salaryPayCost?: number
+  /** 社保公积金成本 */
+  socialHousingFundCost?: number
   /** 当月销售提成（用于拆出固定成本、预填提成比例） */
   totalCommission?: number
 }
@@ -202,11 +206,16 @@ export default function MPerformanceEstimateSheet({
 
     const manual = nextSummary.manualCost ?? 0
     const salary = nextSummary.salaryCost ?? 0
-    const salaryWithoutCommission = Math.max(0, salary - commission)
+    const salaryPay = nextSummary.salaryPayCost
+      ?? Math.max(0, salary - (nextSummary.socialHousingFundCost ?? 0))
+    const socialFund = nextSummary.socialHousingFundCost
+      ?? Math.max(0, salary - salaryPay)
+    const salaryWithoutCommission = Math.max(0, salaryPay - commission)
     setCostHint(
       `固定成本已扣所选期间提成 ${formatCurrency(commission)}`
         + `（录入 ${formatCurrency(manual)}`
-        + ` + 人力非提成 ${formatCurrency(salaryWithoutCommission)}）`,
+        + ` + 薪酬非提成 ${formatCurrency(salaryWithoutCommission)}`
+        + ` + 社保公积金 ${formatCurrency(socialFund)}）`,
     )
     setImportedAt(new Date().toLocaleString('zh-CN', { hour12: false }))
   }

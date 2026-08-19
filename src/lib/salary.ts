@@ -705,9 +705,12 @@ export function getTotalSalaryCost(
 ): {
   units: UnitSalaryCost[];
   grandTotal: number;
+  /** 薪酬成本（不含社保公积金） */
   grandSalary: number;
   grandSocialInsurance: number;
   grandHousingFund: number;
+  /** 社保公积金成本 = 社保 + 公积金 */
+  grandSocialHousingFund: number;
   grandProductCommission: number;
   grandSalesCommission: number;
   grandLeaveDeduction: number;
@@ -729,6 +732,8 @@ export function getTotalSalaryCost(
   const grandSalary = units.reduce((sum, u) => sum + u.totalSalary, 0);
   const grandSocialInsurance = units.reduce((sum, u) => sum + u.totalSocialInsurance, 0);
   const grandHousingFund = units.reduce((sum, u) => sum + u.totalHousingFund, 0);
+  /** 社保 + 公积金（与薪酬成本分列） */
+  const grandSocialHousingFund = grandSocialInsurance + grandHousingFund;
   const grandProductCommission = units.reduce((sum, u) => sum + u.totalProductCommission, 0);
   const grandSalesCommission = units.reduce((sum, u) => sum + u.totalSalesCommission, 0);
   const grandLeaveDeduction = units.reduce((sum, u) => sum + u.totalLeaveDeduction, 0);
@@ -736,9 +741,11 @@ export function getTotalSalaryCost(
   return {
     units,
     grandTotal,
+    /** 薪酬成本（底薪/绩效/补贴/提成/请假与其他调整，不含社保公积金） */
     grandSalary,
     grandSocialInsurance,
     grandHousingFund,
+    grandSocialHousingFund,
     grandProductCommission,
     grandSalesCommission,
     grandLeaveDeduction,

@@ -166,6 +166,8 @@ filterUnitIds,
       monthlyAdjustments,productPersonCommissions,
       teamMgmtContext,
     );
+    const salaryPayCost = salaryData.grandSalary;
+    const socialHousingFundCost = salaryData.grandSocialHousingFund;
     const salaryCost = salaryData.grandTotal;
     const productCommission = salaryData.grandSalesCommission;
     const totalCost = manualCost + salaryCost;
@@ -181,6 +183,8 @@ filterUnitIds,
       totalCost,
       manualCost,
       salaryCost,
+      salaryPayCost,
+      socialHousingFundCost,
       productCommission,
       totalProfit,
       profitMargin,
@@ -302,8 +306,11 @@ filterUnitIds,
       monthlyAdjustments,productPersonCommissions,
       teamMgmtContext,
     );
-    if (salaryData.grandTotal > 0) {
-      catMap.set("人力成本（薪酬+社保+公积金）", salaryData.grandTotal);
+    if (salaryData.grandSalary > 0) {
+      catMap.set("薪酬成本", salaryData.grandSalary);
+    }
+    if (salaryData.grandSocialHousingFund > 0) {
+      catMap.set("社保公积金成本", salaryData.grandSocialHousingFund);
     }
     if (salaryData.grandSalesCommission > 0) {
       catMap.set("销售提成（单位×人员）", salaryData.grandSalesCommission);
@@ -345,6 +352,9 @@ filterUnitIds,
       isUp: false,
       color: "text-orange-600",
       bg: "bg-orange-50",
+      hint:
+        `薪酬 ${formatCurrency(stats.salaryPayCost)}`
+        + ` · 社保公积金 ${formatCurrency(stats.socialHousingFundCost)}`,
     },
     {
       title: "净利润",
@@ -503,17 +513,21 @@ filterUnitIds,
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{card.value}</div>
-                <div className="mt-1 flex items-center gap-1 text-xs">
-                  {card.isUp ? (
-                    <ArrowUpRight className="h-3 w-3 text-emerald-500" />
-                  ) : (
-                    <ArrowDownRight className="h-3 w-3 text-red-500" />
-                  )}
-                  <span className={card.isUp ? "text-emerald-600" : "text-red-500"}>
-                    {card.change}
-                  </span>
-                  <span className="text-muted-foreground">较上期</span>
-                </div>
+                {"hint" in card && card.hint ? (
+                  <p className="mt-1 text-xs text-muted-foreground">{card.hint}</p>
+                ) : (
+                  <div className="mt-1 flex items-center gap-1 text-xs">
+                    {card.isUp ? (
+                      <ArrowUpRight className="h-3 w-3 text-emerald-500" />
+                    ) : (
+                      <ArrowDownRight className="h-3 w-3 text-red-500" />
+                    )}
+                    <span className={card.isUp ? "text-emerald-600" : "text-red-500"}>
+                      {card.change}
+                    </span>
+                    <span className="text-muted-foreground">较上期</span>
+                  </div>
+                )}
               </CardContent>
             </Card>
           );

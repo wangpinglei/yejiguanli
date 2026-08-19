@@ -613,7 +613,7 @@ export default function CostManagement() {
       </div>
 
       {/* Summary Cards：录入侧概览 */}
-      <div id="section-overview" className="mb-6 grid scroll-mt-20 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      <div id="section-overview" className="mb-6 grid scroll-mt-20 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <Card>
           <CardContent className="flex items-center gap-4 p-5">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-cyan-50">
@@ -646,11 +646,28 @@ export default function CostManagement() {
               <Calculator className="h-6 w-6 text-blue-600" />
             </div>
             <div className="min-w-0">
-              <p className="text-sm text-muted-foreground">总人力成本</p>
-              <p className="text-xl font-bold text-blue-600">{formatCurrency(salaryCosts.grandTotal)}</p>
+              <p className="text-sm text-muted-foreground">薪酬成本</p>
+              <p className="text-xl font-bold text-blue-600">
+                {formatCurrency(salaryCosts.grandSalary)}
+              </p>
               <p className="text-[10px] text-muted-foreground">
-                薪资 {formatCurrency(salaryCosts.grandSalary)}
-                + 社保 {formatCurrency(salaryCosts.grandSocialInsurance)}
+                底薪/绩效/补贴/提成/调整（不含社保公积金）
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="flex items-center gap-4 p-5">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-red-50">
+              <Users className="h-6 w-6 text-red-600" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm text-muted-foreground">社保公积金成本</p>
+              <p className="text-xl font-bold text-red-600">
+                {formatCurrency(salaryCosts.grandSocialHousingFund)}
+              </p>
+              <p className="text-[10px] text-muted-foreground">
+                社保 {formatCurrency(salaryCosts.grandSocialInsurance)}
                 + 公积金 {formatCurrency(salaryCosts.grandHousingFund)}
               </p>
             </div>
@@ -682,7 +699,7 @@ export default function CostManagement() {
               <p className="text-[10px] text-muted-foreground">
                 个人 {formatCurrency(personalCommissionFromSales)}
                 + 团队 {formatCurrency(teamMgmtCommissionTotal)}
-                · 已计入总人力成本
+                · 已计入薪酬成本
               </p>
             </div>
           </CardContent>
@@ -733,7 +750,7 @@ export default function CostManagement() {
             <h3 className="text-base font-semibold">
               自动计入人力成本 / 实时薪资（{selectedMonth} 月度）
               <span className="ml-2 text-xs font-normal text-muted-foreground">
-                按人员管理入离职日期判定在岗
+                薪酬与社保公积金分列；按人员管理入离职日期判定在岗
               </span>
             </h3>
             <Badge variant="outline" className="border-blue-200 text-blue-700">
@@ -762,7 +779,9 @@ export default function CostManagement() {
                   <TableHead className="text-right">其他调整</TableHead>
                   <TableHead className="text-right">社保</TableHead>
                   <TableHead className="text-right">公积金</TableHead>
-                  <TableHead className="text-right">总人力成本</TableHead>
+                  <TableHead className="text-right">薪酬成本</TableHead>
+                  <TableHead className="text-right">社保公积金</TableHead>
+                  <TableHead className="text-right">人力合计</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -802,11 +821,19 @@ export default function CostManagement() {
                         <TableCell className="text-right text-amber-600">{sums.other >= 0 ? "+" : ""}{formatCurrency(sums.other)}</TableCell>
                         <TableCell className="text-right text-red-600">{formatCurrency(unit.totalSocialInsurance)}</TableCell>
                         <TableCell className="text-right text-cyan-600">{formatCurrency(unit.totalHousingFund)}</TableCell>
-                        <TableCell className="text-right font-bold text-blue-600">{formatCurrency(unit.totalCost)}</TableCell>
+                        <TableCell className="text-right font-medium text-blue-600">
+                          {formatCurrency(unit.totalSalary)}
+                        </TableCell>
+                        <TableCell className="text-right font-medium text-red-600">
+                          {formatCurrency(unit.totalSocialInsurance + unit.totalHousingFund)}
+                        </TableCell>
+                        <TableCell className="text-right font-bold text-blue-700">
+                          {formatCurrency(unit.totalCost)}
+                        </TableCell>
                       </TableRow>
                       {isExpanded && (
                         <TableRow key={unit.unitId + "-detail"} className="bg-blue-50/30">
-                          <TableCell colSpan={13} className="py-3">
+                          <TableCell colSpan={15} className="py-3">
                             <div className="ml-8 space-y-2">
                               {unit.details.map((d) => (
                                 <div key={d.personId} className="grid grid-cols-11 gap-2 rounded-lg border bg-card px-4 py-2 text-sm">
@@ -819,8 +846,12 @@ export default function CostManagement() {
                                   <span className="text-right text-amber-600">其他 {formatCurrency(d.otherBonus - d.otherDeduction)}</span>
                                   <span className="text-right text-red-600">社保 {formatCurrency(d.socialInsurance)}</span>
                                   <span className="text-right text-cyan-600">公积金 {formatCurrency(d.housingFund)}</span>
-                                  <span className="text-right text-muted-foreground">{d.adjustment?.note || "-"}</span>
-                                  <span className="text-right font-bold text-blue-600">{formatCurrency(d.total)}</span>
+                                  <span className="text-right text-blue-600">
+                                    薪酬 {formatCurrency(d.salaryTotal)}
+                                  </span>
+                                  <span className="text-right font-bold text-blue-700">
+                                    合计 {formatCurrency(d.total)}
+                                  </span>
                                 </div>
                               ))}
                               {unit.details.length === 0 && (
@@ -835,7 +866,7 @@ export default function CostManagement() {
                 })}
                 {salaryCosts.units.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={13} className="text-center py-12 text-muted-foreground">暂无在职人员数据</TableCell>
+                    <TableCell colSpan={15} className="text-center py-12 text-muted-foreground">暂无在职人员数据</TableCell>
                   </TableRow>
                 )}
               </TableBody>
