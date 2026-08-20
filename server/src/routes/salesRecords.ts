@@ -99,10 +99,29 @@ router.get("/", (req, res) => {
   const visibleIds = getVisibleUnitIds(req.user!);
   if (visibleIds !== null) {
     const idSet = new Set(visibleIds);
-    rows = rows.filter((r: any) => !r.sales_unit_id || idSet.has(r.sales_unit_id));
+    rows = rows.filter((r: any) => {
+      if (!r.sales_unit_id || idSet.has(r.sales_unit_id)) return true;
+      // 跨单位分业绩：本单位有人分到份额时也应可见
+      const mapped = rowToSalesRecord(r);
+      return (mapped.collaborators || []).some(
+        (c: { salesUnitId?: string; personnelId?: string }) => {
+          if (c.salesUnitId && idSet.has(c.salesUnitId)) return true;
+          return false;
+        },
+      );
+    });
   }
   const { salesUnitId, personnelId } = req.query;
-  if (salesUnitId) rows = rows.filter((r: any) => r.sales_unit_id === salesUnitId);
+  if (salesUnitId) {
+    const uid = String(salesUnitId);
+    rows = rows.filter((r: any) => {
+      if (r.sales_unit_id === uid) return true;
+      const mapped = rowToSalesRecord(r);
+      return (mapped.collaborators || []).some(
+        (c: { salesUnitId?: string }) => c.salesUnitId === uid,
+      );
+    });
+  }
   if (personnelId) {
     const pid = String(personnelId);
     rows = rows.filter((r: any) => {

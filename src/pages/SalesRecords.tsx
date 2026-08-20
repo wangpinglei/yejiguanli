@@ -618,7 +618,16 @@ export default function SalesRecords() {
           productName.toLowerCase().includes(search.toLowerCase()) ||
           (s.customerName || "").toLowerCase().includes(search.toLowerCase()) ||
           (s.externalOrderId || "").toLowerCase().includes(search.toLowerCase());
-        const matchUnit = filterUnit === "all" || s.salesUnitId === filterUnit;
+        const matchUnit =
+          filterUnit === "all"
+          || s.salesUnitId === filterUnit
+          || (s.collaborators || []).some((c) => {
+            if (c.salesUnitId === filterUnit) return true;
+            const p = personnel.find((x) => x.id === c.personnelId);
+            if (!p) return false;
+            return resolveUnitIdAt(p, s.saleDate) === filterUnit
+              || p.salesUnitId === filterUnit;
+          });
         const matchPerson =
           filterPerson === "all"
           || s.personnelId === filterPerson
