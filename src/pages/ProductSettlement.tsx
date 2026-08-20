@@ -34,6 +34,7 @@ import MBusinessDomainSection, {
   UNCATEGORIZED,
   getProductDomainKey,
 } from "./ProductSettlement/components/m-business-domain-section";
+import MUnitSettlementList from "./ProductSettlement/components/m-unit-settlement-list";
 
 function toggleIdInSet(prev: Set<string>, id: string): Set<string> {
   const next = new Set(prev);
@@ -101,6 +102,8 @@ export default function ProductSettlement() {
   const [settleConfigExpanded, setSettleConfigExpanded] = useState(true);
   /** 配置缺口速查：未设结算 / 未设个人提成 */
   const [configGapFilter, setConfigGapFilter] = useState<'all' | 'noSettle' | 'noCommission'>('all');
+  /** 结算列表视角：按单位（默认）| 按产品 */
+  const [settleViewMode, setSettleViewMode] = useState<'unit' | 'product'>('unit');
 
   // 按月过滤销售记录
   const monthlySales = useMemo(() => filterByMonth(salesRecords, selectedMonth), [salesRecords, selectedMonth]);
@@ -151,7 +154,8 @@ export default function ProductSettlement() {
     productsMissingSettle, productsMissingCommission,
   ]);
 
-  const showSettleConfig =
+  // 按单位视角始终可看；按产品需勾选业务域或走缺口速查
+  const showProductSettleList =
     configGapFilter !== 'all' || selectedDomainKeys.length > 0;
 
   function handleToggleGapFilter(next: 'noSettle' | 'noCommission') {
@@ -502,14 +506,7 @@ export default function ProductSettlement() {
         onUpdateCategory={handleUpdateProductCategory}
       />
 
-      {/* ==================== 第一部分：产品 × 单位 结算配置（按业务域 / 缺口速查） ==================== */}
-      {!showSettleConfig ? (
-        <Card className="mb-8 border-dashed">
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            请先在上方勾选业务域，或点击「未设结算 / 未设提成」速查配置缺口
-          </CardContent>
-        </Card>
-      ) : (
+      {/* ==================== 结算配置：按单位（默认）/ 按产品 ==================== */}
       <div className="mb-8 space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <button
@@ -530,11 +527,11 @@ export default function ProductSettlement() {
               </h3>
               <p className="text-xs text-muted-foreground mt-0.5">
                 {configGapFilter === 'noSettle' && (
-                  <>共 {settleConfigProducts.length} 个产品尚无任意单位结算配置</>
+                  <>共 {productsMissingSettle.length} 个产品尚无任意单位结算配置</>
                 )}
                 {configGapFilter === 'noCommission' && (
                   <>
-                    共 {settleConfigProducts.length} 个产品尚无「人员×产品」个人提成；
+                    共 {productsMissingCommission.length} 个产品尚无「人员×产品」个人提成；
                     请到
                     <Link to="/personnel" className="mx-1 text-violet-700 underline">
                       人员管理
@@ -542,9 +539,12 @@ export default function ProductSettlement() {
                     按人配置。下方仍可查看/补全结算。
                   </>
                 )}
-                {configGapFilter === 'all' && (
+                {configGapFilter === 'all' && settleViewMode === 'unit' && (
+                  <>按销售单位查看各业务域产品的结算比例；未配置项高亮提示</>
+                )}
+                {configGapFilter === 'all' && settleViewMode === 'product' && (
                   <>
-                    当前业务域：{selectedDomainLabel}
+                    当前业务域：{selectedDomainLabel || '（未勾选，请先勾选）'}
                     （{settleConfigProducts.length} 个产品）
                   </>
                 )}
@@ -556,7 +556,29 @@ export default function ProductSettlement() {
               )}
             </div>
           </button>
-          <div className="flex flex-wrap gap-2 shrink-0">
+          <div className="flex flex-wrap gap-2 shrink-0 items-center">
+            <div className="flex rounded-md border p-0.5 bg-muted/30">
+              <Button
+                type="button"
+                size="sm"
+                variant={settleViewMode === 'unit' ? 'default' : 'ghost'}
+                className="h-8"
+                onClick={() => setSettleViewMode('unit')}
+              >
+                <Building2 className="mr-1.5 h-3.5 w-3.5" />
+                按单位
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={settleViewMode === 'product' ? 'default' : 'ghost'}
+                className="h-8"
+                onClick={() => setSettleViewMode('product')}
+              >
+                <Package className="mr-1.5 h-3.5 w-3.5" />
+                按产品
+              </Button>
+            </div>
             <Button
               variant="ghost"
               size="sm"
@@ -564,7 +586,8 @@ export default function ProductSettlement() {
             >
               {settleConfigExpanded ? "折叠" : "展开"}
             </Button>
-            {canEdit && settleConfigExpanded && settleConfigProducts.length > 0 && units.length > 0 && (
+            {canEdit && settleConfigExpanded && settleViewMode === 'product'
+              && settleConfigProducts.length > 0 && units.length > 0 && (
               <Button variant="outline" size="sm" onClick={() => openBatchSettle("all")}>
                 <Layers className="mr-2 h-4 w-4" />
                 批量设置所选业务域产品
@@ -572,7 +595,35 @@ export default function ProductSettlement() {
             )}
           </div>
         </div>
-        {settleConfigExpanded && settleConfigProducts.map((product: Product) => {
+
+        {settleConfigExpanded && settleViewMode === 'unit' && (
+          <MUnitSettlementList
+            units={units}
+            products={filteredProducts}
+            upsList={upsList}
+            ppcList={ppcList}
+            monthlySales={monthlySales}
+            selectedMonth={selectedMonth}
+            canEdit={canEdit}
+            selectedDomainKeys={
+              configGapFilter === 'all' ? selectedDomainKeys : []
+            }
+            search={search}
+            gapFilter={configGapFilter}
+            onEdit={openSettleEdit}
+            onClear={handleSettleClear}
+          />
+        )}
+
+        {settleConfigExpanded && settleViewMode === 'product' && !showProductSettleList && (
+          <Card className="border-dashed">
+            <CardContent className="py-10 text-center text-sm text-muted-foreground">
+              请先在上方勾选业务域，或点击「未设结算 / 未设提成」速查配置缺口
+            </CardContent>
+          </Card>
+        )}
+
+        {settleConfigExpanded && settleViewMode === 'product' && showProductSettleList && settleConfigProducts.map((product: Product) => {
           const productUnits = getUnitsForProduct(product.id);
           const isExpanded = expandedSettleProductIds.has(product.id);
           const configuredCount = productUnits.filter((u) => findUps(product.id, u.id)).length;
@@ -741,7 +792,8 @@ export default function ProductSettlement() {
             </Card>
           );
         })}
-        {settleConfigExpanded && settleConfigProducts.length === 0 && (
+        {settleConfigExpanded && settleViewMode === 'product' && showProductSettleList
+          && settleConfigProducts.length === 0 && (
           <Card>
             <CardContent className="py-12 text-center text-muted-foreground text-sm">
               {configGapFilter === 'noSettle'
@@ -753,7 +805,6 @@ export default function ProductSettlement() {
           </Card>
         )}
       </div>
-      )}
 
       {/* ===== 编辑结算弹窗 ===== */}
       <Dialog open={!!editKey} onOpenChange={(open) => !open && setEditKey(null)}>
