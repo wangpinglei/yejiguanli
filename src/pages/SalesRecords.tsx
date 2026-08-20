@@ -752,6 +752,35 @@ export default function SalesRecords() {
     };
   }
 
+  function getRecorderPerson(saleDate: string) {
+    if (!user?.name) return undefined;
+    return personnel.find((p) => (p.name || "").trim() === user.name.trim());
+  }
+
+  function ensureRecorderOnForm() {
+    if (form.personnelId && form.salesUnitId) {
+      return { personnelId: form.personnelId, salesUnitId: form.salesUnitId };
+    }
+    const me = getRecorderPerson(form.saleDate);
+    const salesUnitId = me
+      ? (resolveUnitIdAt(me, form.saleDate) || me.salesUnitId || form.salesUnitId || salesUnits[0]?.id || "")
+      : (form.salesUnitId || salesUnits[0]?.id || "");
+    const personnelId = me?.id || form.personnelId || "";
+    if (personnelId !== form.personnelId || salesUnitId !== form.salesUnitId) {
+      setForm((prev) => ({ ...prev, personnelId, salesUnitId }));
+    }
+    return { personnelId, salesUnitId };
+  }
+
+  function getPrimaryShareLabel(c: SaleCollaborator) {
+    const person = personnel.find((p) => p.id === c.personnelId)
+      || personnel.find((p) => p.id === form.personnelId);
+    const unitId = c.salesUnitId || form.salesUnitId || getShareUnitId(c);
+    const unitName = salesUnits.find((u) => u.id === unitId)?.name || "-";
+    const name = person?.name || "-";
+    return `${unitName} · ${name}`;
+  }
+
   const totalAmount = form.quantity * form.unitPrice;
 
   const openAdd = () => {
@@ -760,10 +789,7 @@ export default function SalesRecords() {
     setShareMode("percent");
     setCollaborators([]);
     const saleDate = new Date().toISOString().slice(0, 10);
-    // 谁录入默认就是谁：按登录用户姓名匹配人员
-    const me = user?.name
-      ? personnel.find((p) => (p.name || "").trim() === user.name.trim())
-      : undefined;
+    const me = getRecorderPerson(saleDate);
     const defaultUnitId = me
       ? (resolveUnitIdAt(me, saleDate) || me.salesUnitId || salesUnits[0]?.id || "")
       : (salesUnits[0]?.id || "");
@@ -792,7 +818,17 @@ export default function SalesRecords() {
     setShareMode(mode);
     setCollaborators(
       splitOn
-        ? cols.map((c) => enrichShareRow(c, record.saleDate))
+        ? cols.map((c, idx) => {
+          const enriched = enrichShareRow(c, record.saleDate);
+          if (idx === 0) {
+            return {
+              ...enriched,
+              personnelId: record.personnelId || enriched.personnelId,
+              salesUnitId: record.salesUnitId || enriched.salesUnitId,
+            };
+          }
+          return enriched;
+        })
         : buildDefaultShares(
           record.personnelId || "",
           mode,
@@ -870,10 +906,19 @@ export default function SalesRecords() {
     let payloadCollaborators: SaleCollaborator[] | undefined;
     let payloadShareMode: SaleShareMode | undefined;
     if (isSplitPerformance) {
-      const list = collaborators.map((c) => ({
-        ...c,
-        salesUnitId: c.salesUnitId || getShareUnitId(c) || undefined,
-      }));
+      const list = collaborators.map((c, idx) => {
+        if (idx === 0) {
+          return {
+            ...c,
+            personnelId: form.personnelId || c.personnelId,
+            salesUnitId: form.salesUnitId || c.salesUnitId || getShareUnitId(c) || undefined,
+          };
+        }
+        return {
+          ...c,
+          salesUnitId: c.salesUnitId || getShareUnitId(c) || undefined,
+        };
+      });
       for (const c of list) {
         if (!c.salesUnitId) {
           alert("请为每一位分摊人选择销售单位");
@@ -891,7 +936,6 @@ export default function SalesRecords() {
       }
       payloadCollaborators = list;
       payloadShareMode = shareMode;
-      // 主责以分业绩第一行为准，避免与上方字段重复维护
       const primary = list[0];
       try {
         const payload = {
@@ -1756,8 +1800,8 @@ export default function SalesRecords() {
                     <Label className="mb-0">订单分业绩</Label>
                     <p className="text-[11px] text-muted-foreground">
                       {isSplitPerformance
-                        ? "第一行为主责；每人先选单位再选人员，可本单位或跨单位"
-                        : "开启后在下方配置多人分摊，可本单位或跨单位"}
+                        ? "主责固定为录单人，仅改比例/金额；其他人可选本单位或跨单位"
+                        : "开启后主责默认为录单人，再添加其他人分摊"}
                     </p>
                   </div>
                 </div>
@@ -1772,21 +1816,27 @@ export default function SalesRecords() {
                         setForm((prev) => ({
                           ...prev,
                           personnelId: first.personnelId,
-                          salesUnitId: first.salesUnitId || getShareUnitId(first) || prev.salesUnitId,
+                          salesUnitId:
+                            first.salesUnitId || getShareUnitId(first) || prev.salesUnitId,
                         }));
                       }
                       setIsSplitPerformance(false);
                       return;
                     }
+                    const primary = ensureRecorderOnForm();
+                    if (!primary.personnelId) {
+                      alert("未匹配到当前登录人对应的销售人员，请先在人员管理中维护同名人员");
+                      return;
+                    }
                     setIsSplitPerformance(true);
                     setCollaborators(
                       buildDefaultShares(
-                        form.personnelId,
+                        primary.personnelId,
                         shareMode,
                         form.quantity * form.unitPrice,
                         "",
-                        form.salesUnitId,
-                        form.salesUnitId,
+                        primary.salesUnitId,
+                        primary.salesUnitId,
                       ),
                     );
                   }}
@@ -1818,6 +1868,66 @@ export default function SalesRecords() {
                   {collaborators.map((c, idx) => {
                     const rowUnitId = getShareUnitId(c);
                     const peopleInUnit = getPersonnelForShareUnit(rowUnitId);
+                    if (idx === 0) {
+                      return (
+                        <div
+                          key={idx}
+                          className="grid grid-cols-[1fr_110px_auto] gap-2 items-center"
+                        >
+                          <div className="flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm">
+                            <span className="truncate">{getPrimaryShareLabel(c)}</span>
+                            <span className="ml-2 shrink-0 text-[11px] text-muted-foreground">
+                              （录单主责，无需再选）
+                            </span>
+                          </div>
+                          <div className="relative">
+                            {shareMode === "percent" ? (
+                              <>
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  max={100}
+                                  step={1}
+                                  value={c.sharePercent ?? ""}
+                                  onChange={(e) => {
+                                    const val = Number(e.target.value);
+                                    setCollaborators((prev) => {
+                                      const next = [...prev];
+                                      next[0] = { ...next[0], sharePercent: val };
+                                      return next;
+                                    });
+                                  }}
+                                />
+                                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                                  %
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  step={0.01}
+                                  value={c.shareAmount ?? ""}
+                                  onChange={(e) => {
+                                    const val = Number(e.target.value);
+                                    setCollaborators((prev) => {
+                                      const next = [...prev];
+                                      next[0] = { ...next[0], shareAmount: val };
+                                      return next;
+                                    });
+                                  }}
+                                />
+                                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                                  元
+                                </span>
+                              </>
+                            )}
+                          </div>
+                          <span className="text-xs text-muted-foreground text-center">主责</span>
+                        </div>
+                      );
+                    }
                     return (
                       <div
                         key={idx}
@@ -1838,13 +1948,6 @@ export default function SalesRecords() {
                               };
                               return next;
                             });
-                            if (idx === 0) {
-                              setForm((prev) => ({
-                                ...prev,
-                                salesUnitId: unitId,
-                                personnelId: "",
-                              }));
-                            }
                           }}
                         >
                           <SelectTrigger>
@@ -1868,18 +1971,11 @@ export default function SalesRecords() {
                               };
                               return next;
                             });
-                            if (idx === 0) {
-                              setForm((prev) => ({
-                                ...prev,
-                                personnelId: v,
-                                salesUnitId: rowUnitId || prev.salesUnitId,
-                              }));
-                            }
                           }}
                           disabled={!rowUnitId}
                         >
                           <SelectTrigger>
-                            <SelectValue placeholder={idx === 0 ? "选择人员" : "选择人员"} />
+                            <SelectValue placeholder="选择人员" />
                           </SelectTrigger>
                           <SelectContent>
                             {peopleInUnit.map((p) => (
@@ -1931,20 +2027,16 @@ export default function SalesRecords() {
                             </>
                           )}
                         </div>
-                        {idx > 0 ? (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            onClick={() =>
-                              setCollaborators((prev) => prev.filter((_, i) => i !== idx))
-                            }
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        ) : (
-                          <span className="text-xs text-muted-foreground text-center">主责</span>
-                        )}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() =>
+                            setCollaborators((prev) => prev.filter((_, i) => i !== idx))
+                          }
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
                       </div>
                     );
                   })}
