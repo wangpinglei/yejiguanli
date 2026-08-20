@@ -417,7 +417,7 @@ unitIds,
       .sort((a, b) => b.value - a.value);
   }, [filteredCosts, resolvedFilterUnitIds, personnel, salesRecords, products, selectedMonth, monthlyAdjustments, productPersonCommissions, teamMgmtContext]);
 
-  // 人员业绩排行（含合作分摊）
+  // 人员业绩排行（含订单分业绩）
   const personnelRanking = useMemo(() => {
     return personnel
       .map((p) => {

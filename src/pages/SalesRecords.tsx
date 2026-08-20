@@ -6,10 +6,15 @@ import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { calcSalePersonCommissionPreview } from "@/lib/commissionReward";
 import {
-  buildDefaultCollaborators,
+  buildDefaultShares,
+  formatShareLabel,
+  getCollaboratorsAmountSum,
   getCollaboratorsShareSum,
-  validateCollaborators,
+  getPersonShareAmount,
+  getSaleShareMode,
+  validatePerformanceSplit,
   type SaleCollaborator,
+  type SaleShareMode,
 } from "@/lib/saleCollaborators";
 import { resolveUnitIdAt } from "@/lib/unitAssignment";
 import type { SalesRecord } from "@/types";
@@ -554,7 +559,9 @@ export default function SalesRecords() {
     customerName: "",
     activityName: "",
   });
-  const [isCollaborate, setIsCollaborate] = useState(false);
+  /** 是否开启订单分业绩（编辑对应订单时配置） */
+  const [isSplitPerformance, setIsSplitPerformance] = useState(false);
+  const [shareMode, setShareMode] = useState<SaleShareMode>("percent");
   const [collaborators, setCollaborators] = useState<SaleCollaborator[]>([]);
   const isEditingSynced = Boolean(editingRecord?.synced);
 
@@ -704,7 +711,7 @@ export default function SalesRecords() {
       return s.collaborators
         .map((c) => {
           const name = personnel.find((p) => p.id === c.personnelId)?.name || "-";
-          return `${name} ${c.sharePercent}%`;
+          return formatShareLabel(s, c, name);
         })
         .join(" / ");
     }
@@ -720,7 +727,8 @@ export default function SalesRecords() {
 
   const openAdd = () => {
     setEditingRecord(null);
-    setIsCollaborate(false);
+    setIsSplitPerformance(false);
+    setShareMode("percent");
     setCollaborators([]);
     setForm({
       salesUnitId: salesUnits[0]?.id || "",
@@ -741,12 +749,14 @@ export default function SalesRecords() {
   const openEdit = (record: SalesRecord) => {
     setEditingRecord(record);
     const cols = record.collaborators || [];
-    const collaborate = cols.length >= 2;
-    setIsCollaborate(collaborate);
+    const splitOn = cols.length >= 2;
+    const mode = getSaleShareMode(record);
+    setIsSplitPerformance(splitOn);
+    setShareMode(mode);
     setCollaborators(
-      collaborate
+      splitOn
         ? cols.map((c) => ({ ...c }))
-        : buildDefaultCollaborators(record.personnelId || ""),
+        : buildDefaultShares(record.personnelId || "", mode, record.totalAmount || 0),
     );
     setForm({
       salesUnitId: record.salesUnitId,
@@ -764,6 +774,31 @@ export default function SalesRecords() {
     setDialogOpen(true);
   };
 
+  function handleChangeShareMode(nextMode: SaleShareMode) {
+    if (nextMode === shareMode) return;
+    const orderTotal = form.quantity * form.unitPrice;
+    setShareMode(nextMode);
+    setCollaborators((prev) => {
+      if (prev.length < 2) {
+        return buildDefaultShares(form.personnelId, nextMode, orderTotal);
+      }
+      if (nextMode === "amount") {
+        return prev.map((c) => {
+          const pct = Number(c.sharePercent) || 0;
+          const amount = Math.round(orderTotal * pct) / 100;
+          return { ...c, shareAmount: amount, sharePercent: pct };
+        });
+      }
+      return prev.map((c) => {
+        const amount = Number(c.shareAmount) || 0;
+        const pct = orderTotal > 0
+          ? Math.round((amount / orderTotal) * 1000) / 10
+          : 0;
+        return { ...c, sharePercent: pct, shareAmount: amount };
+      });
+    });
+  }
+
   const handleProductChange = (productId: string) => {
     const product = products.find((p) => p.id === productId);
     setForm({ ...form, productId, unitPrice: product?.unitPrice || 0 });
@@ -775,24 +810,29 @@ export default function SalesRecords() {
 
   const handleSubmit = async () => {
     if (!form.salesUnitId || !form.personnelId || !form.productId) return;
+    const orderTotal = form.quantity * form.unitPrice;
     let payloadCollaborators: SaleCollaborator[] | undefined;
-    if (isCollaborate) {
+    let payloadShareMode: SaleShareMode | undefined;
+    if (isSplitPerformance) {
       const list = collaborators.map((c, idx) =>
         idx === 0 ? { ...c, personnelId: form.personnelId } : c,
       );
-      const check = validateCollaborators(list);
+      const check = validatePerformanceSplit(shareMode, list, orderTotal);
       if (!check.ok) {
         alert(check.message);
         return;
       }
       payloadCollaborators = list;
+      payloadShareMode = shareMode;
     } else {
       payloadCollaborators = [];
+      payloadShareMode = undefined;
     }
     try {
       const payload = {
         ...form,
         collaborators: payloadCollaborators,
+        shareMode: payloadShareMode,
       };
       if (editingRecord) {
         await updateSalesRecord(editingRecord.id, payload);
@@ -1452,7 +1492,7 @@ export default function SalesRecords() {
                           <Badge variant="outline" className="text-xs">手动</Badge>
                         )}
                         {record.collaborators && record.collaborators.length > 1 && (
-                          <Badge className="bg-violet-100 text-violet-700 text-xs">合作</Badge>
+                          <Badge className="bg-violet-100 text-violet-700 text-xs">分业绩</Badge>
                         )}
                         {duplicateRecordIdSet.has(record.id) && (
                           <button
@@ -1480,7 +1520,7 @@ export default function SalesRecords() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            title={record.synced ? "编辑合作分摊" : "编辑"}
+                            title={record.synced ? "编辑订单分业绩" : "编辑"}
                             onClick={() => openEdit(record)}
                           >
                             <Pencil className="h-4 w-4" />
@@ -1564,14 +1604,14 @@ export default function SalesRecords() {
           <DialogHeader>
             <DialogTitle>
               {editingRecord
-                ? (isEditingSynced ? "编辑生态圈订单（合作分摊）" : "编辑销售记录")
+                ? (isEditingSynced ? "编辑生态圈订单（分业绩）" : "编辑销售记录")
                 : "新增销售记录"}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             {isEditingSynced && (
               <p className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">
-                生态圈订单：金额/产品/日期等由同步维护；可改主责人与合作分摊比例，下次同步不会覆盖分摊。
+                生态圈订单：金额/产品/日期等由同步维护；可改主责人与订单分业绩，下次同步不会覆盖分摊。
               </p>
             )}
             <div className="space-y-2">
@@ -1607,10 +1647,16 @@ export default function SalesRecords() {
                       ? resolveUnitIdAt(person, form.saleDate) || form.salesUnitId
                       : form.salesUnitId;
                     setForm({ ...form, personnelId: v, salesUnitId: unitId });
-                    if (isCollaborate) {
+                    if (isSplitPerformance) {
                       setCollaborators((prev) => {
                         const next = [...prev];
-                        if (next.length === 0) return buildDefaultCollaborators(v);
+                        if (next.length === 0) {
+                          return buildDefaultShares(
+                            v,
+                            shareMode,
+                            form.quantity * form.unitPrice,
+                          );
+                        }
                         next[0] = { ...next[0], personnelId: v };
                         return next;
                       });
@@ -1629,32 +1675,60 @@ export default function SalesRecords() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <Users className="h-4 w-4 text-violet-600" />
-                  <Label className="mb-0">合作分摊（多人 + 比例）</Label>
+                  <Label className="mb-0">订单分业绩</Label>
                 </div>
                 <Button
                   type="button"
-                  variant={isCollaborate ? "default" : "outline"}
+                  variant={isSplitPerformance ? "default" : "outline"}
                   size="sm"
                   onClick={() => {
-                    if (isCollaborate) {
-                      setIsCollaborate(false);
+                    if (isSplitPerformance) {
+                      setIsSplitPerformance(false);
                       return;
                     }
                     if (!form.personnelId) {
                       alert("请先选择主责销售");
                       return;
                     }
-                    setIsCollaborate(true);
-                    setCollaborators(buildDefaultCollaborators(form.personnelId));
+                    setIsSplitPerformance(true);
+                    setCollaborators(
+                      buildDefaultShares(
+                        form.personnelId,
+                        shareMode,
+                        form.quantity * form.unitPrice,
+                      ),
+                    );
                   }}
                 >
-                  {isCollaborate ? "关闭合作" : "开启合作"}
+                  {isSplitPerformance ? "取消分业绩" : "开启分业绩"}
                 </Button>
               </div>
-              {isCollaborate && (
+              {isSplitPerformance && (
                 <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-muted-foreground">分摊方式</span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={shareMode === "percent" ? "default" : "outline"}
+                      onClick={() => handleChangeShareMode("percent")}
+                    >
+                      按比例
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={shareMode === "amount" ? "default" : "outline"}
+                      onClick={() => handleChangeShareMode("amount")}
+                    >
+                      固定金额
+                    </Button>
+                  </div>
                   {collaborators.map((c, idx) => (
-                    <div key={idx} className="grid grid-cols-[1fr_100px_auto] gap-2 items-center">
+                    <div
+                      key={idx}
+                      className="grid grid-cols-[1fr_110px_auto] gap-2 items-center"
+                    >
                       <Select
                         value={c.personnelId || undefined}
                         onValueChange={(v) => {
@@ -1673,7 +1747,7 @@ export default function SalesRecords() {
                         }}
                       >
                         <SelectTrigger>
-                          <SelectValue placeholder={idx === 0 ? "主责人" : "合作人"} />
+                          <SelectValue placeholder={idx === 0 ? "主责人" : "分摊人"} />
                         </SelectTrigger>
                         <SelectContent>
                           {personnel
@@ -1688,22 +1762,48 @@ export default function SalesRecords() {
                         </SelectContent>
                       </Select>
                       <div className="relative">
-                        <Input
-                          type="number"
-                          min={0}
-                          max={100}
-                          step={1}
-                          value={c.sharePercent}
-                          onChange={(e) => {
-                            const val = Number(e.target.value);
-                            setCollaborators((prev) => {
-                              const next = [...prev];
-                              next[idx] = { ...next[idx], sharePercent: val };
-                              return next;
-                            });
-                          }}
-                        />
-                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+                        {shareMode === "percent" ? (
+                          <>
+                            <Input
+                              type="number"
+                              min={0}
+                              max={100}
+                              step={1}
+                              value={c.sharePercent ?? ""}
+                              onChange={(e) => {
+                                const val = Number(e.target.value);
+                                setCollaborators((prev) => {
+                                  const next = [...prev];
+                                  next[idx] = { ...next[idx], sharePercent: val };
+                                  return next;
+                                });
+                              }}
+                            />
+                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                              %
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <Input
+                              type="number"
+                              min={0}
+                              step={0.01}
+                              value={c.shareAmount ?? ""}
+                              onChange={(e) => {
+                                const val = Number(e.target.value);
+                                setCollaborators((prev) => {
+                                  const next = [...prev];
+                                  next[idx] = { ...next[idx], shareAmount: val };
+                                  return next;
+                                });
+                              }}
+                            />
+                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                              元
+                            </span>
+                          </>
+                        )}
                       </div>
                       {idx > 0 ? (
                         <Button
@@ -1727,15 +1827,46 @@ export default function SalesRecords() {
                       variant="outline"
                       size="sm"
                       onClick={() =>
-                        setCollaborators((prev) => [...prev, { personnelId: "", sharePercent: 0 }])
+                        setCollaborators((prev) => [
+                          ...prev,
+                          shareMode === "amount"
+                            ? { personnelId: "", shareAmount: 0 }
+                            : { personnelId: "", sharePercent: 0 },
+                        ])
                       }
                     >
                       <Plus className="mr-1 h-3.5 w-3.5" />
                       添加人员
                     </Button>
-                    <span className={`text-xs ${Math.abs(getCollaboratorsShareSum(collaborators) - 100) < 0.01 ? "text-emerald-600" : "text-amber-600"}`}>
-                      合计 {getCollaboratorsShareSum(collaborators).toFixed(1)}%
-                    </span>
+                    {shareMode === "percent" ? (
+                      <span
+                        className={
+                          `text-xs ${
+                            Math.abs(getCollaboratorsShareSum(collaborators) - 100) < 0.01
+                              ? "text-emerald-600"
+                              : "text-amber-600"
+                          }`
+                        }
+                      >
+                        合计 {getCollaboratorsShareSum(collaborators).toFixed(1)}%
+                      </span>
+                    ) : (
+                      <span
+                        className={
+                          `text-xs ${
+                            Math.abs(
+                              getCollaboratorsAmountSum(collaborators) - totalAmount,
+                            ) < 0.05
+                              ? "text-emerald-600"
+                              : "text-amber-600"
+                          }`
+                        }
+                      >
+                        合计 {formatCurrency(getCollaboratorsAmountSum(collaborators))}
+                        {" / "}
+                        {formatCurrency(totalAmount)}
+                      </span>
+                    )}
                   </div>
                 </div>
               )}
@@ -1851,14 +1982,23 @@ export default function SalesRecords() {
                   },
                   ppcList,
                 );
-                const primaryShare = isCollaborate
-                  ? (collaborators[0]?.sharePercent || 0) / 100
-                  : 1;
+                const primaryShareAmt = isSplitPerformance
+                  ? getPersonShareAmount(
+                    {
+                      personnelId: form.personnelId,
+                      collaborators,
+                      shareMode,
+                      totalAmount,
+                    },
+                    form.personnelId,
+                  )
+                  : totalAmount;
+                const primaryShare = totalAmount > 0 ? primaryShareAmt / totalAmount : 1;
                 const shown = commission * primaryShare;
                 return (
                   <div className="rounded-lg bg-violet-50 p-3 flex flex-col justify-center">
                     <span className="text-sm text-violet-700">
-                      {isCollaborate ? "主责提成预估" : "提成预估"}
+                      {isSplitPerformance ? "主责提成预估" : "提成预估"}
                     </span>
                     <span className="text-lg font-bold text-violet-700">{formatCurrency(shown)}</span>
                     <span className="text-[10px] text-muted-foreground mt-0.5">按成本管理配置</span>

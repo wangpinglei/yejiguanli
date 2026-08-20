@@ -237,17 +237,23 @@ export interface Product {
   settlementNote?: string; // 结算说明
 }
 
-/** 合作单分摊人（比例合计 100） */
+/** 订单分业绩方式 */
+export type SaleShareMode = "percent" | "amount";
+
+/** 订单分业绩人员 */
 export interface SaleCollaborator {
   personnelId: string;
-  sharePercent: number;
+  /** 按比例时：0~100 */
+  sharePercent?: number;
+  /** 固定金额时：分到的实收金额 */
+  shareAmount?: number;
 }
 
 // 销售记录
 export interface SalesRecord {
   id: string;
   salesUnitId: string;
-  /** 主责人（合作单时通常为分摊列表第一人） */
+  /** 主责人（分业绩时通常为分摊列表第一人） */
   personnelId: string;
   productId: string;
   quantity: number;
@@ -256,10 +262,12 @@ export interface SalesRecord {
   saleDate: string;
   remark: string;
   /**
-   * 合作分摊：多人 + 比例；空/未设 = 业绩与提成 100% 归 personnelId
+   * 订单分业绩：多人分摊；空/未设 = 业绩与提成 100% 归 personnelId
    * 单位结算仍按整单金额，不受分摊影响
    */
   collaborators?: SaleCollaborator[];
+  /** 分业绩方式：percent 按比例 / amount 固定金额 */
+  shareMode?: SaleShareMode;
   // 生态圈同步标记
   synced?: boolean; // 是否来自生态圈同步
   externalOrderId?: string; // 生态圈订单号

@@ -531,7 +531,7 @@ export default function PersonnelPage() {
     return calculateMonthlySalary(salaryDetailPerson, salesRecords, products, salaryDetailMonth, adj, productPersonCommissions, teamMgmtContext);
   }, [salaryDetailPerson, salaryDetailMonth, salesRecords, products, monthlyAdjustments, productPersonCommissions, teamMgmtContext]);
 
-  // 月度销售额（含合作分摊）
+  // 月度销售额（含订单分业绩）
   const monthlyPersonnelSales = useMemo(() => {
     if (!salaryDetailPerson) return 0;
     return getPersonalSales(

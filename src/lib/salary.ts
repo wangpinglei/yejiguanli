@@ -99,7 +99,7 @@ export function isPersonnelOnDutyInMonth(
 
 /**
  * 计算个人销售额（给定销售记录）
- * 含合作分摊：按比例计入；无合作单时优先 personnelId，无 id 时按姓名兜底
+ * 含订单分业绩：按比例或固定金额计入；无分摊时优先 personnelId，无 id 时按姓名兜底
  */
 export function getPersonalSales(
   personId: string,

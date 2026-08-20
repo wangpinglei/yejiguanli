@@ -22,9 +22,10 @@ const UPDATE_SQL = `
   WHERE id=?
 `;
 
-function normalizeCollaborators(raw: any): string {
+function normalizeCollaborators(raw: any, shareMode?: string): string {
   if (raw == null || raw === "") return "";
   let list = raw;
+  let mode = shareMode === "amount" ? "amount" : "percent";
   if (typeof raw === "string") {
     try {
       list = JSON.parse(raw);
@@ -32,15 +33,20 @@ function normalizeCollaborators(raw: any): string {
       return "";
     }
   }
+  if (list && typeof list === "object" && !Array.isArray(list)) {
+    if (list.mode === "amount" || list.mode === "percent") mode = list.mode;
+    list = list.shares;
+  }
   if (!Array.isArray(list) || list.length === 0) return "";
   const cleaned = list
     .map((item: any) => ({
       personnelId: String(item?.personnelId || "").trim(),
-      sharePercent: Number(item?.sharePercent) || 0,
+      sharePercent: item?.sharePercent != null ? Number(item.sharePercent) : undefined,
+      shareAmount: item?.shareAmount != null ? Number(item.shareAmount) : undefined,
     }))
     .filter((c: { personnelId: string }) => c.personnelId);
   if (cleaned.length === 0) return "";
-  return JSON.stringify(cleaned);
+  return JSON.stringify({ mode, shares: cleaned });
 }
 
 function pick(body: any, existing?: any) {
@@ -51,7 +57,7 @@ function pick(body: any, existing?: any) {
     : (existing ? existing.total_amount : qty * price);
   const collaborators =
     body.collaborators !== undefined
-      ? normalizeCollaborators(body.collaborators)
+      ? normalizeCollaborators(body.collaborators, body.shareMode)
       : (existing?.collaborators || "");
   return {
     salesUnitId: body.salesUnitId ?? existing?.sales_unit_id ?? "",
@@ -101,7 +107,9 @@ router.get("/", (req, res) => {
     rows = rows.filter((r: any) => {
       if (r.personnel_id === pid) return true;
       const mapped = rowToSalesRecord(r);
-      return (mapped.collaborators || []).some((c) => c.personnelId === pid);
+      return (mapped.collaborators || []).some(
+        (c: { personnelId: string }) => c.personnelId === pid,
+      );
     });
   }
   res.json(rows.map(rowToSalesRecord));

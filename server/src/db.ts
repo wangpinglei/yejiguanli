@@ -1224,27 +1224,43 @@ export function rowToProduct(row: any) {
   };
 }
 
-function parseSalesCollaborators(raw: any) {
-  if (raw == null || raw === "") return undefined;
-  let arr = raw;
+function parseSalesCollaborators(row: any) {
+  const raw = row.collaborators;
+  if (raw == null || raw === "") {
+    return { collaborators: undefined as any, shareMode: undefined as any };
+  }
+  let data: any = raw;
   if (typeof raw === "string") {
     try {
-      arr = JSON.parse(raw);
+      data = JSON.parse(raw);
     } catch {
-      return undefined;
+      return { collaborators: undefined, shareMode: undefined };
     }
   }
-  if (!Array.isArray(arr) || arr.length === 0) return undefined;
-  return arr
+  let mode: "percent" | "amount" = "percent";
+  let arr: any = data;
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    if (data.mode === "amount" || data.mode === "percent") mode = data.mode;
+    arr = data.shares;
+  }
+  if (!Array.isArray(arr) || arr.length === 0) {
+    return { collaborators: undefined, shareMode: undefined };
+  }
+  const collaborators = arr
     .map((item: any) => ({
       personnelId: String(item?.personnelId || "").trim(),
-      sharePercent: Number(item?.sharePercent) || 0,
+      sharePercent: item?.sharePercent != null ? Number(item.sharePercent) : undefined,
+      shareAmount: item?.shareAmount != null ? Number(item.shareAmount) : undefined,
     }))
     .filter((c: { personnelId: string }) => c.personnelId);
+  return {
+    collaborators: collaborators.length > 0 ? collaborators : undefined,
+    shareMode: collaborators.length > 0 ? mode : undefined,
+  };
 }
 
 export function rowToSalesRecord(row: any) {
-  const collaborators = parseSalesCollaborators(row.collaborators);
+  const { collaborators, shareMode } = parseSalesCollaborators(row);
   return {
     id: row.id,
     salesUnitId: row.sales_unit_id || "",
@@ -1256,6 +1272,7 @@ export function rowToSalesRecord(row: any) {
     saleDate: row.sale_date,
     remark: row.remark || "",
     collaborators,
+    shareMode,
     synced: Boolean(row.synced),
     externalOrderId: row.external_order_id || undefined,
     customerName: row.customer_name || undefined,
