@@ -864,28 +864,23 @@ export default function SalesRecords() {
   };
 
   const handleSubmit = async () => {
-    if (!form.salesUnitId || !form.personnelId || !form.productId) return;
+    if (!form.productId) return;
+    if (!isSplitPerformance && (!form.salesUnitId || !form.personnelId)) return;
     const orderTotal = form.quantity * form.unitPrice;
     let payloadCollaborators: SaleCollaborator[] | undefined;
     let payloadShareMode: SaleShareMode | undefined;
     if (isSplitPerformance) {
-      const list = collaborators.map((c, idx) => {
-        const unitId = c.salesUnitId || getShareUnitId(c);
-        if (idx === 0) {
-          return {
-            ...c,
-            personnelId: form.personnelId,
-            salesUnitId: c.salesUnitId || form.salesUnitId || unitId || undefined,
-          };
-        }
-        return {
-          ...c,
-          salesUnitId: unitId || undefined,
-        };
-      });
+      const list = collaborators.map((c) => ({
+        ...c,
+        salesUnitId: c.salesUnitId || getShareUnitId(c) || undefined,
+      }));
       for (const c of list) {
         if (!c.salesUnitId) {
           alert("请为每一位分摊人选择销售单位");
+          return;
+        }
+        if (!c.personnelId) {
+          alert("请为每一位分摊人选择人员");
           return;
         }
       }
@@ -896,6 +891,26 @@ export default function SalesRecords() {
       }
       payloadCollaborators = list;
       payloadShareMode = shareMode;
+      // 主责以分业绩第一行为准，避免与上方字段重复维护
+      const primary = list[0];
+      try {
+        const payload = {
+          ...form,
+          salesUnitId: primary.salesUnitId || form.salesUnitId,
+          personnelId: primary.personnelId,
+          collaborators: payloadCollaborators,
+          shareMode: payloadShareMode,
+        };
+        if (editingRecord) {
+          await updateSalesRecord(editingRecord.id, payload);
+        } else {
+          await addSalesRecord(payload);
+        }
+        setDialogOpen(false);
+      } catch (error: any) {
+        alert("操作失败: " + (error.message || "未知错误"));
+      }
+      return;
     } else {
       payloadCollaborators = [];
       payloadShareMode = undefined;
@@ -1695,60 +1710,43 @@ export default function SalesRecords() {
                 disabled={isEditingSynced}
               />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>销售单位 *</Label>
-                <Select
-                  value={form.salesUnitId}
-                  onValueChange={handleUnitChange}
-                  disabled={isEditingSynced}
-                >
-                  <SelectTrigger><SelectValue placeholder="选择单位" /></SelectTrigger>
-                  <SelectContent>
-                    {salesUnits.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+            {!isSplitPerformance && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>销售单位 *</Label>
+                  <Select
+                    value={form.salesUnitId}
+                    onValueChange={handleUnitChange}
+                    disabled={isEditingSynced}
+                  >
+                    <SelectTrigger><SelectValue placeholder="选择单位" /></SelectTrigger>
+                    <SelectContent>
+                      {salesUnits.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>主责销售 *</Label>
+                  <Select
+                    value={form.personnelId}
+                    onValueChange={(v) => {
+                      const person = personnel.find((p) => p.id === v);
+                      const unitId = person
+                        ? resolveUnitIdAt(person, form.saleDate) || form.salesUnitId
+                        : form.salesUnitId;
+                      setForm({ ...form, personnelId: v, salesUnitId: unitId });
+                    }}
+                  >
+                    <SelectTrigger><SelectValue placeholder="选择人员" /></SelectTrigger>
+                    <SelectContent>
+                      {formPersonnel.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>{p.name} - {p.position}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label>主责销售 *</Label>
-                <Select
-                  value={form.personnelId}
-                  onValueChange={(v) => {
-                    const person = personnel.find((p) => p.id === v);
-                    const unitId = person
-                      ? resolveUnitIdAt(person, form.saleDate) || form.salesUnitId
-                      : form.salesUnitId;
-                    setForm({ ...form, personnelId: v, salesUnitId: unitId });
-                    if (isSplitPerformance) {
-                      setCollaborators((prev) => {
-                        const next = [...prev];
-                        if (next.length === 0) {
-                          return buildDefaultShares(
-                            v,
-                            shareMode,
-                            form.quantity * form.unitPrice,
-                            "",
-                            unitId,
-                            form.salesUnitId || unitId,
-                          );
-                        }
-                        next[0] = {
-                          ...next[0],
-                          personnelId: v,
-                          salesUnitId: unitId,
-                        };
-                        return next;
-                      });
-                    }
-                  }}
-                >
-                  <SelectTrigger><SelectValue placeholder="选择人员" /></SelectTrigger>
-                  <SelectContent>
-                    {formPersonnel.map((p) => <SelectItem key={p.id} value={p.id}>{p.name} - {p.position}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+            )}
 
             <div className="rounded-lg border p-3 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1757,7 +1755,9 @@ export default function SalesRecords() {
                   <div>
                     <Label className="mb-0">订单分业绩</Label>
                     <p className="text-[11px] text-muted-foreground">
-                      每人先选销售单位再选人员，支持本单位或跨单位
+                      {isSplitPerformance
+                        ? "第一行为主责；每人先选单位再选人员，可本单位或跨单位"
+                        : "开启后在下方配置多人分摊，可本单位或跨单位"}
                     </p>
                   </div>
                 </div>
@@ -1767,11 +1767,15 @@ export default function SalesRecords() {
                   size="sm"
                   onClick={() => {
                     if (isSplitPerformance) {
+                      const first = collaborators[0];
+                      if (first?.personnelId) {
+                        setForm((prev) => ({
+                          ...prev,
+                          personnelId: first.personnelId,
+                          salesUnitId: first.salesUnitId || getShareUnitId(first) || prev.salesUnitId,
+                        }));
+                      }
                       setIsSplitPerformance(false);
-                      return;
-                    }
-                    if (!form.personnelId) {
-                      alert("请先选择主责销售");
                       return;
                     }
                     setIsSplitPerformance(true);
