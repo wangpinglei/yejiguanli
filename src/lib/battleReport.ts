@@ -1,6 +1,7 @@
 /**
  * 单位战报计算
- * 业绩唯一凭证：本单位当月销售记录全量归集；团队总业绩 = 各行个人业绩之和
+ * 业绩唯一凭证：销售记录；订单分业绩按份额计入对应单位/人员（支持跨单位）
+ * 团队总业绩 = 本单位各人个人业绩之和
  */
 import {
   filterByMonth,
@@ -8,8 +9,12 @@ import {
   isSalesBattlePosition,
   EMPTY_SALARY,
 } from '@/lib/salary'
+import {
+  getPersonShareAmount,
+  getSaleShares,
+} from '@/lib/saleCollaborators'
 import { personBelongsToUnitInMonth } from '@/lib/unitAssignment'
-import type { Personnel, PerformanceTarget, SalesRecord } from '@/types'
+import type { Personnel, PerformanceTarget, SalesRecord, SaleCollaborator } from '@/types'
 
 export type PositionGroupMatch = {
   keyword: string
@@ -79,15 +84,25 @@ function findPersonByName(
   return inUnit || hits[0]
 }
 
+/** 该分摊份额是否计入本单位战报 */
+function shareBelongsToUnit(
+  c: SaleCollaborator,
+  person: Personnel | undefined,
+  salesUnitId: string,
+  yearMonth: string,
+): boolean {
+  if (c.salesUnitId) return c.salesUnitId === salesUnitId
+  if (person) return personBelongsToUnitInMonth(person, salesUnitId, yearMonth)
+  return false
+}
+
 /**
- * 按销售记录归集到人：
- * 1) personnelId 能命中系统人员 → 该人
- * 2) 否则按 salesPersonName 命中系统人员 → 该人（有错误 id 时仍以销售姓名为准）
- * 3) 否则按姓名记外援行
- * 4) 姓名也没有 → 未归集行（仍计入团队总业绩）
+ * 按销售记录归集到人（含订单分业绩 / 跨单位）：
+ * - 有分摊：按每人份额计入其所属单位战报
+ * - 无分摊：仍按订单 salesUnitId 整单归主责/姓名
  */
 function aggregateSalesByPerson(
-  monthUnitSales: SalesRecord[],
+  monthSales: SalesRecord[],
   personnel: Personnel[],
   salesUnitId: string,
   yearMonth: string,
@@ -96,6 +111,7 @@ function aggregateSalesByPerson(
   const agg = new Map<string, SalesAgg>()
 
   function add(row: Omit<SalesAgg, 'amount'>, amount: number) {
+    if (!(amount > 0)) return
     const prev = agg.get(row.personId)
     if (prev) {
       prev.amount += amount
@@ -104,7 +120,8 @@ function aggregateSalesByPerson(
     agg.set(row.personId, { ...row, amount })
   }
 
-  for (const r of monthUnitSales) {
+  function addFullOrderToPrimary(r: SalesRecord) {
+    if (r.salesUnitId !== salesUnitId) return
     const amount = Number(r.totalAmount) || 0
     const pid = (r.personnelId || '').trim()
     const sname = (r.salesPersonName || '').trim()
@@ -120,7 +137,7 @@ function aggregateSalesByPerson(
         },
         amount,
       )
-      continue
+      return
     }
 
     if (sname) {
@@ -146,7 +163,7 @@ function aggregateSalesByPerson(
           amount,
         )
       }
-      continue
+      return
     }
 
     add(
@@ -158,6 +175,44 @@ function aggregateSalesByPerson(
       },
       amount,
     )
+  }
+
+  for (const r of monthSales) {
+    const shares = getSaleShares(r)
+    if (shares.length >= 2) {
+      for (const c of shares) {
+        const pid = (c.personnelId || '').trim()
+        if (!pid) continue
+        const amount = getPersonShareAmount(r, pid)
+        const person = personnelById.get(pid)
+        if (!shareBelongsToUnit(c, person, salesUnitId, yearMonth)) continue
+
+        if (person) {
+          add(
+            {
+              personId: person.id,
+              name: person.name,
+              position: person.position || '',
+              isExternalPerson: false,
+            },
+            amount,
+          )
+        } else {
+          add(
+            {
+              personId: `ext_${pid}`,
+              name: pid,
+              position: '外援',
+              isExternalPerson: true,
+            },
+            amount,
+          )
+        }
+      }
+      continue
+    }
+
+    addFullOrderToPrimary(r)
   }
 
   return agg
@@ -185,13 +240,10 @@ export function buildUnitBattleReport(options: {
     matchPositionLabel,
   } = options
 
-  const monthUnitSales = filterByMonth(salesRecords, yearMonth).filter(
-    (r) => r.salesUnitId === salesUnitId,
-  )
-  const teamTotal = monthUnitSales.reduce((sum, r) => sum + (Number(r.totalAmount) || 0), 0)
+  const monthSales = filterByMonth(salesRecords, yearMonth)
 
   const salesAgg = aggregateSalesByPerson(
-    monthUnitSales,
+    monthSales,
     personnel,
     salesUnitId,
     yearMonth,
@@ -210,8 +262,6 @@ export function buildUnitBattleReport(options: {
       amount: 0,
     })
   }
-
-  // 本单位其他岗：当月有业绩已在 salesAgg；无业绩不展示
 
   const personnelTargets = new Map<string, number>()
   performanceTargets.forEach((t) => {
@@ -253,6 +303,8 @@ export function buildUnitBattleReport(options: {
 
   const totalTarget = rows.reduce((sum, row) => sum + (row.targetAmount || 0), 0)
   const battlePersonalSalesTotal = rows.reduce((sum, row) => sum + row.personalSales, 0)
+  // 团队总业绩 = 计入本单位的个人业绩之和（含跨单位分来的份额）
+  const teamTotal = battlePersonalSalesTotal
   const effectiveTeamTarget = totalTarget
   const teamDiff = effectiveTeamTarget > 0 ? teamTotal - effectiveTeamTarget : 0
   const effectiveTeamCompletionRate =
