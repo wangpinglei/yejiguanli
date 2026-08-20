@@ -458,6 +458,7 @@ function initSchema() {
     { name: "order_amount", ddl: "order_amount REAL DEFAULT 0" },
     { name: "order_type", ddl: "order_type TEXT DEFAULT ''" },
     { name: "activity_name", ddl: "activity_name TEXT DEFAULT ''" },
+    { name: "collaborators", ddl: "collaborators TEXT DEFAULT ''" },
   ]);
 
   ensureColumns("cost_records", [
@@ -1223,7 +1224,27 @@ export function rowToProduct(row: any) {
   };
 }
 
+function parseSalesCollaborators(raw: any) {
+  if (raw == null || raw === "") return undefined;
+  let arr = raw;
+  if (typeof raw === "string") {
+    try {
+      arr = JSON.parse(raw);
+    } catch {
+      return undefined;
+    }
+  }
+  if (!Array.isArray(arr) || arr.length === 0) return undefined;
+  return arr
+    .map((item: any) => ({
+      personnelId: String(item?.personnelId || "").trim(),
+      sharePercent: Number(item?.sharePercent) || 0,
+    }))
+    .filter((c: { personnelId: string }) => c.personnelId);
+}
+
 export function rowToSalesRecord(row: any) {
+  const collaborators = parseSalesCollaborators(row.collaborators);
   return {
     id: row.id,
     salesUnitId: row.sales_unit_id || "",
@@ -1234,6 +1255,7 @@ export function rowToSalesRecord(row: any) {
     totalAmount: row.total_amount || 0,
     saleDate: row.sale_date,
     remark: row.remark || "",
+    collaborators,
     synced: Boolean(row.synced),
     externalOrderId: row.external_order_id || undefined,
     customerName: row.customer_name || undefined,

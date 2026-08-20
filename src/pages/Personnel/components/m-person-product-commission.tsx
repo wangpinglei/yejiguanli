@@ -119,7 +119,8 @@ export default function MPersonProductCommission({
     if (!person) return new Set<string>()
     const ids = new Set<string>()
     salesRecords.forEach((s) => {
-      if (s.personnelId === person.id && s.productId) ids.add(s.productId)
+      const inCollab = (s.collaborators || []).some((c) => c.personnelId === person.id)
+      if ((s.personnelId === person.id || inCollab) && s.productId) ids.add(s.productId)
     })
     ppcList.forEach((c) => {
       if (c.personnelId === person.id) ids.add(c.productId)

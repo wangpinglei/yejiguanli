@@ -3,7 +3,7 @@ import { useData } from "@/context/DataContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, formatDate } from "@/lib/format";
-import { EMPTY_SALARY, calculateMonthlySalary, getFixedSalary, filterByMonth, MONTHLY_WORK_DAYS, isSalesBattlePosition } from "@/lib/salary";
+import { EMPTY_SALARY, calculateMonthlySalary, getFixedSalary, filterByMonth, MONTHLY_WORK_DAYS, isSalesBattlePosition, getPersonalSales } from "@/lib/salary";
 import type { Personnel, SalaryStructure } from "@/types";
 import {
   Plus,
@@ -182,8 +182,11 @@ export default function PersonnelPage() {
       const soldIds = new Set<string>();
       for (const s of salesRecords) {
         const hitPerson =
-          s.personnelId === person.id ||
-          (!s.personnelId && (s.salesPersonName || '').trim() === person.name);
+          s.personnelId === person.id
+          || (s.collaborators || []).some((c) => c.personnelId === person.id)
+          || (!s.personnelId
+            && (!s.collaborators || s.collaborators.length === 0)
+            && (s.salesPersonName || '').trim() === person.name);
         if (!hitPerson) continue;
         if (s.productId) soldIds.add(s.productId);
       }
@@ -528,12 +531,14 @@ export default function PersonnelPage() {
     return calculateMonthlySalary(salaryDetailPerson, salesRecords, products, salaryDetailMonth, adj, productPersonCommissions, teamMgmtContext);
   }, [salaryDetailPerson, salaryDetailMonth, salesRecords, products, monthlyAdjustments, productPersonCommissions, teamMgmtContext]);
 
-  // 月度销售额
+  // 月度销售额（含合作分摊）
   const monthlyPersonnelSales = useMemo(() => {
     if (!salaryDetailPerson) return 0;
-    return filterByMonth(salesRecords, salaryDetailMonth)
-      .filter((s) => s.personnelId === salaryDetailPerson.id)
-      .reduce((sum, s) => sum + s.totalAmount, 0);
+    return getPersonalSales(
+      salaryDetailPerson.id,
+      filterByMonth(salesRecords, salaryDetailMonth),
+      salaryDetailPerson.name,
+    );
   }, [salaryDetailPerson, salaryDetailMonth, salesRecords]);
 
   return (

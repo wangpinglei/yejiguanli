@@ -3,6 +3,7 @@ import { useData } from '@/context/DataContext'
 import { usePermissions } from '@/hooks/usePermissions'
 import { formatCurrency, formatDate } from '@/lib/format'
 import { filterByMonth } from '@/lib/salary'
+import { getPersonShareAmount } from '@/lib/saleCollaborators'
 import {
   formatCommissionRewardPeriod,
   groupCommissionRewardHits,
@@ -157,8 +158,8 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
 
   function calcPersonProductSales(personId: string, productId: string): number {
     return monthlySales
-      .filter((s) => s.personnelId === personId && s.productId === productId)
-      .reduce((sum, s) => sum + s.totalAmount, 0)
+      .filter((s) => s.productId === productId)
+      .reduce((sum, s) => sum + getPersonShareAmount(s, personId), 0)
   }
 
   function calcTeamSales(unitId: string): number {

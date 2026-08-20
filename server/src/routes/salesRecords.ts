@@ -10,17 +10,38 @@ const INSERT_SQL = `
   INSERT INTO sales_records (
     id, sales_unit_id, personnel_id, product_id, quantity, unit_price, total_amount, sale_date, remark,
     synced, external_order_id, customer_name, sales_unit_name, sales_person_name, product_name, synced_at,
-    order_number, product_module, order_amount, order_type, activity_name
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    order_number, product_module, order_amount, order_type, activity_name, collaborators
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `;
 
 const UPDATE_SQL = `
   UPDATE sales_records SET
     sales_unit_id=?, personnel_id=?, product_id=?, quantity=?, unit_price=?, total_amount=?, sale_date=?, remark=?,
     synced=?, external_order_id=?, customer_name=?, sales_unit_name=?, sales_person_name=?, product_name=?, synced_at=?,
-    order_number=?, product_module=?, order_amount=?, order_type=?, activity_name=?
+    order_number=?, product_module=?, order_amount=?, order_type=?, activity_name=?, collaborators=?
   WHERE id=?
 `;
+
+function normalizeCollaborators(raw: any): string {
+  if (raw == null || raw === "") return "";
+  let list = raw;
+  if (typeof raw === "string") {
+    try {
+      list = JSON.parse(raw);
+    } catch {
+      return "";
+    }
+  }
+  if (!Array.isArray(list) || list.length === 0) return "";
+  const cleaned = list
+    .map((item: any) => ({
+      personnelId: String(item?.personnelId || "").trim(),
+      sharePercent: Number(item?.sharePercent) || 0,
+    }))
+    .filter((c: { personnelId: string }) => c.personnelId);
+  if (cleaned.length === 0) return "";
+  return JSON.stringify(cleaned);
+}
 
 function pick(body: any, existing?: any) {
   const qty = body.quantity ?? existing?.quantity ?? 1;
@@ -28,6 +49,10 @@ function pick(body: any, existing?: any) {
   const totalAmount = body.totalAmount != null
     ? body.totalAmount
     : (existing ? existing.total_amount : qty * price);
+  const collaborators =
+    body.collaborators !== undefined
+      ? normalizeCollaborators(body.collaborators)
+      : (existing?.collaborators || "");
   return {
     salesUnitId: body.salesUnitId ?? existing?.sales_unit_id ?? "",
     personnelId: body.personnelId ?? existing?.personnel_id ?? "",
@@ -49,6 +74,7 @@ function pick(body: any, existing?: any) {
     orderAmount: body.orderAmount ?? existing?.order_amount ?? 0,
     orderType: body.orderType ?? existing?.order_type ?? "",
     activityName: body.activityName ?? existing?.activity_name ?? "",
+    collaborators,
   };
 }
 
@@ -56,7 +82,7 @@ function bind(f: ReturnType<typeof pick>) {
   return [
     f.salesUnitId, f.personnelId, f.productId, f.quantity, f.unitPrice, f.totalAmount, f.saleDate, f.remark,
     f.synced, f.externalOrderId, f.customerName, f.salesUnitName, f.salesPersonName, f.productName, f.syncedAt,
-    f.orderNumber, f.productModule, f.orderAmount, f.orderType, f.activityName,
+    f.orderNumber, f.productModule, f.orderAmount, f.orderType, f.activityName, f.collaborators,
   ];
 }
 
@@ -70,7 +96,14 @@ router.get("/", (req, res) => {
   }
   const { salesUnitId, personnelId } = req.query;
   if (salesUnitId) rows = rows.filter((r: any) => r.sales_unit_id === salesUnitId);
-  if (personnelId) rows = rows.filter((r: any) => r.personnel_id === personnelId);
+  if (personnelId) {
+    const pid = String(personnelId);
+    rows = rows.filter((r: any) => {
+      if (r.personnel_id === pid) return true;
+      const mapped = rowToSalesRecord(r);
+      return (mapped.collaborators || []).some((c) => c.personnelId === pid);
+    });
+  }
   res.json(rows.map(rowToSalesRecord));
 });
 

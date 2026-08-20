@@ -113,24 +113,26 @@ router.post("/", (req, res) => {
         `INSERT INTO sales_records (
           id, sales_unit_id, personnel_id, product_id, quantity, unit_price, total_amount, sale_date, remark,
           synced, external_order_id, customer_name, sales_unit_name, sales_person_name, product_name, synced_at,
-          order_number, product_module, order_amount, order_type, activity_name
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          order_number, product_module, order_amount, order_type, activity_name, collaborators
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           sr.id, sr.salesUnitId || "", sr.personnelId || "", sr.productId || "", sr.quantity || 1,
           sr.unitPrice || 0, sr.totalAmount || 0, sr.saleDate, sr.remark || "",
           sr.synced ? 1 : 0, sr.externalOrderId || "", sr.customerName || "", sr.salesUnitName || "",
           sr.salesPersonName || "", sr.productName || "", sr.syncedAt || null,
           sr.orderNumber || "", sr.productModule || "", sr.orderAmount || 0, sr.orderType || "", sr.activityName || "",
+          sr.collaborators ? JSON.stringify(sr.collaborators) : "",
         ],
         `UPDATE sales_records SET sales_unit_id=?, personnel_id=?, product_id=?, quantity=?, unit_price=?, total_amount=?, sale_date=?, remark=?,
           synced=?, external_order_id=?, customer_name=?, sales_unit_name=?, sales_person_name=?, product_name=?, synced_at=?,
-          order_number=?, product_module=?, order_amount=?, order_type=?, activity_name=? WHERE id=?`,
+          order_number=?, product_module=?, order_amount=?, order_type=?, activity_name=?, collaborators=? WHERE id=?`,
         [
           sr.salesUnitId || "", sr.personnelId || "", sr.productId || "", sr.quantity || 1,
           sr.unitPrice || 0, sr.totalAmount || 0, sr.saleDate, sr.remark || "",
           sr.synced ? 1 : 0, sr.externalOrderId || "", sr.customerName || "", sr.salesUnitName || "",
           sr.salesPersonName || "", sr.productName || "", sr.syncedAt || null,
           sr.orderNumber || "", sr.productModule || "", sr.orderAmount || 0, sr.orderType || "", sr.activityName || "",
+          sr.collaborators ? JSON.stringify(sr.collaborators) : "",
           sr.id,
         ]
       );

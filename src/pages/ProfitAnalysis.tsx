@@ -5,7 +5,8 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useAuth } from "@/context/AuthContext";
 import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, formatDate, getYearMonth } from "@/lib/format";
-import { getTotalSalaryCost, filterByMonth } from "@/lib/salary";
+import { getTotalSalaryCost, filterByMonth, getPersonalSales } from "@/lib/salary";
+import { getPersonShareAmount } from "@/lib/saleCollaborators";
 import { calcSaleSettlementIncome } from "@/lib/settlement";
 import {
   getEffectiveConfirmAmount,
@@ -416,13 +417,20 @@ unitIds,
       .sort((a, b) => b.value - a.value);
   }, [filteredCosts, resolvedFilterUnitIds, personnel, salesRecords, products, selectedMonth, monthlyAdjustments, productPersonCommissions, teamMgmtContext]);
 
-  // 人员业绩排行
+  // 人员业绩排行（含合作分摊）
   const personnelRanking = useMemo(() => {
     return personnel
       .map((p) => {
-        const records = filteredSales.filter((s) => s.personnelId === p.id);
-        const totalRevenue = records.reduce((sum, s) => sum + s.totalAmount, 0);
-        return { name: p.name, unit: salesUnits.find((u) => u.id === p.salesUnitId)?.name || "-", count: records.length, revenue: totalRevenue };
+        const totalRevenue = getPersonalSales(p.id, filteredSales, p.name);
+        const count = filteredSales.filter(
+          (s) => getPersonShareAmount(s, p.id) > 0,
+        ).length;
+        return {
+          name: p.name,
+          unit: salesUnits.find((u) => u.id === p.salesUnitId)?.name || "-",
+          count,
+          revenue: totalRevenue,
+        };
       })
       .filter((p) => p.revenue > 0)
       .sort((a, b) => b.revenue - a.revenue)

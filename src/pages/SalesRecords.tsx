@@ -5,9 +5,15 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { calcSalePersonCommissionPreview } from "@/lib/commissionReward";
+import {
+  buildDefaultCollaborators,
+  getCollaboratorsShareSum,
+  validateCollaborators,
+  type SaleCollaborator,
+} from "@/lib/saleCollaborators";
 import { resolveUnitIdAt } from "@/lib/unitAssignment";
 import type { SalesRecord } from "@/types";
-import { Plus, Search, Pencil, Trash2, RefreshCw, CloudDownload, Upload, FileSpreadsheet, CheckCircle2, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, RefreshCw, CloudDownload, Upload, FileSpreadsheet, CheckCircle2, AlertCircle, ChevronLeft, ChevronRight, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -548,6 +554,9 @@ export default function SalesRecords() {
     customerName: "",
     activityName: "",
   });
+  const [isCollaborate, setIsCollaborate] = useState(false);
+  const [collaborators, setCollaborators] = useState<SaleCollaborator[]>([]);
+  const isEditingSynced = Boolean(editingRecord?.synced);
 
   const idToProductName = useMemo(
     () => new Map(products.map((p) => [p.id, p.name || ""])),
@@ -601,7 +610,10 @@ export default function SalesRecords() {
           (s.customerName || "").toLowerCase().includes(search.toLowerCase()) ||
           (s.externalOrderId || "").toLowerCase().includes(search.toLowerCase());
         const matchUnit = filterUnit === "all" || s.salesUnitId === filterUnit;
-        const matchPerson = filterPerson === "all" || s.personnelId === filterPerson;
+        const matchPerson =
+          filterPerson === "all"
+          || s.personnelId === filterPerson
+          || (s.collaborators || []).some((c) => c.personnelId === filterPerson);
         const matchSync = filterSync === "all" || (filterSync === "synced" ? s.synced : !s.synced);
         const domainKey = product ? getProductDomainKey(product) : UNCATEGORIZED;
         const matchDomain = filterDomain === "all" || domainKey === filterDomain;
@@ -688,6 +700,14 @@ export default function SalesRecords() {
     return s.salesUnitName || "（未匹配）";
   };
   const getPersonnelName = (s: SalesRecord) => {
+    if (s.collaborators && s.collaborators.length > 1) {
+      return s.collaborators
+        .map((c) => {
+          const name = personnel.find((p) => p.id === c.personnelId)?.name || "-";
+          return `${name} ${c.sharePercent}%`;
+        })
+        .join(" / ");
+    }
     if (s.personnelId) return personnel.find((p) => p.id === s.personnelId)?.name || s.salesPersonName || "-";
     return s.salesPersonName || "（未匹配）";
   };
@@ -700,6 +720,8 @@ export default function SalesRecords() {
 
   const openAdd = () => {
     setEditingRecord(null);
+    setIsCollaborate(false);
+    setCollaborators([]);
     setForm({
       salesUnitId: salesUnits[0]?.id || "",
       personnelId: "",
@@ -717,8 +739,15 @@ export default function SalesRecords() {
   };
 
   const openEdit = (record: SalesRecord) => {
-    if (record.synced) return; // 同步记录不可编辑
     setEditingRecord(record);
+    const cols = record.collaborators || [];
+    const collaborate = cols.length >= 2;
+    setIsCollaborate(collaborate);
+    setCollaborators(
+      collaborate
+        ? cols.map((c) => ({ ...c }))
+        : buildDefaultCollaborators(record.personnelId || ""),
+    );
     setForm({
       salesUnitId: record.salesUnitId,
       personnelId: record.personnelId,
@@ -746,11 +775,29 @@ export default function SalesRecords() {
 
   const handleSubmit = async () => {
     if (!form.salesUnitId || !form.personnelId || !form.productId) return;
+    let payloadCollaborators: SaleCollaborator[] | undefined;
+    if (isCollaborate) {
+      const list = collaborators.map((c, idx) =>
+        idx === 0 ? { ...c, personnelId: form.personnelId } : c,
+      );
+      const check = validateCollaborators(list);
+      if (!check.ok) {
+        alert(check.message);
+        return;
+      }
+      payloadCollaborators = list;
+    } else {
+      payloadCollaborators = [];
+    }
     try {
+      const payload = {
+        ...form,
+        collaborators: payloadCollaborators,
+      };
       if (editingRecord) {
-        await updateSalesRecord(editingRecord.id, form);
+        await updateSalesRecord(editingRecord.id, payload);
       } else {
-        await addSalesRecord(form);
+        await addSalesRecord(payload);
       }
       setDialogOpen(false);
     } catch (error: any) {
@@ -1404,6 +1451,9 @@ export default function SalesRecords() {
                         ) : (
                           <Badge variant="outline" className="text-xs">手动</Badge>
                         )}
+                        {record.collaborators && record.collaborators.length > 1 && (
+                          <Badge className="bg-violet-100 text-violet-700 text-xs">合作</Badge>
+                        )}
                         {duplicateRecordIdSet.has(record.id) && (
                           <button
                             type="button"
@@ -1425,16 +1475,21 @@ export default function SalesRecords() {
                       </div>
                     </TableCell>
                     <TableCell className="text-right">
-                      {record.synced ? (
-                        <span className="text-xs text-muted-foreground">只读</span>
-                      ) : canEditSales && !isReadOnly ? (
+                      {canEditSales && !isReadOnly ? (
                         <div className="flex justify-end gap-1">
-                          <Button variant="ghost" size="icon" onClick={() => openEdit(record)}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title={record.synced ? "编辑合作分摊" : "编辑"}
+                            onClick={() => openEdit(record)}
+                          >
                             <Pencil className="h-4 w-4" />
                           </Button>
-                          <Button variant="ghost" size="icon" onClick={() => setDeleteId(record.id)}>
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
+                          {!record.synced && (
+                            <Button variant="ghost" size="icon" onClick={() => setDeleteId(record.id)}>
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          )}
                         </div>
                       ) : (
                         <span className="text-xs text-muted-foreground">仅查看</span>
@@ -1505,19 +1560,37 @@ export default function SalesRecords() {
 
       {/* Add/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editingRecord ? "编辑销售记录" : "新增销售记录"}</DialogTitle>
+            <DialogTitle>
+              {editingRecord
+                ? (isEditingSynced ? "编辑生态圈订单（合作分摊）" : "编辑销售记录")
+                : "新增销售记录"}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
+            {isEditingSynced && (
+              <p className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">
+                生态圈订单：金额/产品/日期等由同步维护；可改主责人与合作分摊比例，下次同步不会覆盖分摊。
+              </p>
+            )}
             <div className="space-y-2">
               <Label>客户姓名</Label>
-              <Input value={form.customerName} onChange={(e) => setForm({ ...form, customerName: e.target.value })} placeholder="客户名称" />
+              <Input
+                value={form.customerName}
+                onChange={(e) => setForm({ ...form, customerName: e.target.value })}
+                placeholder="客户名称"
+                disabled={isEditingSynced}
+              />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>销售单位 *</Label>
-                <Select value={form.salesUnitId} onValueChange={handleUnitChange}>
+                <Select
+                  value={form.salesUnitId}
+                  onValueChange={handleUnitChange}
+                  disabled={isEditingSynced}
+                >
                   <SelectTrigger><SelectValue placeholder="选择单位" /></SelectTrigger>
                   <SelectContent>
                     {salesUnits.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
@@ -1525,7 +1598,7 @@ export default function SalesRecords() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>销售人员 *</Label>
+                <Label>主责销售 *</Label>
                 <Select
                   value={form.personnelId}
                   onValueChange={(v) => {
@@ -1534,6 +1607,14 @@ export default function SalesRecords() {
                       ? resolveUnitIdAt(person, form.saleDate) || form.salesUnitId
                       : form.salesUnitId;
                     setForm({ ...form, personnelId: v, salesUnitId: unitId });
+                    if (isCollaborate) {
+                      setCollaborators((prev) => {
+                        const next = [...prev];
+                        if (next.length === 0) return buildDefaultCollaborators(v);
+                        next[0] = { ...next[0], personnelId: v };
+                        return next;
+                      });
+                    }
                   }}
                 >
                   <SelectTrigger><SelectValue placeholder="选择人员" /></SelectTrigger>
@@ -1543,9 +1624,130 @@ export default function SalesRecords() {
                 </Select>
               </div>
             </div>
+
+            <div className="rounded-lg border p-3 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Users className="h-4 w-4 text-violet-600" />
+                  <Label className="mb-0">合作分摊（多人 + 比例）</Label>
+                </div>
+                <Button
+                  type="button"
+                  variant={isCollaborate ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => {
+                    if (isCollaborate) {
+                      setIsCollaborate(false);
+                      return;
+                    }
+                    if (!form.personnelId) {
+                      alert("请先选择主责销售");
+                      return;
+                    }
+                    setIsCollaborate(true);
+                    setCollaborators(buildDefaultCollaborators(form.personnelId));
+                  }}
+                >
+                  {isCollaborate ? "关闭合作" : "开启合作"}
+                </Button>
+              </div>
+              {isCollaborate && (
+                <div className="space-y-2">
+                  {collaborators.map((c, idx) => (
+                    <div key={idx} className="grid grid-cols-[1fr_100px_auto] gap-2 items-center">
+                      <Select
+                        value={c.personnelId || undefined}
+                        onValueChange={(v) => {
+                          setCollaborators((prev) => {
+                            const next = [...prev];
+                            next[idx] = { ...next[idx], personnelId: v };
+                            return next;
+                          });
+                          if (idx === 0) {
+                            const person = personnel.find((p) => p.id === v);
+                            const unitId = person
+                              ? resolveUnitIdAt(person, form.saleDate) || form.salesUnitId
+                              : form.salesUnitId;
+                            setForm({ ...form, personnelId: v, salesUnitId: unitId });
+                          }
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder={idx === 0 ? "主责人" : "合作人"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {personnel
+                            .filter((p) =>
+                              p.salesUnitId === form.salesUnitId
+                              || resolveUnitIdAt(p, form.saleDate) === form.salesUnitId
+                              || p.id === c.personnelId,
+                            )
+                            .map((p) => (
+                              <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                      <div className="relative">
+                        <Input
+                          type="number"
+                          min={0}
+                          max={100}
+                          step={1}
+                          value={c.sharePercent}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            setCollaborators((prev) => {
+                              const next = [...prev];
+                              next[idx] = { ...next[idx], sharePercent: val };
+                              return next;
+                            });
+                          }}
+                        />
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+                      </div>
+                      {idx > 0 ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() =>
+                            setCollaborators((prev) => prev.filter((_, i) => i !== idx))
+                          }
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground text-center">主责</span>
+                      )}
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        setCollaborators((prev) => [...prev, { personnelId: "", sharePercent: 0 }])
+                      }
+                    >
+                      <Plus className="mr-1 h-3.5 w-3.5" />
+                      添加人员
+                    </Button>
+                    <span className={`text-xs ${Math.abs(getCollaboratorsShareSum(collaborators) - 100) < 0.01 ? "text-emerald-600" : "text-amber-600"}`}>
+                      合计 {getCollaboratorsShareSum(collaborators).toFixed(1)}%
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="space-y-2">
               <Label>销售产品 *</Label>
-              <Select value={form.productId} onValueChange={handleProductChange}>
+              <Select
+                value={form.productId}
+                onValueChange={handleProductChange}
+                disabled={isEditingSynced}
+              >
                 <SelectTrigger><SelectValue placeholder="选择产品" /></SelectTrigger>
                 <SelectContent>
                   {products.map((p) => (
@@ -1559,11 +1761,22 @@ export default function SalesRecords() {
             <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label>数量</Label>
-                <Input type="number" min="1" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: Number(e.target.value) })} />
+                <Input
+                  type="number"
+                  min="1"
+                  value={form.quantity}
+                  onChange={(e) => setForm({ ...form, quantity: Number(e.target.value) })}
+                  disabled={isEditingSynced}
+                />
               </div>
               <div className="space-y-2">
                 <Label>单价 (¥)</Label>
-                <Input type="number" value={form.unitPrice} onChange={(e) => setForm({ ...form, unitPrice: Number(e.target.value) })} />
+                <Input
+                  type="number"
+                  value={form.unitPrice}
+                  onChange={(e) => setForm({ ...form, unitPrice: Number(e.target.value) })}
+                  disabled={isEditingSynced}
+                />
               </div>
               <div className="space-y-2">
                 <Label>销售日期</Label>
@@ -1578,13 +1791,18 @@ export default function SalesRecords() {
                       : form.salesUnitId;
                     setForm({ ...form, saleDate, salesUnitId });
                   }}
+                  disabled={isEditingSynced}
                 />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>订单类型</Label>
-                <Select value={form.orderType} onValueChange={(v) => setForm({ ...form, orderType: v })}>
+                <Select
+                  value={form.orderType}
+                  onValueChange={(v) => setForm({ ...form, orderType: v })}
+                  disabled={isEditingSynced}
+                >
                   <SelectTrigger><SelectValue placeholder="选择类型" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="新购">新购</SelectItem>
@@ -1598,13 +1816,24 @@ export default function SalesRecords() {
               </div>
               <div className="space-y-2">
                 <Label>参加活动</Label>
-                <Input value={form.activityName} onChange={(e) => setForm({ ...form, activityName: e.target.value })} placeholder="如：小游戏风月庆 / 无活动" />
+                <Input
+                  value={form.activityName}
+                  onChange={(e) => setForm({ ...form, activityName: e.target.value })}
+                  placeholder="如：小游戏风月庆 / 无活动"
+                  disabled={isEditingSynced}
+                />
               </div>
             </div>
             <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label>订单金额 (¥)</Label>
-                <Input type="number" value={form.orderAmount} onChange={(e) => setForm({ ...form, orderAmount: Number(e.target.value) })} placeholder="原价" />
+                <Input
+                  type="number"
+                  value={form.orderAmount}
+                  onChange={(e) => setForm({ ...form, orderAmount: Number(e.target.value) })}
+                  placeholder="原价"
+                  disabled={isEditingSynced}
+                />
               </div>
               <div className="rounded-lg bg-primary/5 p-3 flex flex-col justify-center">
                 <span className="text-sm text-muted-foreground">实收金额</span>
@@ -1622,10 +1851,16 @@ export default function SalesRecords() {
                   },
                   ppcList,
                 );
+                const primaryShare = isCollaborate
+                  ? (collaborators[0]?.sharePercent || 0) / 100
+                  : 1;
+                const shown = commission * primaryShare;
                 return (
                   <div className="rounded-lg bg-violet-50 p-3 flex flex-col justify-center">
-                    <span className="text-sm text-violet-700">提成预估</span>
-                    <span className="text-lg font-bold text-violet-700">{formatCurrency(commission)}</span>
+                    <span className="text-sm text-violet-700">
+                      {isCollaborate ? "主责提成预估" : "提成预估"}
+                    </span>
+                    <span className="text-lg font-bold text-violet-700">{formatCurrency(shown)}</span>
                     <span className="text-[10px] text-muted-foreground mt-0.5">按成本管理配置</span>
                   </div>
                 );

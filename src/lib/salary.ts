@@ -4,6 +4,11 @@ import {
   resolvePayForMonth,
   resolvePpcListForSaleDate,
 } from "@/lib/compensation";
+import {
+  getPersonShareAmount,
+  saleInvolvesPerson,
+  scaleSaleForPerson,
+} from "@/lib/saleCollaborators";
 import { getPersonTeamMgmtCommission } from "@/lib/teamMgmtCommission";
 import {
   getUnitFixedPayRatioInMonth,
@@ -94,23 +99,25 @@ export function isPersonnelOnDutyInMonth(
 
 /**
  * 计算个人销售额（给定销售记录）
- * 优先按 personnelId；无 id 时按销售人员姓名匹配（导入/同步未挂人员时）
+ * 含合作分摊：按比例计入；无合作单时优先 personnelId，无 id 时按姓名兜底
  */
 export function getPersonalSales(
   personId: string,
   salesRecords: SalesRecord[],
   personName?: string
 ): number {
-  const name = (personName || "").trim();
-  return salesRecords
-    .filter((s) => {
-      if (s.personnelId === personId) return true;
-      if (!s.personnelId && name && (s.salesPersonName || "").trim() === name) {
-        return true;
-      }
-      return false;
-    })
-    .reduce((sum, s) => sum + s.totalAmount, 0);
+  return salesRecords.reduce((sum, s) => {
+    const share = getPersonShareAmount(s, personId);
+    if (share > 0) return sum + share;
+    if (
+      !s.personnelId
+      && (!s.collaborators || s.collaborators.length === 0)
+      && saleInvolvesPerson(s, personId, personName)
+    ) {
+      return sum + (s.totalAmount || 0);
+    }
+    return sum;
+  }, 0);
 }
 
 /** 非销售岗位关键词（命中则战报一定不展示；「销售」开头的岗位优先放行） */
@@ -251,7 +258,11 @@ export function calcManagementCommissionByProduct(
 ): number {
   const s = person.salary || EMPTY_SALARY;
   // 找出该人员本月涉及的所有产品 ID
-  const productIds = new Set(monthlyRecords.filter((r) => r.personnelId === person.id).map((r) => r.productId));
+  const productIds = new Set(
+    monthlyRecords
+      .filter((r) => saleInvolvesPerson(r, person.id, person.name))
+      .map((r) => r.productId),
+  );
   // 也加上所有产品（用于计算团队销售额中各产品的占比）
   // const allProductIds = new Set(monthlyRecords.map((r) => r.productId));
 
@@ -297,7 +308,9 @@ export function calcPersonalCommissionByProduct(
   _products: Product[],
   ppcList: ProductPersonCommission[]
 ): number {
-  const personRecords = monthlyRecords.filter((r) => r.personnelId === person.id);
+  const personRecords = monthlyRecords
+    .map((r) => scaleSaleForPerson(r, person.id))
+    .filter((r): r is SalesRecord => r != null);
   if (personRecords.length === 0) return 0;
 
   // 按「常规 / 分销」拆开，各自汇总门槛，避免跨段混算
@@ -820,6 +833,8 @@ export function getPersonProductCommission(
   salesRecords: SalesRecord[],
   products: Product[]
 ): number {
-  const personSales = salesRecords.filter((s) => s.personnelId === personId);
+  const personSales = salesRecords
+    .map((s) => scaleSaleForPerson(s, personId))
+    .filter((s): s is SalesRecord => s != null);
   return getTotalProductCommission(personSales, products);
 }
