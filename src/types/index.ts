@@ -243,6 +243,8 @@ export type SaleShareMode = "percent" | "amount";
 /** 订单分业绩人员 */
 export interface SaleCollaborator {
   personnelId: string;
+  /** 分摊时所属销售单位（支持跨单位；缺省可从人员归属推断） */
+  salesUnitId?: string;
   /** 按比例时：0~100 */
   sharePercent?: number;
   /** 固定金额时：分到的实收金额 */

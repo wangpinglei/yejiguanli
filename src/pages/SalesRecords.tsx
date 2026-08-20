@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { useData } from "@/context/DataContext";
+import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, formatDate } from "@/lib/format";
@@ -519,6 +520,7 @@ export default function SalesRecords() {
     products, ensureProductByName, ensurePersonnelByName, addSalesRecord, updateSalesRecord, deleteSalesRecord,
     refreshSyncedOrders, syncedLoading, productPersonCommissions: ppcList,
   } = useData();
+  const { user } = useAuth();
   const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleSalesRecords: salesRecords, canEditSales, isReadOnly } = usePermissions();
   const [search, setSearch] = useState("");
   const [filterUnit, setFilterUnit] = useState("all");
@@ -710,18 +712,45 @@ export default function SalesRecords() {
     if (s.collaborators && s.collaborators.length > 1) {
       return s.collaborators
         .map((c) => {
-          const name = personnel.find((p) => p.id === c.personnelId)?.name || "-";
-          return formatShareLabel(s, c, name);
+          const person = personnel.find((p) => p.id === c.personnelId);
+          const name = person?.name || "-";
+          const unitId = c.salesUnitId
+            || (person ? resolveUnitIdAt(person, s.saleDate) || person.salesUnitId : "");
+          const unitName = salesUnits.find((u) => u.id === unitId)?.name;
+          const label = unitName ? `${unitName}·${name}` : name;
+          return formatShareLabel(s, c, label);
         })
         .join(" / ");
     }
     if (s.personnelId) return personnel.find((p) => p.id === s.personnelId)?.name || s.salesPersonName || "-";
     return s.salesPersonName || "（未匹配）";
   };
-  const getProductName = (s: SalesRecord) => {
-    if (s.productId) return products.find((p) => p.id === s.productId)?.name || s.productName || "-";
-    return s.productName || "（未匹配）";
-  };
+
+  function getShareUnitId(c: SaleCollaborator): string {
+    if (c.salesUnitId) return c.salesUnitId;
+    const person = personnel.find((p) => p.id === c.personnelId);
+    if (!person) return "";
+    return resolveUnitIdAt(person, form.saleDate) || person.salesUnitId || "";
+  }
+
+  function getPersonnelForShareUnit(unitId: string) {
+    if (!unitId) return [];
+    return personnel.filter(
+      (p) =>
+        resolveUnitIdAt(p, form.saleDate) === unitId
+        || p.salesUnitId === unitId,
+    );
+  }
+
+  function enrichShareRow(c: SaleCollaborator, saleDate: string): SaleCollaborator {
+    if (c.salesUnitId || !c.personnelId) return { ...c };
+    const person = personnel.find((p) => p.id === c.personnelId);
+    if (!person) return { ...c };
+    return {
+      ...c,
+      salesUnitId: resolveUnitIdAt(person, saleDate) || person.salesUnitId || undefined,
+    };
+  }
 
   const totalAmount = form.quantity * form.unitPrice;
 
@@ -730,13 +759,21 @@ export default function SalesRecords() {
     setIsSplitPerformance(false);
     setShareMode("percent");
     setCollaborators([]);
+    const saleDate = new Date().toISOString().slice(0, 10);
+    // 谁录入默认就是谁：按登录用户姓名匹配人员
+    const me = user?.name
+      ? personnel.find((p) => (p.name || "").trim() === user.name.trim())
+      : undefined;
+    const defaultUnitId = me
+      ? (resolveUnitIdAt(me, saleDate) || me.salesUnitId || salesUnits[0]?.id || "")
+      : (salesUnits[0]?.id || "");
     setForm({
-      salesUnitId: salesUnits[0]?.id || "",
-      personnelId: "",
+      salesUnitId: defaultUnitId,
+      personnelId: me?.id || "",
       productId: "",
       quantity: 1,
       unitPrice: 0,
-      saleDate: new Date().toISOString().slice(0, 10),
+      saleDate,
       remark: "",
       orderAmount: 0,
       orderType: "",
@@ -755,8 +792,15 @@ export default function SalesRecords() {
     setShareMode(mode);
     setCollaborators(
       splitOn
-        ? cols.map((c) => ({ ...c }))
-        : buildDefaultShares(record.personnelId || "", mode, record.totalAmount || 0),
+        ? cols.map((c) => enrichShareRow(c, record.saleDate))
+        : buildDefaultShares(
+          record.personnelId || "",
+          mode,
+          record.totalAmount || 0,
+          "",
+          record.salesUnitId || "",
+          record.salesUnitId || "",
+        ),
     );
     setForm({
       salesUnitId: record.salesUnitId,
@@ -780,7 +824,14 @@ export default function SalesRecords() {
     setShareMode(nextMode);
     setCollaborators((prev) => {
       if (prev.length < 2) {
-        return buildDefaultShares(form.personnelId, nextMode, orderTotal);
+        return buildDefaultShares(
+          form.personnelId,
+          nextMode,
+          orderTotal,
+          "",
+          form.salesUnitId,
+          form.salesUnitId,
+        );
       }
       if (nextMode === "amount") {
         return prev.map((c) => {
@@ -798,6 +849,10 @@ export default function SalesRecords() {
       });
     });
   }
+  const getProductName = (s: SalesRecord) => {
+    if (s.productId) return products.find((p) => p.id === s.productId)?.name || s.productName || "-";
+    return s.productName || "（未匹配）";
+  };
 
   const handleProductChange = (productId: string) => {
     const product = products.find((p) => p.id === productId);
@@ -814,9 +869,26 @@ export default function SalesRecords() {
     let payloadCollaborators: SaleCollaborator[] | undefined;
     let payloadShareMode: SaleShareMode | undefined;
     if (isSplitPerformance) {
-      const list = collaborators.map((c, idx) =>
-        idx === 0 ? { ...c, personnelId: form.personnelId } : c,
-      );
+      const list = collaborators.map((c, idx) => {
+        const unitId = c.salesUnitId || getShareUnitId(c);
+        if (idx === 0) {
+          return {
+            ...c,
+            personnelId: form.personnelId,
+            salesUnitId: c.salesUnitId || form.salesUnitId || unitId || undefined,
+          };
+        }
+        return {
+          ...c,
+          salesUnitId: unitId || undefined,
+        };
+      });
+      for (const c of list) {
+        if (!c.salesUnitId) {
+          alert("请为每一位分摊人选择销售单位");
+          return;
+        }
+      }
       const check = validatePerformanceSplit(shareMode, list, orderTotal);
       if (!check.ok) {
         alert(check.message);
@@ -1655,9 +1727,16 @@ export default function SalesRecords() {
                             v,
                             shareMode,
                             form.quantity * form.unitPrice,
+                            "",
+                            unitId,
+                            form.salesUnitId || unitId,
                           );
                         }
-                        next[0] = { ...next[0], personnelId: v };
+                        next[0] = {
+                          ...next[0],
+                          personnelId: v,
+                          salesUnitId: unitId,
+                        };
                         return next;
                       });
                     }
@@ -1675,7 +1754,12 @@ export default function SalesRecords() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <Users className="h-4 w-4 text-violet-600" />
-                  <Label className="mb-0">订单分业绩</Label>
+                  <div>
+                    <Label className="mb-0">订单分业绩</Label>
+                    <p className="text-[11px] text-muted-foreground">
+                      每人先选销售单位再选人员，支持本单位或跨单位
+                    </p>
+                  </div>
                 </div>
                 <Button
                   type="button"
@@ -1696,6 +1780,9 @@ export default function SalesRecords() {
                         form.personnelId,
                         shareMode,
                         form.quantity * form.unitPrice,
+                        "",
+                        form.salesUnitId,
+                        form.salesUnitId,
                       ),
                     );
                   }}
@@ -1724,103 +1811,139 @@ export default function SalesRecords() {
                       固定金额
                     </Button>
                   </div>
-                  {collaborators.map((c, idx) => (
-                    <div
-                      key={idx}
-                      className="grid grid-cols-[1fr_110px_auto] gap-2 items-center"
-                    >
-                      <Select
-                        value={c.personnelId || undefined}
-                        onValueChange={(v) => {
-                          setCollaborators((prev) => {
-                            const next = [...prev];
-                            next[idx] = { ...next[idx], personnelId: v };
-                            return next;
-                          });
-                          if (idx === 0) {
-                            const person = personnel.find((p) => p.id === v);
-                            const unitId = person
-                              ? resolveUnitIdAt(person, form.saleDate) || form.salesUnitId
-                              : form.salesUnitId;
-                            setForm({ ...form, personnelId: v, salesUnitId: unitId });
-                          }
-                        }}
+                  {collaborators.map((c, idx) => {
+                    const rowUnitId = getShareUnitId(c);
+                    const peopleInUnit = getPersonnelForShareUnit(rowUnitId);
+                    return (
+                      <div
+                        key={idx}
+                        className="grid grid-cols-[1fr_1fr_110px_auto] gap-2 items-center"
                       >
-                        <SelectTrigger>
-                          <SelectValue placeholder={idx === 0 ? "主责人" : "分摊人"} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {personnel
-                            .filter((p) =>
-                              p.salesUnitId === form.salesUnitId
-                              || resolveUnitIdAt(p, form.saleDate) === form.salesUnitId
-                              || p.id === c.personnelId,
-                            )
-                            .map((p) => (
+                        <Select
+                          value={rowUnitId || undefined}
+                          onValueChange={(unitId) => {
+                            setCollaborators((prev) => {
+                              const next = [...prev];
+                              const prevPersonOk = next[idx].personnelId
+                                && getPersonnelForShareUnit(unitId)
+                                  .some((p) => p.id === next[idx].personnelId);
+                              next[idx] = {
+                                ...next[idx],
+                                salesUnitId: unitId,
+                                personnelId: prevPersonOk ? next[idx].personnelId : "",
+                              };
+                              return next;
+                            });
+                            if (idx === 0) {
+                              setForm((prev) => ({
+                                ...prev,
+                                salesUnitId: unitId,
+                                personnelId: "",
+                              }));
+                            }
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="销售单位" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {salesUnits.map((u) => (
+                              <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Select
+                          value={c.personnelId || undefined}
+                          onValueChange={(v) => {
+                            setCollaborators((prev) => {
+                              const next = [...prev];
+                              next[idx] = {
+                                ...next[idx],
+                                personnelId: v,
+                                salesUnitId: rowUnitId || next[idx].salesUnitId,
+                              };
+                              return next;
+                            });
+                            if (idx === 0) {
+                              setForm((prev) => ({
+                                ...prev,
+                                personnelId: v,
+                                salesUnitId: rowUnitId || prev.salesUnitId,
+                              }));
+                            }
+                          }}
+                          disabled={!rowUnitId}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder={idx === 0 ? "选择人员" : "选择人员"} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {peopleInUnit.map((p) => (
                               <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
                             ))}
-                        </SelectContent>
-                      </Select>
-                      <div className="relative">
-                        {shareMode === "percent" ? (
-                          <>
-                            <Input
-                              type="number"
-                              min={0}
-                              max={100}
-                              step={1}
-                              value={c.sharePercent ?? ""}
-                              onChange={(e) => {
-                                const val = Number(e.target.value);
-                                setCollaborators((prev) => {
-                                  const next = [...prev];
-                                  next[idx] = { ...next[idx], sharePercent: val };
-                                  return next;
-                                });
-                              }}
-                            />
-                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-                              %
-                            </span>
-                          </>
+                          </SelectContent>
+                        </Select>
+                        <div className="relative">
+                          {shareMode === "percent" ? (
+                            <>
+                              <Input
+                                type="number"
+                                min={0}
+                                max={100}
+                                step={1}
+                                value={c.sharePercent ?? ""}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value);
+                                  setCollaborators((prev) => {
+                                    const next = [...prev];
+                                    next[idx] = { ...next[idx], sharePercent: val };
+                                    return next;
+                                  });
+                                }}
+                              />
+                              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                                %
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <Input
+                                type="number"
+                                min={0}
+                                step={0.01}
+                                value={c.shareAmount ?? ""}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value);
+                                  setCollaborators((prev) => {
+                                    const next = [...prev];
+                                    next[idx] = { ...next[idx], shareAmount: val };
+                                    return next;
+                                  });
+                                }}
+                              />
+                              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                                元
+                              </span>
+                            </>
+                          )}
+                        </div>
+                        {idx > 0 ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() =>
+                              setCollaborators((prev) => prev.filter((_, i) => i !== idx))
+                            }
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
                         ) : (
-                          <>
-                            <Input
-                              type="number"
-                              min={0}
-                              step={0.01}
-                              value={c.shareAmount ?? ""}
-                              onChange={(e) => {
-                                const val = Number(e.target.value);
-                                setCollaborators((prev) => {
-                                  const next = [...prev];
-                                  next[idx] = { ...next[idx], shareAmount: val };
-                                  return next;
-                                });
-                              }}
-                            />
-                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-                              元
-                            </span>
-                          </>
+                          <span className="text-xs text-muted-foreground text-center">主责</span>
                         )}
                       </div>
-                      {idx > 0 ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          onClick={() =>
-                            setCollaborators((prev) => prev.filter((_, i) => i !== idx))
-                          }
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      ) : (
-                        <span className="text-xs text-muted-foreground text-center">主责</span>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                   <div className="flex items-center justify-between">
                     <Button
                       type="button"
@@ -1830,8 +1953,16 @@ export default function SalesRecords() {
                         setCollaborators((prev) => [
                           ...prev,
                           shareMode === "amount"
-                            ? { personnelId: "", shareAmount: 0 }
-                            : { personnelId: "", sharePercent: 0 },
+                            ? {
+                              personnelId: "",
+                              salesUnitId: form.salesUnitId || "",
+                              shareAmount: 0,
+                            }
+                            : {
+                              personnelId: "",
+                              salesUnitId: form.salesUnitId || "",
+                              sharePercent: 0,
+                            },
                         ])
                       }
                     >

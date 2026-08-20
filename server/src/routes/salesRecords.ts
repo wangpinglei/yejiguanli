@@ -41,6 +41,7 @@ function normalizeCollaborators(raw: any, shareMode?: string): string {
   const cleaned = list
     .map((item: any) => ({
       personnelId: String(item?.personnelId || "").trim(),
+      salesUnitId: String(item?.salesUnitId || "").trim() || undefined,
       sharePercent: item?.sharePercent != null ? Number(item.sharePercent) : undefined,
       shareAmount: item?.shareAmount != null ? Number(item.shareAmount) : undefined,
     }))

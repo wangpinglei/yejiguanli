@@ -1249,6 +1249,7 @@ function parseSalesCollaborators(row: any) {
   const collaborators = arr
     .map((item: any) => ({
       personnelId: String(item?.personnelId || "").trim(),
+      salesUnitId: String(item?.salesUnitId || "").trim() || undefined,
       sharePercent: item?.sharePercent != null ? Number(item.sharePercent) : undefined,
       shareAmount: item?.shareAmount != null ? Number(item.shareAmount) : undefined,
     }))

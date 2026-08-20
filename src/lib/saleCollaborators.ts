@@ -42,6 +42,7 @@ export function parseCollaboratorsJson(raw: unknown): ParsedPerformanceSplit | u
     const shareAmount = Number(row.shareAmount)
     list.push({
       personnelId,
+      salesUnitId: String(row.salesUnitId || '').trim() || undefined,
       sharePercent: Number.isFinite(sharePercent) ? sharePercent : undefined,
       shareAmount: Number.isFinite(shareAmount) ? shareAmount : undefined,
     })
@@ -221,18 +222,38 @@ export function buildDefaultShares(
   mode: SaleShareMode,
   orderTotal: number,
   secondId = '',
+  primaryUnitId = '',
+  secondUnitId = '',
 ): SaleCollaborator[] {
   if (mode === 'amount') {
     const half = Math.round((orderTotal / 2) * 100) / 100
     const rest = Math.round((orderTotal - half) * 100) / 100
     return [
-      { personnelId: primaryId, shareAmount: half, sharePercent: 50 },
-      { personnelId: secondId, shareAmount: rest, sharePercent: 50 },
+      {
+        personnelId: primaryId,
+        salesUnitId: primaryUnitId || undefined,
+        shareAmount: half,
+        sharePercent: 50,
+      },
+      {
+        personnelId: secondId,
+        salesUnitId: secondUnitId || primaryUnitId || undefined,
+        shareAmount: rest,
+        sharePercent: 50,
+      },
     ]
   }
   return [
-    { personnelId: primaryId, sharePercent: 50 },
-    { personnelId: secondId, sharePercent: 50 },
+    {
+      personnelId: primaryId,
+      salesUnitId: primaryUnitId || undefined,
+      sharePercent: 50,
+    },
+    {
+      personnelId: secondId,
+      salesUnitId: secondUnitId || primaryUnitId || undefined,
+      sharePercent: 50,
+    },
   ]
 }
 
