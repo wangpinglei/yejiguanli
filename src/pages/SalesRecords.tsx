@@ -12,7 +12,9 @@ import {
   getCollaboratorsAmountSum,
   getCollaboratorsShareSum,
   getPersonShareAmount,
+  getPersonShareQuantity,
   getSaleShareMode,
+  getSaleShares,
   validatePerformanceSplit,
   type SaleCollaborator,
   type SaleShareMode,
@@ -1060,9 +1062,96 @@ export default function SalesRecords() {
     await refreshSyncedOrders();
   };
 
-  const totalRevenue = filteredRecords.reduce((sum, s) => sum + s.totalAmount, 0);
+  function collaboratorMatchesUnit(c: SaleCollaborator, unitId: string, sale: SalesRecord) {
+    if (c.salesUnitId === unitId) return true;
+    const p = personnel.find((x) => x.id === c.personnelId);
+    if (!p) return false;
+    return resolveUnitIdAt(p, sale.saleDate) === unitId || p.salesUnitId === unitId;
+  }
+
+  /** 当前筛选下该单计入的业绩（按人/单位份额，非整单） */
+  function getFilteredShareAmount(s: SalesRecord): number {
+    if (filterPerson !== "all") {
+      return getPersonShareAmount(s, filterPerson);
+    }
+    if (filterUnit !== "all") {
+      const shares = getSaleShares(s);
+      if (shares.length >= 2) {
+        return shares
+          .filter((c) => collaboratorMatchesUnit(c, filterUnit, s))
+          .reduce((sum, c) => sum + getPersonShareAmount(s, c.personnelId), 0);
+      }
+      return s.salesUnitId === filterUnit ? (Number(s.totalAmount) || 0) : 0;
+    }
+    return Number(s.totalAmount) || 0;
+  }
+
+  /** 当前筛选下该单提成预估 */
+  function getFilteredCommission(s: SalesRecord): number {
+    if (filterPerson !== "all") {
+      const amount = getPersonShareAmount(s, filterPerson);
+      if (!(amount > 0)) return 0;
+      const collab = getSaleShares(s).find((c) => c.personnelId === filterPerson);
+      const person = personnel.find((x) => x.id === filterPerson);
+      const unitCandidates = [
+        collab?.salesUnitId,
+        person ? (resolveUnitIdAt(person, s.saleDate) || person.salesUnitId) : "",
+        s.salesUnitId,
+      ].filter(Boolean) as string[];
+      for (const unitId of unitCandidates) {
+        const c = calcSalePersonCommissionPreview(
+          {
+            productId: s.productId,
+            salesUnitId: unitId,
+            personnelId: filterPerson,
+            quantity: getPersonShareQuantity(s, filterPerson),
+            totalAmount: amount,
+            saleDate: s.saleDate,
+          },
+          ppcList,
+        );
+        if (c > 0) return c;
+      }
+      // 无该人专属配置时：按份额比例缩放整单预估
+      const full = calcSalePersonCommissionPreview(s, ppcList);
+      const total = Number(s.totalAmount) || 0;
+      return total > 0 ? full * (amount / total) : 0;
+    }
+    if (filterUnit !== "all") {
+      const shares = getSaleShares(s);
+      if (shares.length >= 2) {
+        return shares
+          .filter((c) => collaboratorMatchesUnit(c, filterUnit, s))
+          .reduce((sum, c) => {
+            const amount = getPersonShareAmount(s, c.personnelId);
+            if (!(amount > 0)) return sum;
+            const unitId = c.salesUnitId || filterUnit;
+            let part = calcSalePersonCommissionPreview(
+              {
+                productId: s.productId,
+                salesUnitId: unitId,
+                personnelId: c.personnelId,
+                quantity: getPersonShareQuantity(s, c.personnelId),
+                totalAmount: amount,
+                saleDate: s.saleDate,
+              },
+              ppcList,
+            );
+            if (!(part > 0)) {
+              const full = calcSalePersonCommissionPreview(s, ppcList);
+              const total = Number(s.totalAmount) || 0;
+              part = total > 0 ? full * (amount / total) : 0;
+            }
+            return sum + part;
+          }, 0);
+      }
+    }
+    return calcSalePersonCommissionPreview(s, ppcList);
+  }
+
+  const totalRevenue = filteredRecords.reduce((sum, s) => sum + getFilteredShareAmount(s), 0);
   const totalCommission = filteredRecords.reduce(
-    (sum, s) => sum + calcSalePersonCommissionPreview(s, ppcList),
+    (sum, s) => sum + getFilteredCommission(s),
     0,
   );
 
@@ -1593,7 +1682,21 @@ export default function SalesRecords() {
                     </TableCell>
                     <TableCell className="whitespace-nowrap">{getProductName(record)}</TableCell>
                     <TableCell className="text-right text-muted-foreground whitespace-nowrap">{record.orderAmount ? formatCurrency(record.orderAmount) : "-"}</TableCell>
-                    <TableCell className="text-right font-bold text-blue-600 whitespace-nowrap">{formatCurrency(record.totalAmount)}</TableCell>
+                    <TableCell className="text-right font-bold text-blue-600 whitespace-nowrap">
+                      {formatCurrency(
+                        filterPerson !== "all" || filterUnit !== "all"
+                          ? getFilteredShareAmount(record)
+                          : record.totalAmount,
+                      )}
+                      {(filterPerson !== "all" || filterUnit !== "all")
+                        && getSaleShares(record).length >= 2
+                        && getFilteredShareAmount(record) !== record.totalAmount
+                        && (
+                          <div className="text-[10px] font-normal text-muted-foreground">
+                            整单 {formatCurrency(record.totalAmount)}
+                          </div>
+                        )}
+                    </TableCell>
                     <TableCell>
                       {record.orderType ? (
                         <Badge variant="outline" className="text-xs">{record.orderType}</Badge>
@@ -1620,7 +1723,7 @@ export default function SalesRecords() {
                     </TableCell>
                     <TableCell className="text-right text-violet-600 font-medium whitespace-nowrap">
                       {(() => {
-                        const commission = calcSalePersonCommissionPreview(record, ppcList);
+                        const commission = getFilteredCommission(record);
                         return commission > 0 ? formatCurrency(commission) : "-";
                       })()}
                     </TableCell>
