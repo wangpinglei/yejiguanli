@@ -752,7 +752,7 @@ export default function SalesRecords() {
     };
   }
 
-  function getRecorderPerson(saleDate: string) {
+  function getRecorderPerson() {
     if (!user?.name) return undefined;
     return personnel.find((p) => (p.name || "").trim() === user.name.trim());
   }
@@ -761,7 +761,7 @@ export default function SalesRecords() {
     if (form.personnelId && form.salesUnitId) {
       return { personnelId: form.personnelId, salesUnitId: form.salesUnitId };
     }
-    const me = getRecorderPerson(form.saleDate);
+    const me = getRecorderPerson();
     const salesUnitId = me
       ? (resolveUnitIdAt(me, form.saleDate) || me.salesUnitId || form.salesUnitId || salesUnits[0]?.id || "")
       : (form.salesUnitId || salesUnits[0]?.id || "");
@@ -789,7 +789,7 @@ export default function SalesRecords() {
     setShareMode("percent");
     setCollaborators([]);
     const saleDate = new Date().toISOString().slice(0, 10);
-    const me = getRecorderPerson(saleDate);
+    const me = getRecorderPerson();
     const defaultUnitId = me
       ? (resolveUnitIdAt(me, saleDate) || me.salesUnitId || salesUnits[0]?.id || "")
       : (salesUnits[0]?.id || "");
