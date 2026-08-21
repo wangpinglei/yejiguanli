@@ -6,6 +6,7 @@ import {
   rowToPerformanceTarget,
   rowToPositionGroupLabel,
   rowToSalesUnit,
+  rowToUnitProductSettlement,
 } from '../db'
 import { buildUnitBattleReport } from '../lib/battleReport'
 
@@ -90,6 +91,10 @@ router.get('/battle-report', (req, res) => {
     .prepare('SELECT * FROM position_group_labels ORDER BY created_at')
     .all()
     .map(rowToPositionGroupLabel)
+  const upsList = db
+    .prepare('SELECT * FROM unit_product_settlements')
+    .all()
+    .map(rowToUnitProductSettlement)
 
   const reports = units.map((unit: { id: string; name: string }) =>
     buildUnitBattleReport({
@@ -100,6 +105,7 @@ router.get('/battle-report', (req, res) => {
       salesRecords,
       performanceTargets,
       positionGroupLabels,
+      upsList,
     }),
   )
 

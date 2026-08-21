@@ -53,6 +53,7 @@ const EMPTY_SETTLE_FORM = {
   rewardFrom: "",
   rewardTo: "",
   excludeFromTeamMgmt: false,
+  excludeFromPerformance: false,
   note: "",
 };
 
@@ -232,6 +233,7 @@ export default function ProductSettlement() {
       rewardFrom: ups?.rewardFrom || "",
       rewardTo: ups?.rewardTo || "",
       excludeFromTeamMgmt: !!ups?.excludeFromTeamMgmt,
+      excludeFromPerformance: !!ups?.excludeFromPerformance,
       note: ups?.note || "",
     });
     setEditKey({ productId, unitId });
@@ -252,6 +254,7 @@ export default function ProductSettlement() {
         rewardFrom: settleForm.rewardFrom || "",
         rewardTo: settleForm.rewardTo || "",
         excludeFromTeamMgmt: !!settleForm.excludeFromTeamMgmt,
+        excludeFromPerformance: !!settleForm.excludeFromPerformance,
         note: settleForm.note,
       });
       setEditKey(null);
@@ -300,6 +303,7 @@ export default function ProductSettlement() {
         rewardFrom: settleForm.rewardFrom || "",
         rewardTo: settleForm.rewardTo || "",
         excludeFromTeamMgmt: !!settleForm.excludeFromTeamMgmt,
+        excludeFromPerformance: !!settleForm.excludeFromPerformance,
         note: settleForm.note,
       }))
     );
@@ -699,7 +703,7 @@ export default function ProductSettlement() {
                           <TableHead className="text-right">结算比例 / 金额</TableHead>
                           <TableHead>生效时间</TableHead>
                           <TableHead className="text-right">结算奖励</TableHead>
-                          <TableHead>管理提成基数</TableHead>
+                          <TableHead>管理/业绩</TableHead>
                           <TableHead className="text-right">{selectedMonth} 结算收入</TableHead>
                           <TableHead className="text-right">操作</TableHead>
                         </TableRow>
@@ -742,11 +746,18 @@ export default function ProductSettlement() {
                                 )}
                               </TableCell>
                               <TableCell>
-                                {ups?.excludeFromTeamMgmt ? (
-                                  <Badge className="bg-slate-100 text-slate-700">不参与</Badge>
-                                ) : (
-                                  <span className="text-xs text-muted-foreground">参与</span>
-                                )}
+                                <div className="flex flex-col gap-1 items-start">
+                                  {ups?.excludeFromTeamMgmt ? (
+                                    <Badge className="bg-slate-100 text-slate-700 text-[10px]">不参与管理提成</Badge>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground">管理提成·参与</span>
+                                  )}
+                                  {ups?.excludeFromPerformance ? (
+                                    <Badge className="bg-orange-100 text-orange-800 text-[10px]">不参与业绩汇入</Badge>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground">业绩汇入·参与</span>
+                                  )}
+                                </div>
                               </TableCell>
                               <TableCell className="text-right text-sm font-medium text-cyan-600">
                                 {income > 0 ? formatCurrency(income) : "-"}
@@ -891,6 +902,21 @@ export default function ProductSettlement() {
                 </span>
               </span>
             </label>
+            <label className="flex items-start gap-2 rounded-lg border px-3 py-2 cursor-pointer">
+              <Checkbox
+                checked={settleForm.excludeFromPerformance}
+                onCheckedChange={(v) =>
+                  setSettleForm({ ...settleForm, excludeFromPerformance: v === true })
+                }
+                className="mt-0.5"
+              />
+              <span className="text-sm leading-snug">
+                不参与业绩汇入
+                <span className="block text-xs text-muted-foreground mt-0.5">
+                  勾选后，该单位此产品不计入战报个人/团队业绩
+                </span>
+              </span>
+            </label>
             <div className="space-y-2">
               <Label>结算说明</Label>
               <Input value={settleForm.note} onChange={(e) => setSettleForm({ ...settleForm, note: e.target.value })} placeholder="如：该单位特殊结算政策" />
@@ -1019,6 +1045,21 @@ export default function ProductSettlement() {
                 不参与团队管理提成基数
                 <span className="block text-xs text-muted-foreground mt-0.5">
                   批量应用到所选产品×单位
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 rounded-lg border px-3 py-2 cursor-pointer">
+              <Checkbox
+                checked={settleForm.excludeFromPerformance}
+                onCheckedChange={(v) =>
+                  setSettleForm({ ...settleForm, excludeFromPerformance: v === true })
+                }
+                className="mt-0.5"
+              />
+              <span className="text-sm leading-snug">
+                不参与业绩汇入
+                <span className="block text-xs text-muted-foreground mt-0.5">
+                  批量应用到所选产品×单位；不计入战报业绩
                 </span>
               </span>
             </label>

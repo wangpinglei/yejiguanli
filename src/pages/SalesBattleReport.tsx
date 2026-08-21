@@ -68,6 +68,7 @@ export default function SalesBattleReport() {
     visibleSalesUnits: salesUnits,
     visiblePersonnel: personnel,
     visibleSalesRecords: salesRecords,
+    visibleUnitProductSettlements: upsList,
     canEditBattleReport,
   } = usePermissions();
   const canEditTargets = canEditBattleReport;
@@ -98,6 +99,7 @@ export default function SalesBattleReport() {
       salesRecords,
       performanceTargets,
       matchPositionLabel,
+      upsList,
     });
   }, [
     unitId,
@@ -107,6 +109,7 @@ export default function SalesBattleReport() {
     salesRecords,
     performanceTargets,
     matchPositionLabel,
+    upsList,
   ]);
 
   const teamTotal = unitReport?.teamTotal ?? 0;

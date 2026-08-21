@@ -412,6 +412,8 @@ export interface UnitProductSettlement {
   rewardTo?: string;
   /** 不参与团队管理提成基数（默认 false=参与） */
   excludeFromTeamMgmt?: boolean;
+  /** 不参与业绩汇入（战报个人/团队业绩，默认 false=参与） */
+  excludeFromPerformance?: boolean;
   note?: string; // 结算说明
   createdAt: string;
   updatedAt?: string;

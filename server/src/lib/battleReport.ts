@@ -42,12 +42,19 @@ export type BattleSaleCollaborator = {
 
 export type BattleSale = {
   salesUnitId: string
+  productId?: string
   personnelId?: string
   salesPersonName?: string
   totalAmount: number
   saleDate: string
   collaborators?: BattleSaleCollaborator[]
   shareMode?: 'percent' | 'amount'
+}
+
+export type BattleUpsExclude = {
+  salesUnitId: string
+  productId: string
+  excludeFromPerformance?: boolean
 }
 
 export type BattleTarget = {
@@ -216,11 +223,31 @@ function shareBelongsToUnit(
   return false
 }
 
+function isProductInPerformance(
+  excludedKeys: Set<string>,
+  productId: string | undefined,
+  unitId: string,
+): boolean {
+  if (!productId || !unitId) return true
+  return !excludedKeys.has(`${unitId}::${productId}`)
+}
+
+function buildExcludedPerformanceKeys(upsList: BattleUpsExclude[]): Set<string> {
+  const keys = new Set<string>()
+  for (const u of upsList) {
+    if (u.excludeFromPerformance && u.salesUnitId && u.productId) {
+      keys.add(`${u.salesUnitId}::${u.productId}`)
+    }
+  }
+  return keys
+}
+
 function aggregateSalesByPerson(
   monthSales: BattleSale[],
   personnel: BattlePerson[],
   salesUnitId: string,
   yearMonth: string,
+  excludedKeys: Set<string> = new Set(),
 ): Map<string, SalesAgg> {
   const personnelById = new Map(personnel.map((p) => [p.id, p]))
   const agg = new Map<string, SalesAgg>()
@@ -237,6 +264,7 @@ function aggregateSalesByPerson(
 
   function addFullOrderToPrimary(r: BattleSale) {
     if (r.salesUnitId !== salesUnitId) return
+    if (!isProductInPerformance(excludedKeys, r.productId, salesUnitId)) return
     const amount = Number(r.totalAmount) || 0
     const pid = (r.personnelId || '').trim()
     const sname = (r.salesPersonName || '').trim()
@@ -301,6 +329,8 @@ function aggregateSalesByPerson(
         const amount = getPersonShareAmount(r, pid)
         const person = personnelById.get(pid)
         if (!shareBelongsToUnit(c, person, salesUnitId, yearMonth)) continue
+        const shareUnitId = c.salesUnitId || r.salesUnitId
+        if (!isProductInPerformance(excludedKeys, r.productId, shareUnitId)) continue
         if (person) {
           add(
             {
@@ -340,6 +370,7 @@ export function buildUnitBattleReport(options: {
   salesRecords: BattleSale[]
   performanceTargets: BattleTarget[]
   positionGroupLabels: PositionGroupLabel[]
+  upsList?: BattleUpsExclude[]
 }): UnitBattleReport {
   const {
     salesUnitId,
@@ -349,15 +380,18 @@ export function buildUnitBattleReport(options: {
     salesRecords,
     performanceTargets,
     positionGroupLabels,
+    upsList = [],
   } = options
 
   const monthSales = filterByMonth(salesRecords, yearMonth)
+  const excludedKeys = buildExcludedPerformanceKeys(upsList)
 
   const salesAgg = aggregateSalesByPerson(
     monthSales,
     personnel,
     salesUnitId,
     yearMonth,
+    excludedKeys,
   )
 
   for (const p of personnel) {

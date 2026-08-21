@@ -14,7 +14,8 @@ import {
   getSaleShares,
 } from '@/lib/saleCollaborators'
 import { personBelongsToUnitInMonth } from '@/lib/unitAssignment'
-import type { Personnel, PerformanceTarget, SalesRecord, SaleCollaborator } from '@/types'
+import type { Personnel, PerformanceTarget, SalesRecord, SaleCollaborator, UnitProductSettlement } from '@/types'
+import { isProductInPerformance } from '@/lib/teamMgmtCommission'
 
 export type PositionGroupMatch = {
   keyword: string
@@ -106,6 +107,7 @@ function aggregateSalesByPerson(
   personnel: Personnel[],
   salesUnitId: string,
   yearMonth: string,
+  upsList: UnitProductSettlement[] = [],
 ): Map<string, SalesAgg> {
   const personnelById = new Map(personnel.map((p) => [p.id, p]))
   const agg = new Map<string, SalesAgg>()
@@ -122,6 +124,7 @@ function aggregateSalesByPerson(
 
   function addFullOrderToPrimary(r: SalesRecord) {
     if (r.salesUnitId !== salesUnitId) return
+    if (!isProductInPerformance(upsList, r.productId, salesUnitId)) return
     const amount = Number(r.totalAmount) || 0
     const pid = (r.personnelId || '').trim()
     const sname = (r.salesPersonName || '').trim()
@@ -186,6 +189,8 @@ function aggregateSalesByPerson(
         const amount = getPersonShareAmount(r, pid)
         const person = personnelById.get(pid)
         if (!shareBelongsToUnit(c, person, salesUnitId, yearMonth)) continue
+        const shareUnitId = c.salesUnitId || r.salesUnitId
+        if (!isProductInPerformance(upsList, r.productId, shareUnitId)) continue
 
         if (person) {
           add(
@@ -229,6 +234,8 @@ export function buildUnitBattleReport(options: {
   salesRecords: SalesRecord[]
   performanceTargets: PerformanceTarget[]
   matchPositionLabel: MatchPositionFn
+  /** 单位×产品结算；用于排除「不参与业绩汇入」 */
+  upsList?: UnitProductSettlement[]
 }): UnitBattleReport {
   const {
     salesUnitId,
@@ -238,6 +245,7 @@ export function buildUnitBattleReport(options: {
     salesRecords,
     performanceTargets,
     matchPositionLabel,
+    upsList = [],
   } = options
 
   const monthSales = filterByMonth(salesRecords, yearMonth)
@@ -247,6 +255,7 @@ export function buildUnitBattleReport(options: {
     personnel,
     salesUnitId,
     yearMonth,
+    upsList,
   )
 
   // 本单位在职销售岗：无成交也保留行，便于录目标

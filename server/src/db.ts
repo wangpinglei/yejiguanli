@@ -443,6 +443,7 @@ function initSchema() {
     { name: "reward_from", ddl: "reward_from TEXT DEFAULT ''" },
     { name: "reward_to", ddl: "reward_to TEXT DEFAULT ''" },
     { name: "exclude_from_team_mgmt", ddl: "exclude_from_team_mgmt INTEGER DEFAULT 0" },
+    { name: "exclude_from_performance", ddl: "exclude_from_performance INTEGER DEFAULT 0" },
   ]);
 
   ensureColumns("sales_records", [
@@ -1369,6 +1370,7 @@ export function rowToUnitProductSettlement(row: any) {
     rewardFrom: row.reward_from || "",
     rewardTo: row.reward_to || "",
     excludeFromTeamMgmt: Boolean(row.exclude_from_team_mgmt),
+    excludeFromPerformance: Boolean(row.exclude_from_performance),
     note: row.note || undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at || undefined,

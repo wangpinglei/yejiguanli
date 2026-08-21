@@ -30,6 +30,19 @@ export function isProductInTeamMgmtBase(
   return !(ups?.excludeFromTeamMgmt)
 }
 
+/** 产品是否计入战报业绩汇入（无配置视为参与） */
+export function isProductInPerformance(
+  upsList: UnitProductSettlement[],
+  productId: string,
+  unitId: string,
+): boolean {
+  if (!productId || !unitId) return true
+  const ups = upsList.find(
+    (x) => x.productId === productId && x.salesUnitId === unitId,
+  )
+  return !(ups?.excludeFromPerformance)
+}
+
 /** 单位当月可计实收（排除不参与产品） */
 export function calcTeamMgmtEligibleSales(
   unitId: string,

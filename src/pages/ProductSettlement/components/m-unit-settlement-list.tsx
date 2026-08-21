@@ -247,6 +247,7 @@ export default function MUnitSettlementList({
                               <TableHead className="text-right">比例 / 金额</TableHead>
                               <TableHead>生效时间</TableHead>
                               <TableHead className="text-right">结算奖励</TableHead>
+                              <TableHead>管理/业绩</TableHead>
                               <TableHead className="text-right">
                                 {selectedMonth} 结算收入
                               </TableHead>
@@ -315,6 +316,24 @@ export default function MUnitSettlementList({
                                   ) : (
                                     <span className="text-muted-foreground">-</span>
                                   )}
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex flex-col gap-1 items-start">
+                                    {ups?.excludeFromTeamMgmt ? (
+                                      <Badge className="bg-slate-100 text-slate-700 text-[10px]">
+                                        不参与管理提成
+                                      </Badge>
+                                    ) : (
+                                      <span className="text-xs text-muted-foreground">管理提成·参与</span>
+                                    )}
+                                    {ups?.excludeFromPerformance ? (
+                                      <Badge className="bg-orange-100 text-orange-800 text-[10px]">
+                                        不参与业绩汇入
+                                      </Badge>
+                                    ) : (
+                                      <span className="text-xs text-muted-foreground">业绩汇入·参与</span>
+                                    )}
+                                  </div>
                                 </TableCell>
                                 <TableCell className="text-right text-sm font-medium text-cyan-600">
                                   {income > 0 ? formatCurrency(income) : '-'}

@@ -239,22 +239,26 @@ router.post("/", (req, res) => {
       (r) => ({
         sql: `INSERT INTO unit_product_settlements (
           id, sales_unit_id, product_id, settlement_type, settlement_rate, settlement_amount, note,
-          effective_from, effective_to, reward_amount, reward_from, reward_to, exclude_from_team_mgmt,
+          effective_from, effective_to, reward_amount, reward_from, reward_to,
+          exclude_from_team_mgmt, exclude_from_performance,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [r.id, r.salesUnitId, r.productId, r.settlementType || "percentage", r.settlementRate ?? 100,
           r.settlementAmount || 0, r.note || "",
           r.effectiveFrom || "", r.effectiveTo || "", r.rewardAmount || 0, r.rewardFrom || "", r.rewardTo || "",
           r.excludeFromTeamMgmt ? 1 : 0,
+          r.excludeFromPerformance ? 1 : 0,
           r.createdAt || new Date().toISOString(), r.updatedAt || null],
       }),
       (r) => ({
         sql: `UPDATE unit_product_settlements SET sales_unit_id=?, product_id=?, settlement_type=?, settlement_rate=?, settlement_amount=?, note=?,
-          effective_from=?, effective_to=?, reward_amount=?, reward_from=?, reward_to=?, exclude_from_team_mgmt=?, updated_at=? WHERE id=?`,
+          effective_from=?, effective_to=?, reward_amount=?, reward_from=?, reward_to=?,
+          exclude_from_team_mgmt=?, exclude_from_performance=?, updated_at=? WHERE id=?`,
         args: [r.salesUnitId, r.productId, r.settlementType || "percentage", r.settlementRate ?? 100,
           r.settlementAmount || 0, r.note || "",
           r.effectiveFrom || "", r.effectiveTo || "", r.rewardAmount || 0, r.rewardFrom || "", r.rewardTo || "",
           r.excludeFromTeamMgmt ? 1 : 0,
+          r.excludeFromPerformance ? 1 : 0,
           r.updatedAt || new Date().toISOString(), r.id],
       })
     );

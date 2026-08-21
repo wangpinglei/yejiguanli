@@ -201,7 +201,8 @@ router.get("/unit-product-settlements", (req, res) => {
 router.post("/unit-product-settlements/upsert", requireEditPermission, (req, res) => {
   const {
     salesUnitId, productId, settlementType, settlementRate, settlementAmount, note,
-    effectiveFrom, effectiveTo, rewardAmount, rewardFrom, rewardTo, excludeFromTeamMgmt,
+    effectiveFrom, effectiveTo, rewardAmount, rewardFrom, rewardTo,
+    excludeFromTeamMgmt, excludeFromPerformance,
   } = req.body;
   if (!salesUnitId || !productId) return res.status(400).json({ error: "单位和产品不能为空" });
   const db = getDb();
@@ -209,13 +210,14 @@ router.post("/unit-product-settlements/upsert", requireEditPermission, (req, res
     "SELECT * FROM unit_product_settlements WHERE sales_unit_id=? AND product_id=?"
   ).get(salesUnitId, productId);
   const now = new Date().toISOString();
-  const excludeVal = excludeFromTeamMgmt ? 1 : 0;
+  const excludeTeamVal = excludeFromTeamMgmt ? 1 : 0;
+  const excludePerfVal = excludeFromPerformance ? 1 : 0;
   if (existing) {
     db.prepare(`
       UPDATE unit_product_settlements SET
         settlement_type=?, settlement_rate=?, settlement_amount=?, note=?,
         effective_from=?, effective_to=?, reward_amount=?, reward_from=?, reward_to=?,
-        exclude_from_team_mgmt=?, updated_at=?
+        exclude_from_team_mgmt=?, exclude_from_performance=?, updated_at=?
       WHERE id=?
     `).run(
       settlementType || existing.settlement_type,
@@ -227,7 +229,8 @@ router.post("/unit-product-settlements/upsert", requireEditPermission, (req, res
       rewardAmount ?? existing.reward_amount ?? 0,
       rewardFrom ?? existing.reward_from ?? "",
       rewardTo ?? existing.reward_to ?? "",
-      excludeFromTeamMgmt == null ? (existing.exclude_from_team_mgmt || 0) : excludeVal,
+      excludeFromTeamMgmt == null ? (existing.exclude_from_team_mgmt || 0) : excludeTeamVal,
+      excludeFromPerformance == null ? (existing.exclude_from_performance || 0) : excludePerfVal,
       now, existing.id
     );
     return res.json(rowToUnitProductSettlement(db.prepare("SELECT * FROM unit_product_settlements WHERE id=?").get(existing.id)));
@@ -236,11 +239,13 @@ router.post("/unit-product-settlements/upsert", requireEditPermission, (req, res
   db.prepare(`
     INSERT INTO unit_product_settlements (
       id, sales_unit_id, product_id, settlement_type, settlement_rate, settlement_amount, note,
-      effective_from, effective_to, reward_amount, reward_from, reward_to, exclude_from_team_mgmt, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      effective_from, effective_to, reward_amount, reward_from, reward_to,
+      exclude_from_team_mgmt, exclude_from_performance, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id, salesUnitId, productId, settlementType || "percentage", settlementRate ?? 100, settlementAmount || 0, note || "",
-    effectiveFrom || "", effectiveTo || "", rewardAmount || 0, rewardFrom || "", rewardTo || "", excludeVal, now
+    effectiveFrom || "", effectiveTo || "", rewardAmount || 0, rewardFrom || "", rewardTo || "",
+    excludeTeamVal, excludePerfVal, now
   );
   res.json(rowToUnitProductSettlement(db.prepare("SELECT * FROM unit_product_settlements WHERE id=?").get(id)));
 });
@@ -253,25 +258,27 @@ router.post("/unit-product-settlements/batch", requireEditPermission, (req, res)
     for (const item of items) {
       const {
         salesUnitId, productId, settlementType, settlementRate, settlementAmount, note,
-        effectiveFrom, effectiveTo, rewardAmount, rewardFrom, rewardTo, excludeFromTeamMgmt,
+        effectiveFrom, effectiveTo, rewardAmount, rewardFrom, rewardTo,
+        excludeFromTeamMgmt, excludeFromPerformance,
       } = item;
       if (!salesUnitId || !productId) continue;
       const existing = db.prepare(
         "SELECT * FROM unit_product_settlements WHERE sales_unit_id=? AND product_id=?"
       ).get(salesUnitId, productId);
       const now = new Date().toISOString();
-      const excludeVal = excludeFromTeamMgmt ? 1 : 0;
+      const excludeTeamVal = excludeFromTeamMgmt ? 1 : 0;
+      const excludePerfVal = excludeFromPerformance ? 1 : 0;
       if (existing) {
         db.prepare(`
           UPDATE unit_product_settlements SET
             settlement_type=?, settlement_rate=?, settlement_amount=?, note=?,
             effective_from=?, effective_to=?, reward_amount=?, reward_from=?, reward_to=?,
-            exclude_from_team_mgmt=?, updated_at=?
+            exclude_from_team_mgmt=?, exclude_from_performance=?, updated_at=?
           WHERE id=?
         `).run(
           settlementType || "percentage", settlementRate ?? 100, settlementAmount || 0, note || "",
           effectiveFrom || "", effectiveTo || "", rewardAmount || 0, rewardFrom || "", rewardTo || "",
-          excludeVal, now, existing.id
+          excludeTeamVal, excludePerfVal, now, existing.id
         );
         results.push(rowToUnitProductSettlement(db.prepare("SELECT * FROM unit_product_settlements WHERE id=?").get(existing.id)));
       } else {
@@ -279,11 +286,13 @@ router.post("/unit-product-settlements/batch", requireEditPermission, (req, res)
         db.prepare(`
           INSERT INTO unit_product_settlements (
             id, sales_unit_id, product_id, settlement_type, settlement_rate, settlement_amount, note,
-            effective_from, effective_to, reward_amount, reward_from, reward_to, exclude_from_team_mgmt, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            effective_from, effective_to, reward_amount, reward_from, reward_to,
+            exclude_from_team_mgmt, exclude_from_performance, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           id, salesUnitId, productId, settlementType || "percentage", settlementRate ?? 100, settlementAmount || 0, note || "",
-          effectiveFrom || "", effectiveTo || "", rewardAmount || 0, rewardFrom || "", rewardTo || "", excludeVal, now
+          effectiveFrom || "", effectiveTo || "", rewardAmount || 0, rewardFrom || "", rewardTo || "",
+          excludeTeamVal, excludePerfVal, now
         );
         results.push(rowToUnitProductSettlement(db.prepare("SELECT * FROM unit_product_settlements WHERE id=?").get(id)));
       }
