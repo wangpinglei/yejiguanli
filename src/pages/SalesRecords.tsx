@@ -187,6 +187,13 @@ function pickDeletableDuplicateIds(
     const syncedList = group.filter((s) => s.synced);
     const manualList = group.filter((s) => !s.synced);
     if (syncedList.length > 0) {
+      // 有同步单时：保留 1 笔同步，其余同步 + 全部手动可删
+      const sortedSynced = [...syncedList].sort((a, b) => {
+        const dateDiff = (a.saleDate || "").localeCompare(b.saleDate || "");
+        if (dateDiff !== 0) return dateDiff;
+        return a.id.localeCompare(b.id);
+      });
+      extraIds.push(...sortedSynced.slice(1).map((s) => s.id));
       extraIds.push(...manualList.map((s) => s.id));
       continue;
     }
@@ -549,6 +556,8 @@ export default function SalesRecords() {
   const [importStep, setImportStep] = useState<"input" | "preview">("input");
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const tableCardRef = useRef<HTMLDivElement>(null);
+  const [highlightSynced, setHighlightSynced] = useState(false);
 
   const [form, setForm] = useState({
     salesUnitId: "",
@@ -679,11 +688,8 @@ export default function SalesRecords() {
   const syncedCount = useMemo(() => salesRecords.filter((s) => s.synced).length, [salesRecords]);
   const manualCount = useMemo(() => salesRecords.filter((s) => !s.synced).length, [salesRecords]);
 
-  // 可批量删除的记录（当前页 + 非同步）
-  const selectableRecords = useMemo(
-    () => pagedRecords.filter((s) => !s.synced),
-    [pagedRecords],
-  );
+  // 可批量删除的记录（当前页，含同步订单）
+  const selectableRecords = useMemo(() => pagedRecords, [pagedRecords]);
   /** 重复筛选下：每组保留 1 笔后，其余可删 id */
   const duplicateExtraDeletableIdSet = useMemo(
     () => new Set(pickDeletableDuplicateIds(filteredRecords, idToProductName)),
@@ -865,6 +871,25 @@ export default function SalesRecords() {
     setDialogOpen(true);
   };
 
+  /** 点击同步笔数：筛选仅同步订单并滚动到列表 */
+  function handleJumpToSyncedOrders() {
+    if (syncedCount <= 0) return;
+    setSearch("");
+    setFilterUnit("all");
+    setFilterPerson("all");
+    setFilterSync("synced");
+    setFilterDomain("all");
+    setFilterDuplicate("all");
+    setDateFrom("");
+    setDateTo("");
+    setPage(1);
+    setHighlightSynced(true);
+    window.setTimeout(() => {
+      tableCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+    window.setTimeout(() => setHighlightSynced(false), 2500);
+  }
+
   function handleChangeShareMode(nextMode: SaleShareMode) {
     if (nextMode === shareMode) return;
     const orderTotal = form.quantity * form.unitPrice;
@@ -1023,23 +1048,23 @@ export default function SalesRecords() {
     clearSelection();
   }
 
-  /** 自动勾选每组重复中的多余记录（每组留 1 笔，跨页；同步单不可删会优先保留） */
+  /** 自动勾选每组重复中的多余记录（每组留 1 笔，跨页；有同步单时优先保留 1 笔同步） */
   function handleSelectAllFilteredDeletable() {
     const ids = pickDeletableDuplicateIds(filteredRecords, idToProductName);
     if (ids.length === 0) {
-      alert("没有可删除的多余重复（每组需至少保留 1 笔；生态圈同步记录不可删）");
+      alert("没有可删除的多余重复（每组需至少保留 1 笔）");
       return;
     }
     setSelectedIds(new Set(ids));
   }
 
-  // 批量删除（同步记录跳过）
+  // 批量删除（含同步订单；重复筛选下每组仍保留 1 笔）
   const handleBatchDelete = async () => {
     try {
       const extraSet = new Set(pickDeletableDuplicateIds(salesRecords, idToProductName));
       const ids = Array.from(selectedIds).filter((id) => {
         const r = salesRecords.find((s) => s.id === id);
-        if (!r || r.synced) return false;
+        if (!r) return false;
         if (duplicateRecordIdSet.has(id) && !extraSet.has(id)) return false;
         return true;
       });
@@ -1454,7 +1479,23 @@ export default function SalesRecords() {
           <CloudDownload className="h-5 w-5 text-blue-500" />
           <div className="flex flex-1 items-center gap-4 text-sm">
             <span className="text-muted-foreground">生态圈同步：</span>
-            <Badge className="bg-blue-100 text-blue-700">{syncedCount} 笔同步订单</Badge>
+            <button
+              type="button"
+              className="inline-flex"
+              onClick={handleJumpToSyncedOrders}
+              disabled={syncedCount <= 0}
+              title="点击查看同步订单"
+            >
+              <Badge
+                className={
+                  syncedCount > 0
+                    ? "cursor-pointer bg-blue-100 text-blue-700 hover:bg-blue-200"
+                    : "bg-blue-100 text-blue-700"
+                }
+              >
+                {syncedCount} 笔同步订单
+              </Badge>
+            </button>
             <Badge variant="secondary">{manualCount} 笔手动记录</Badge>
             {syncedLoading && <span className="text-blue-500">正在拉取最新订单...</span>}
           </div>
@@ -1617,7 +1658,7 @@ export default function SalesRecords() {
         </div>
       )}
 
-      <Card>
+      <Card ref={tableCardRef}>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <Table>
@@ -1657,22 +1698,20 @@ export default function SalesRecords() {
                       duplicateRecordIdSet.has(record.id)
                         ? "bg-orange-50/40"
                         : record.synced
-                          ? "bg-blue-50/30"
+                          ? (highlightSynced
+                            ? "bg-blue-100/80 ring-1 ring-inset ring-blue-300"
+                            : "bg-blue-50/30")
                           : ""
                     }
                   >
                     <TableCell className="text-center">
-                      {record.synced ? (
-                        <span className="text-xs text-muted-foreground">只读</span>
-                      ) : (
-                        <input
-                          type="checkbox"
-                          checked={selectedIds.has(record.id)}
-                          onChange={() => toggleSelect(record.id)}
-                          className="h-4 w-4 cursor-pointer"
-                          aria-label="选择该行"
-                        />
-                      )}
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(record.id)}
+                        onChange={() => toggleSelect(record.id)}
+                        className="h-4 w-4 cursor-pointer"
+                        aria-label="选择该行"
+                      />
                     </TableCell>
                     <TableCell className="max-w-[9.5rem]">
                       <ExpandableCellText
@@ -1768,11 +1807,14 @@ export default function SalesRecords() {
                           >
                             <Pencil className="h-4 w-4" />
                           </Button>
-                          {!record.synced && (
-                            <Button variant="ghost" size="icon" onClick={() => setDeleteId(record.id)}>
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          )}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title={record.synced ? "删除同步订单" : "删除"}
+                            onClick={() => setDeleteId(record.id)}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
                         </div>
                       ) : (
                         <span className="text-xs text-muted-foreground">仅查看</span>
@@ -2655,7 +2697,7 @@ export default function SalesRecords() {
               确定要删除选中的 {selectedIds.size} 条销售记录吗？此操作不可撤销。
               {filterDuplicate === "duplicate"
                 ? "每组完全相同的记录会自动保留 1 笔。"
-                : "生态圈同步记录不可删除。"}
+                : "包含生态圈同步订单时也将一并删除。"}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
