@@ -312,6 +312,38 @@ export default function PersonnelPage() {
     return salesTotalByPersonId[personId] || { count: 0, total: 0 }
   }
 
+  /** 按姓名分组的疑似重复名单（用于提示与合并预选） */
+  const duplicateGroups = useMemo(() => {
+    const map = new Map<string, Personnel[]>();
+    for (const p of personnel) {
+      const key = (p.name || "").trim();
+      if (!key || !duplicateNameSet.has(key)) continue;
+      const list = map.get(key);
+      if (list) list.push(p);
+      else map.set(key, [p]);
+    }
+    return Array.from(map.entries())
+      .map(([name, people]) => ({
+        name,
+        people: [...people].sort((a, b) => {
+          const salesDiff = getPersonnelSales(b.id).total - getPersonnelSales(a.id).total;
+          if (salesDiff !== 0) return salesDiff;
+          return (a.hireDate || "").localeCompare(b.hireDate || "");
+        }),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, "zh"));
+  }, [personnel, duplicateNameSet, salesTotalByPersonId]);
+
+  /** 合并下拉：同名重复的排前面，方便找到 */
+  const mergeCandidatePersonnel = useMemo(() => {
+    const dup = personnel.filter((p) => duplicateNameSet.has((p.name || "").trim()));
+    const rest = personnel.filter((p) => !duplicateNameSet.has((p.name || "").trim()));
+    const byName = (a: Personnel, b: Personnel) =>
+      (a.name || "").localeCompare(b.name || "", "zh")
+      || getUnitName(a.salesUnitId).localeCompare(getUnitName(b.salesUnitId), "zh");
+    return [...dup.sort(byName), ...rest.sort(byName)];
+  }, [personnel, duplicateNameSet, salesUnits]);
+
   function handleToggleSalesSort() {
     setSalesSortOrder((prev) => {
       if (prev === 'none') return 'desc'
@@ -411,9 +443,29 @@ export default function PersonnelPage() {
   };
 
   function openMergeDialog(preferKeepId?: string, preferRemoveId?: string) {
-    setMergeKeepId(preferKeepId || "");
-    setMergeRemoveId(preferRemoveId || "");
+    if (preferKeepId || preferRemoveId) {
+      setMergeKeepId(preferKeepId || "");
+      setMergeRemoveId(preferRemoveId || "");
+      setMergeOpen(true);
+      return;
+    }
+    // 从「去合并」进入：仅一对同名时自动预选（销售额高的保留）
+    if (duplicateGroups.length === 1 && duplicateGroups[0].people.length === 2) {
+      const [keep, remove] = duplicateGroups[0].people;
+      setMergeKeepId(keep.id);
+      setMergeRemoveId(remove.id);
+    } else {
+      setMergeKeepId("");
+      setMergeRemoveId("");
+    }
     setMergeOpen(true);
+  }
+
+  /** 选中某一组同名：默认销售额高的保留，另一条删除；多于 2 人只预填保留 */
+  function selectDuplicateGroup(people: Personnel[]) {
+    if (people.length < 2) return;
+    setMergeKeepId(people[0].id);
+    setMergeRemoveId(people.length === 2 ? people[1].id : "");
   }
 
   function openMergeForPerson(person: Personnel) {
@@ -566,7 +618,28 @@ export default function PersonnelPage() {
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
           <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
           <span>
-            检测到 {duplicateNameSet.size} 个同名、共 {duplicatePersonCount} 条人员，可能是重复录入。
+            检测到 {duplicateNameSet.size} 个同名、共 {duplicatePersonCount} 条人员，可能是重复录入
+            {duplicateGroups.length > 0 && (
+              <>
+                ：
+                {duplicateGroups.map((g, idx) => (
+                  <span key={g.name}>
+                    {idx > 0 ? "；" : ""}
+                    <button
+                      type="button"
+                      className="font-medium underline underline-offset-2 hover:text-amber-700"
+                      onClick={() => {
+                        selectDuplicateGroup(g.people);
+                        setMergeOpen(true);
+                      }}
+                    >
+                      {g.name}（{g.people.length} 条）
+                    </button>
+                  </span>
+                ))}
+              </>
+            )}
+            。
           </span>
           <Button
             size="sm"
@@ -1422,6 +1495,40 @@ export default function PersonnelPage() {
               将「被合并人员」的销售、提成、月度调整、业绩目标迁到「保留人员」，并删除被合并人员。
               同产品提成 / 同月调整冲突时保留「保留人员」侧；空白字段会用被合并人员补全。
             </p>
+
+            {duplicateGroups.length > 0 && (
+              <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/80 p-3">
+                <p className="text-xs font-medium text-amber-950">
+                  疑似重复名单（点一组即可填入下方）
+                </p>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {duplicateGroups.map((g) => (
+                    <button
+                      key={g.name}
+                      type="button"
+                      className="w-full rounded-md border border-amber-200 bg-white px-3 py-2 text-left text-sm hover:border-amber-400 hover:bg-amber-50"
+                      onClick={() => selectDuplicateGroup(g.people)}
+                    >
+                      <div className="mb-1 flex items-center gap-2">
+                        <Badge className="bg-amber-100 text-amber-800 text-xs">{g.name}</Badge>
+                        <span className="text-xs text-muted-foreground">{g.people.length} 条</span>
+                      </div>
+                      <ul className="space-y-1 text-xs text-muted-foreground">
+                        {g.people.map((p, idx) => (
+                          <li key={p.id}>
+                            {idx === 0 ? "建议保留" : "可删除"}：
+                            {getUnitName(p.salesUnitId)} · {p.position || "无职位"} · 入职{" "}
+                            {formatDate(p.hireDate) || "—"} · 销售{" "}
+                            {formatCurrency(getPersonnelSales(p.id).total)}
+                          </li>
+                        ))}
+                      </ul>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="space-y-1.5">
               <Label>保留人员（合并后留下）</Label>
               <Select value={mergeKeepId || undefined} onValueChange={setMergeKeepId}>
@@ -1429,7 +1536,7 @@ export default function PersonnelPage() {
                   <SelectValue placeholder="选择保留人员" />
                 </SelectTrigger>
                 <SelectContent>
-                  {personnel.map((p) => (
+                  {mergeCandidatePersonnel.map((p) => (
                     <SelectItem key={p.id} value={p.id} disabled={p.id === mergeRemoveId}>
                       {p.name} · {getUnitName(p.salesUnitId)} · {p.position || "无职位"}
                       {duplicateNameSet.has((p.name || "").trim()) ? " · 同名" : ""}
@@ -1453,7 +1560,7 @@ export default function PersonnelPage() {
                   <SelectValue placeholder="选择将被删除的人员" />
                 </SelectTrigger>
                 <SelectContent>
-                  {personnel.map((p) => (
+                  {mergeCandidatePersonnel.map((p) => (
                     <SelectItem key={p.id} value={p.id} disabled={p.id === mergeKeepId}>
                       {p.name} · {getUnitName(p.salesUnitId)} · {p.position || "无职位"}
                       {duplicateNameSet.has((p.name || "").trim()) ? " · 同名" : ""}
