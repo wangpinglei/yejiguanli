@@ -532,6 +532,8 @@ function mapPartyMember(v: unknown): string {
 function upsertHrFields(body: Record<string, unknown>, fallback?: {
   laborCompanyId?: string;
   salesCompanyId?: string;
+  /** 未传无固定期限时保留原值，避免导入覆盖手动勾选 */
+  isIndefiniteContract?: boolean | number | string | null;
 }) {
   const idNumber = fixExcelLongNumber(body.idNumber ?? body.id_number);
   const birthDate = normalizeDate(body.birthDate ?? body.birth_date);
@@ -613,10 +615,17 @@ function upsertHrFields(body: Record<string, unknown>, fallback?: {
     contract2EndDate,
     contract3StartDate,
     contract3EndDate,
-    isIndefiniteContract: parseBoolFlag(
-      body.isIndefiniteContract ?? body.is_indefinite_contract,
-      false,
-    ),
+    isIndefiniteContract: (() => {
+      const raw = body.isIndefiniteContract ?? body.is_indefinite_contract;
+      // 未传该字段时：优先保留 fallback（导入更新），否则默认否
+      if (raw === undefined || raw === null || raw === "") {
+        if (fallback && fallback.isIndefiniteContract !== undefined) {
+          return parseBoolFlag(fallback.isIndefiniteContract, false);
+        }
+        return false;
+      }
+      return parseBoolFlag(raw, false);
+    })(),
     bankBelong: text(body.bankBelong ?? body.bank_belong),
     companyEmail: text(body.companyEmail ?? body.company_email),
   };
@@ -961,6 +970,8 @@ router.put("/:id", requireModuleEdit("hr_management"), (req, res) => {
         : existing.is_indefinite_contract,
     bankBelong: req.body.bankBelong ?? existing.bank_belong,
     companyEmail: req.body.companyEmail ?? existing.company_email,
+  }, {
+    isIndefiniteContract: existing.is_indefinite_contract,
   });
 
   const setClause = HR_FIELD_COLUMNS.split(", ")
@@ -969,6 +980,10 @@ router.put("/:id", requireModuleEdit("hr_management"), (req, res) => {
   db.prepare(`
     UPDATE hr_profiles SET ${setClause}, updated_at=datetime('now') WHERE id=?
   `).run(...hrFieldValues(fields), id);
+  // 单独再写一次，避免大字段 UPDATE 列序/历史库结构异常时该标记被吞掉
+  db.prepare(`
+    UPDATE hr_profiles SET is_indefinite_contract = ? WHERE id = ?
+  `).run(fields.isIndefiniteContract ? 1 : 0, id);
 
   let nextHire = existing.hire_date || "";
   let nextResign = existing.resign_date || "";
@@ -1437,57 +1452,92 @@ router.post("/import", requireModuleEdit("hr_management"), (req, res) => {
         [pick(row, ["劳动合同3起止", "劳动合同3起止时间", "合同3起止"])],
       );
 
-      const fields = upsertHrFields({
-        gender: pick(row, ["性别", "gender"]),
-        contract1StartDate: contract1.start,
-        contract1EndDate: contract1.end,
-        contract2StartDate: contract2.start,
-        contract2EndDate: contract2.end,
-        contract3StartDate: contract3.start,
-        contract3EndDate: contract3.end,
-        contractStartDate: pick(row, [
-          "合同起始日期",
-          "合同开始日期",
-          "合同起日",
-          "contractStartDate",
-        ]),
-        contractEndDate: pick(row, [
-          "合同终止日期",
-          "合同结束日期",
-          "合同止日",
-          "contractEndDate",
-        ]),
-        idNumber: fixExcelLongNumber(pick(row, ["身份证", "身份证号", "idNumber"])),
-        birthDate: pick(row, ["出生年月", "出生日期", "birthDate"]),
-        age: pick(row, ["年龄", "age"]),
-        ethnicity: pick(row, ["民族", "ethnicity"]),
-        politicalStatus: party,
-        education: pick(row, ["学历", "education"]),
-        school: pick(row, ["毕业院校", "院校", "school"]),
-        major: pick(row, ["专业", "major"]),
-        bankAccount: fixExcelLongNumber(pick(row, ["银行卡号", "银行卡", "bankAccount"])),
-        bankName,
-        bankBelong,
-        address: pick(row, ["联系地址", "现住址", "住址", "地址", "address"]),
-        emergencyContact: pick(row, ["紧急联系人姓名", "紧急联系人", "emergencyContact"]),
-        emergencyPhone: fixExcelLongNumber(
-          pick(row, ["联系电话", "紧急联系电话", "紧急电话", "emergencyPhone"]),
-        ),
-        laborCompanyId,
-        salesCompanyId,
-        companyTenure: "",
-        regularizationDate: pick(row, ["转正日期", "regularizationDate"]),
-        employmentType: pick(row, ["用工性质", "employmentType"]),
-        maritalStatus: pick(row, ["婚姻状况", "maritalStatus"]),
-        nativePlace: pick(row, ["籍贯", "nativePlace"]),
-        householdRegister: pick(row, ["户籍", "householdRegister"]),
-        idAddress: pick(row, ["身份证地址", "idAddress"]),
-        graduationDate: pick(row, ["毕业时间", "graduationDate"]),
-        emergencyRelation: pick(row, ["与本人关系", "关系", "emergencyRelation"]),
-        internshipStartDate: internship.start,
-        internshipEndDate: internship.end,
-        companyEmail: pick(row, ["企业邮箱", "邮箱", "email", "companyEmail"]),
-      });
+      // 导入更新时先取已有档案，避免未传「无固定期限」时被默认否覆盖
+      let existingIndefinite: boolean | number | undefined;
+      if (person) {
+        const existedHr = db
+          .prepare("SELECT is_indefinite_contract FROM hr_profiles WHERE personnel_id = ?")
+          .get(person.id) as { is_indefinite_contract?: number } | undefined;
+        if (existedHr) existingIndefinite = existedHr.is_indefinite_contract;
+      } else {
+        const existedHr = db
+          .prepare(`
+            SELECT is_indefinite_contract FROM hr_profiles
+            WHERE personnel_id IS NULL AND TRIM(name) = ?
+            LIMIT 1
+          `)
+          .get(name) as { is_indefinite_contract?: number } | undefined;
+        if (existedHr) existingIndefinite = existedHr.is_indefinite_contract;
+      }
+
+      const indefiniteFromExcel = pick(row, [
+        "无固定期限合同",
+        "无固定期限",
+        "isIndefiniteContract",
+        "indefiniteContract",
+      ]);
+
+      const fields = upsertHrFields(
+        {
+          gender: pick(row, ["性别", "gender"]),
+          contract1StartDate: contract1.start,
+          contract1EndDate: contract1.end,
+          contract2StartDate: contract2.start,
+          contract2EndDate: contract2.end,
+          contract3StartDate: contract3.start,
+          contract3EndDate: contract3.end,
+          contractStartDate: pick(row, [
+            "合同起始日期",
+            "合同开始日期",
+            "合同起日",
+            "contractStartDate",
+          ]),
+          contractEndDate: pick(row, [
+            "合同终止日期",
+            "合同结束日期",
+            "合同止日",
+            "contractEndDate",
+          ]),
+          idNumber: fixExcelLongNumber(pick(row, ["身份证", "身份证号", "idNumber"])),
+          birthDate: pick(row, ["出生年月", "出生日期", "birthDate"]),
+          age: pick(row, ["年龄", "age"]),
+          ethnicity: pick(row, ["民族", "ethnicity"]),
+          politicalStatus: party,
+          education: pick(row, ["学历", "education"]),
+          school: pick(row, ["毕业院校", "院校", "school"]),
+          major: pick(row, ["专业", "major"]),
+          bankAccount: fixExcelLongNumber(pick(row, ["银行卡号", "银行卡", "bankAccount"])),
+          bankName,
+          bankBelong,
+          address: pick(row, ["联系地址", "现住址", "住址", "地址", "address"]),
+          emergencyContact: pick(row, ["紧急联系人姓名", "紧急联系人", "emergencyContact"]),
+          emergencyPhone: fixExcelLongNumber(
+            pick(row, ["联系电话", "紧急联系电话", "紧急电话", "emergencyPhone"]),
+          ),
+          laborCompanyId,
+          salesCompanyId,
+          companyTenure: "",
+          regularizationDate: pick(row, ["转正日期", "regularizationDate"]),
+          employmentType: pick(row, ["用工性质", "employmentType"]),
+          maritalStatus: pick(row, ["婚姻状况", "maritalStatus"]),
+          nativePlace: pick(row, ["籍贯", "nativePlace"]),
+          householdRegister: pick(row, ["户籍", "householdRegister"]),
+          idAddress: pick(row, ["身份证地址", "idAddress"]),
+          graduationDate: pick(row, ["毕业时间", "graduationDate"]),
+          emergencyRelation: pick(row, ["与本人关系", "关系", "emergencyRelation"]),
+          internshipStartDate: internship.start,
+          internshipEndDate: internship.end,
+          companyEmail: pick(row, ["企业邮箱", "邮箱", "email", "companyEmail"]),
+          ...(indefiniteFromExcel !== undefined && indefiniteFromExcel !== null && text(indefiniteFromExcel) !== ""
+            ? { isIndefiniteContract: indefiniteFromExcel }
+            : {}),
+        },
+        {
+          laborCompanyId,
+          salesCompanyId,
+          isIndefiniteContract: existingIndefinite,
+        },
+      );
 
       const personPosition = text(pick(row, ["职位", "岗位", "position"]));
       let profileStatus = status;

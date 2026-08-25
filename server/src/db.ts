@@ -801,6 +801,7 @@ function migrateHrProfilesNullablePersonnel() {
     "contract2_end_date",
     "contract3_start_date",
     "contract3_end_date",
+    "is_indefinite_contract",
     "bank_belong",
     "company_email",
     "signed_documents",
@@ -817,6 +818,7 @@ function migrateHrProfilesNullablePersonnel() {
       if (c === "status") return "'active'";
       if (c === "signed_documents") return "'[]'";
       if (c === "updated_at") return "datetime('now')";
+      if (c === "is_indefinite_contract") return "0";
       return "''";
     }
     return c;
