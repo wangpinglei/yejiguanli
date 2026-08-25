@@ -295,7 +295,7 @@ export default function CostManagement() {
   const openAdd = () => {
     setEditingRecord(null);
     setForm({
-      salesUnitId: salesUnits[0]?.id || "",
+      salesUnitId: "",
       date: monthInputToDate(selectedMonth),
       remark: "",
       changeReason: "",
@@ -341,9 +341,15 @@ export default function CostManagement() {
   const operator = user ? { name: user.name, id: user.id } : undefined;
 
   const handleSubmit = async () => {
-    if (!form.salesUnitId) return;
+    if (!form.salesUnitId) {
+      alert("请选择销售单位");
+      return;
+    }
     const validItems = formItems.filter((i) => i.amount > 0);
-    if (validItems.length === 0) return;
+    if (validItems.length === 0) {
+      alert("请至少填写一项金额大于 0 的成本");
+      return;
+    }
     if (!form.changeReason.trim()) {
       alert("请填写变更原因");
       return;
@@ -396,7 +402,7 @@ export default function CostManagement() {
   const openAddIncome = () => {
     setEditingIncome(null);
     setIncomeForm({
-      salesUnitId: salesUnits[0]?.id || "",
+      salesUnitId: "",
       date: monthInputToDate(selectedMonth),
       remark: "",
       isRecurring: false,
@@ -437,9 +443,15 @@ export default function CostManagement() {
   const incomeFormTotal = incomeFormItems.reduce((sum, item) => sum + (item.amount || 0), 0);
 
   const handleIncomeSubmit = async () => {
-    if (!incomeForm.salesUnitId) return;
+    if (!incomeForm.salesUnitId) {
+      alert("请选择销售单位");
+      return;
+    }
     const validItems = incomeFormItems.filter((i) => i.amount > 0);
-    if (validItems.length === 0) return;
+    if (validItems.length === 0) {
+      alert("请至少填写一项金额大于 0 的收入");
+      return;
+    }
     if (incomeForm.isRecurring && incomeForm.recurringMonths.length === 0) {
       alert("月度固定模式下，请至少选择一个适用月份");
       return;
@@ -1163,8 +1175,11 @@ export default function CostManagement() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>销售单位 *</Label>
-                <Select value={form.salesUnitId} onValueChange={(v) => setForm({ ...form, salesUnitId: v })}>
-                  <SelectTrigger><SelectValue placeholder="选择单位" /></SelectTrigger>
+                <Select
+                  value={form.salesUnitId || undefined}
+                  onValueChange={(v) => setForm({ ...form, salesUnitId: v })}
+                >
+                  <SelectTrigger><SelectValue placeholder="请选择销售单位" /></SelectTrigger>
                   <SelectContent>
                     {salesUnits.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
                   </SelectContent>
@@ -1373,8 +1388,11 @@ export default function CostManagement() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>销售单位 *</Label>
-                <Select value={incomeForm.salesUnitId} onValueChange={(v) => setIncomeForm({ ...incomeForm, salesUnitId: v })}>
-                  <SelectTrigger><SelectValue placeholder="选择单位" /></SelectTrigger>
+                <Select
+                  value={incomeForm.salesUnitId || undefined}
+                  onValueChange={(v) => setIncomeForm({ ...incomeForm, salesUnitId: v })}
+                >
+                  <SelectTrigger><SelectValue placeholder="请选择销售单位" /></SelectTrigger>
                   <SelectContent>
                     {salesUnits.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
                   </SelectContent>
