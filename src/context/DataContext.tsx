@@ -345,11 +345,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
   }, [authLoading, user, managedUnitKey, refreshAll]);
 
   const allSalesRecords = useMemo(() => {
+    const existingIds = new Set(salesRecords.map((s) => s.id));
     const existingExt = new Set(
       salesRecords.map((s) => s.externalOrderId).filter(Boolean) as string[],
     );
+    // 已在销售列表中的同步单不再二次拼接，避免删除后从 syncedOrders 回填
     const syncedAsSales: SalesRecord[] = syncedOrders
-      .filter((o) => !o.externalOrderId || !existingExt.has(o.externalOrderId))
+      .filter((o) => {
+        if (existingIds.has(o.id)) return false;
+        if (o.externalOrderId && existingExt.has(o.externalOrderId)) return false;
+        return true;
+      })
       .map((o) => ({
         id: o.id,
         salesUnitId: o.salesUnitId,
@@ -533,10 +539,38 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const updateSalesRecord = useCallback(async (id: string, s: Partial<SalesRecord>) => {
     const updated = await salesRecordsApi.update(id, s);
     setSalesRecords((prev) => prev.map((x) => (x.id === id ? updated : x)));
+    // 同步单同时存在于 syncedOrders 缓存，需一并更新，避免界面仍显示旧数据
+    setSyncedOrders((prev) =>
+      prev.map((o) => (o.id === id
+        ? {
+          ...o,
+          salesUnitId: updated.salesUnitId,
+          personnelId: updated.personnelId,
+          productId: updated.productId,
+          quantity: updated.quantity,
+          unitPrice: updated.unitPrice,
+          totalAmount: updated.totalAmount,
+          saleDate: updated.saleDate,
+          remark: updated.remark,
+          customerName: updated.customerName || o.customerName,
+          salesUnitName: updated.salesUnitName || o.salesUnitName,
+          salesPersonName: updated.salesPersonName || o.salesPersonName,
+          productName: updated.productName || o.productName,
+          orderAmount: updated.orderAmount ?? o.orderAmount,
+          orderType: updated.orderType || o.orderType,
+          activityName: updated.activityName || o.activityName,
+          externalOrderId: updated.externalOrderId || o.externalOrderId,
+          syncedAt: updated.syncedAt || o.syncedAt,
+          synced: true,
+        }
+        : o)),
+    );
   }, []);
   const deleteSalesRecord = useCallback(async (id: string) => {
     await salesRecordsApi.delete(id);
     setSalesRecords((prev) => prev.filter((x) => x.id !== id));
+    // 删除后必须同步清掉 syncedOrders，否则会从缓存再次合并回列表
+    setSyncedOrders((prev) => prev.filter((x) => x.id !== id));
   }, []);
 
   // -------- Cost --------
