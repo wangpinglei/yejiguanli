@@ -44,7 +44,7 @@ function summarizePermissions(
     managedUnitIds.length === 0
       ? "未分配单位"
       : managedUnitIds.length <= 2
-        ? managedUnitIds.map((id) => unitNameMap[id] || id).join("、")
+        ? `可见单位 ${managedUnitIds.map((id) => unitNameMap[id] || id).join("、")}`
         : `可见单位 ${managedUnitIds.length}`;
   if (viewCount === 0 && editCount === 0) return `未分配模块 · ${unitPart}`;
   return `查看 ${viewCount} · 编辑 ${editCount} · ${unitPart}`;
