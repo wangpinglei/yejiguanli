@@ -42,14 +42,15 @@ import MTeamMgmtCommissionPanel from "./CostManagement/components/m-team-mgmt-co
 const costCategories = ["人力成本", "办公租金", "营销推广", "差旅交通", "运营杂费", "设备采购", "其他"];
 const incomeCategories = ["服务费收入", "咨询费收入", "技术支持费", "培训费收入", "退款收入", "其他收入"];
 
-/** 表单月份选择器：YYYY-MM → 存库用该月 1 日 */
+/** 表单月份选择器：YYYY-MM → 存库用该月 1 日；空则保持为空（需手动选） */
 function monthInputToDate(yearMonth: string): string {
   if (/^\d{4}-\d{2}$/.test(yearMonth)) return `${yearMonth}-01`;
-  return new Date().toISOString().slice(0, 10);
+  return "";
 }
 
 function dateToMonthInput(date: string): string {
-  return (date || "").slice(0, 7);
+  const ym = (date || "").slice(0, 7);
+  return /^\d{4}-\d{2}$/.test(ym) ? ym : "";
 }
 
 export default function CostManagement() {
@@ -71,7 +72,7 @@ export default function CostManagement() {
   // Form state
   const [form, setForm] = useState({
     salesUnitId: "",
-    date: new Date().toISOString().slice(0, 10),
+    date: "",
     remark: "",
     changeReason: "",
     isRecurring: false,
@@ -88,7 +89,7 @@ export default function CostManagement() {
   const [incomeDeleteId, setIncomeDeleteId] = useState<string | null>(null);
   const [incomeForm, setIncomeForm] = useState({
     salesUnitId: "",
-    date: new Date().toISOString().slice(0, 10),
+    date: "",
     remark: "",
     isRecurring: false, // 是否月度固定
     recurringMonths: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as number[], // 适用月份
@@ -296,7 +297,7 @@ export default function CostManagement() {
     setEditingRecord(null);
     setForm({
       salesUnitId: "",
-      date: monthInputToDate(selectedMonth),
+      date: "",
       remark: "",
       changeReason: "",
       isRecurring: false,
@@ -343,6 +344,10 @@ export default function CostManagement() {
   const handleSubmit = async () => {
     if (!form.salesUnitId) {
       alert("请选择销售单位");
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(form.date)) {
+      alert(form.isRecurring ? "请选择生效起始月份" : "请选择成本发生月份");
       return;
     }
     const validItems = formItems.filter((i) => i.amount > 0);
@@ -403,7 +408,7 @@ export default function CostManagement() {
     setEditingIncome(null);
     setIncomeForm({
       salesUnitId: "",
-      date: monthInputToDate(selectedMonth),
+      date: "",
       remark: "",
       isRecurring: false,
       recurringMonths: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
@@ -445,6 +450,10 @@ export default function CostManagement() {
   const handleIncomeSubmit = async () => {
     if (!incomeForm.salesUnitId) {
       alert("请选择销售单位");
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(incomeForm.date)) {
+      alert(incomeForm.isRecurring ? "请选择生效起始月份" : "请选择收入发生月份");
       return;
     }
     const validItems = incomeFormItems.filter((i) => i.amount > 0);
@@ -1186,7 +1195,7 @@ export default function CostManagement() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>{form.isRecurring ? "生效起始月份" : "成本发生月份"}</Label>
+                <Label>{form.isRecurring ? "生效起始月份 *" : "成本发生月份 *"}</Label>
                 <Input
                   type="month"
                   value={dateToMonthInput(form.date)}
@@ -1196,7 +1205,7 @@ export default function CostManagement() {
                 />
                 {!form.isRecurring && (
                   <p className="text-xs text-muted-foreground">
-                    选择月份后，该笔成本计入对应月份（默认与上方筛选月份一致）
+                    请手动选择该笔成本计入的月份（不默认当月）
                   </p>
                 )}
               </div>
@@ -1399,7 +1408,7 @@ export default function CostManagement() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>{incomeForm.isRecurring ? "生效起始月份" : "收入发生月份"}</Label>
+                <Label>{incomeForm.isRecurring ? "生效起始月份 *" : "收入发生月份 *"}</Label>
                 <Input
                   type="month"
                   value={dateToMonthInput(incomeForm.date)}
@@ -1412,7 +1421,7 @@ export default function CostManagement() {
                 />
                 {!incomeForm.isRecurring && (
                   <p className="text-xs text-muted-foreground">
-                    选择月份后，该笔收入计入对应月份（默认与上方筛选月份一致）
+                    请手动选择该笔收入计入的月份（不默认当月）
                   </p>
                 )}
               </div>
