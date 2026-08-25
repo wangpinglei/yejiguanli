@@ -150,6 +150,7 @@ function initSchema() {
       contract2_end_date TEXT DEFAULT '',
       contract3_start_date TEXT DEFAULT '',
       contract3_end_date TEXT DEFAULT '',
+      is_indefinite_contract INTEGER DEFAULT 0,
       bank_belong TEXT DEFAULT '',
       company_email TEXT DEFAULT '',
       signed_documents TEXT DEFAULT '[]',
@@ -493,6 +494,10 @@ function initSchema() {
     { name: "contract2_end_date", ddl: "contract2_end_date TEXT DEFAULT ''" },
     { name: "contract3_start_date", ddl: "contract3_start_date TEXT DEFAULT ''" },
     { name: "contract3_end_date", ddl: "contract3_end_date TEXT DEFAULT ''" },
+    {
+      name: "is_indefinite_contract",
+      ddl: "is_indefinite_contract INTEGER DEFAULT 0",
+    },
     { name: "bank_belong", ddl: "bank_belong TEXT DEFAULT ''" },
     { name: "company_email", ddl: "company_email TEXT DEFAULT ''" },
     { name: "signed_documents", ddl: "signed_documents TEXT DEFAULT '[]'" },
@@ -739,6 +744,7 @@ function migrateHrProfilesNullablePersonnel() {
       contract2_end_date TEXT DEFAULT '',
       contract3_start_date TEXT DEFAULT '',
       contract3_end_date TEXT DEFAULT '',
+      is_indefinite_contract INTEGER DEFAULT 0,
       bank_belong TEXT DEFAULT '',
       company_email TEXT DEFAULT '',
       signed_documents TEXT DEFAULT '[]',
@@ -1130,7 +1136,6 @@ export function calcAgeFromIdOrBirth(idNumber?: string, birthDate?: string): num
 }
 
 export function rowToHrProfile(row: any) {
-  const alert = getContractAlert(row.contract_end_date);
   const asText = (v: unknown): string => {
     if (v === undefined || v === null) return "";
     if (typeof v === "bigint") return v.toString();
@@ -1142,6 +1147,13 @@ export function rowToHrProfile(row: any) {
       ? Number(row.age)
       : calcAgeFromIdOrBirth(idNumber, row.birth_date);
   const linked = Boolean(row.personnel_id);
+  const status = (row.status || "active") as "active" | "inactive";
+  const isIndefiniteContract = Boolean(row.is_indefinite_contract);
+  // 无固定期限 / 离职：不算合同到期提醒
+  const alert =
+    isIndefiniteContract || status === "inactive"
+      ? { contractAlert: "ok" as ContractAlert, contractDaysLeft: null }
+      : getContractAlert(row.contract_end_date);
   return {
     id: row.id,
     personnelId: row.personnel_id || "",
@@ -1181,6 +1193,7 @@ export function rowToHrProfile(row: any) {
     contract2EndDate: row.contract2_end_date || "",
     contract3StartDate: row.contract3_start_date || "",
     contract3EndDate: row.contract3_end_date || "",
+    isIndefiniteContract,
     bankBelong: row.bank_belong || "",
     companyEmail: row.company_email || "",
     signedDocuments: parseSignedDocuments(row.signed_documents),
@@ -1195,7 +1208,7 @@ export function rowToHrProfile(row: any) {
     phone: asText(row.phone),
     hireDate: row.hire_date || "",
     resignDate: row.resign_date || undefined,
-    status: (row.status || "active") as "active" | "inactive",
+    status,
     salary: typeof row.salary === "string" ? JSON.parse(row.salary || "{}") : (row.salary || {}),
     socialInsurance: row.social_insurance || 0,
     housingFund: row.housing_fund || 0,

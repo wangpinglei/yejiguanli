@@ -172,6 +172,8 @@ export interface HrProfile {
   contract2EndDate: string;
   contract3StartDate: string;
   contract3EndDate: string;
+  /** 无固定期限合同；为 true 时不参与合同到期提醒（默认 false） */
+  isIndefiniteContract: boolean;
   bankBelong: string;
   companyEmail: string;
   signedDocuments: SignedDocument[];

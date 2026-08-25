@@ -160,6 +160,7 @@ type HrForm = {
   contract2EndDate: string;
   contract3StartDate: string;
   contract3EndDate: string;
+  isIndefiniteContract: boolean;
   bankBelong: string;
   companyEmail: string;
 };
@@ -202,6 +203,7 @@ const EMPTY_FORM: HrForm = {
   contract2EndDate: "",
   contract3StartDate: "",
   contract3EndDate: "",
+  isIndefiniteContract: false,
   bankBelong: "",
   companyEmail: "",
 };
@@ -626,6 +628,7 @@ export default function HrManagementPage() {
       contract2EndDate: row.contract2EndDate || "",
       contract3StartDate: row.contract3StartDate || "",
       contract3EndDate: row.contract3EndDate || "",
+      isIndefiniteContract: !!row.isIndefiniteContract,
       bankBelong: row.bankBelong || "",
       companyEmail: row.companyEmail || "",
     });
@@ -759,6 +762,7 @@ export default function HrManagementPage() {
         contract2EndDate: form.contract2EndDate,
         contract3StartDate: form.contract3StartDate,
         contract3EndDate: form.contract3EndDate,
+        isIndefiniteContract: !!form.isIndefiniteContract,
         bankBelong: form.bankBelong,
         companyEmail: form.companyEmail,
       } as Parameters<typeof hrProfilesApi.update>[1] & {
@@ -1331,6 +1335,7 @@ export default function HrManagementPage() {
                   <TableHead className="min-w-[110px]">转正日期</TableHead>
                   <TableHead className="min-w-[110px]">合同提醒到期</TableHead>
                   <TableHead className="min-w-[100px]">合同提醒</TableHead>
+                  <TableHead className="min-w-[120px]">无固定期限合同</TableHead>
                   <TableHead className="min-w-[110px]">劳动合同1起</TableHead>
                   <TableHead className="min-w-[110px]">劳动合同1止</TableHead>
                   <TableHead className="min-w-[110px]">劳动合同2起</TableHead>
@@ -1367,7 +1372,7 @@ export default function HrManagementPage() {
                 {loading ? (
                   <TableRow>
                     <TableCell
-                      colSpan={canEdit ? 46 : 44}
+                      colSpan={canEdit ? 47 : 45}
                       className="py-10 text-center text-muted-foreground"
                     >
                       加载中…
@@ -1376,7 +1381,7 @@ export default function HrManagementPage() {
                 ) : filtered.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={canEdit ? 46 : 44}
+                      colSpan={canEdit ? 47 : 45}
                       className="py-10 text-center text-muted-foreground"
                     >
                       暂无人事档案。可点「批量导入表格」（须先在人员管理存在同名人员）。
@@ -1464,7 +1469,14 @@ export default function HrManagementPage() {
                         {displayDate(row.contractEndDate)}
                       </TableCell>
                       <TableCell>
-                        {row.contractAlert !== "ok" && row.contractAlert !== "empty" ? (
+                        {row.isIndefiniteContract ? (
+                          <Badge
+                            variant="outline"
+                            className="border-slate-300 bg-slate-50 text-slate-700"
+                          >
+                            免提醒
+                          </Badge>
+                        ) : row.contractAlert !== "ok" && row.contractAlert !== "empty" ? (
                           <Badge
                             variant="outline"
                             className={cn("border", getAlertClass(row.contractAlert))}
@@ -1475,6 +1487,13 @@ export default function HrManagementPage() {
                           <span className="text-muted-foreground">未填</span>
                         ) : (
                           "—"
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {row.isIndefiniteContract ? (
+                          <Badge className="bg-emerald-100 text-emerald-800">是</Badge>
+                        ) : (
+                          <span className="text-muted-foreground">否</span>
                         )}
                       </TableCell>
                       <TableCell className="tabular-nums">
@@ -1759,11 +1778,26 @@ export default function HrManagementPage() {
                       ? "date"
                       : "text"
                   }
-                  value={form[key]}
+                  value={form[key] as string}
                   onChange={(e) => setForm({ ...form, [key]: e.target.value })}
                 />
               </div>
             ))}
+            <label className="sm:col-span-2 flex items-start gap-2 rounded-lg border px-3 py-2.5 cursor-pointer">
+              <Checkbox
+                checked={form.isIndefiniteContract}
+                onCheckedChange={(v) =>
+                  setForm({ ...form, isIndefiniteContract: v === true })
+                }
+                className="mt-0.5"
+              />
+              <span className="text-sm leading-snug">
+                无固定期限合同
+                <span className="block text-xs text-muted-foreground mt-0.5">
+                  勾选后不再参与合同到期提醒（默认否；需手动标记）
+                </span>
+              </span>
+            </label>
             <div className="sm:col-span-2 space-y-1.5">
               <Label>联系地址</Label>
               <Input
@@ -1891,7 +1925,7 @@ export default function HrManagementPage() {
           )}
           <p className="text-xs text-muted-foreground">
             批量导入按档案表头：姓名、入职时间、司龄、转正日期、用工性质、合同主体、性别…企业邮箱。可先下载样表，选择文件后预览再确认导入。
-            合同提醒取已填期次中到期最晚的一期。签署公司≠销售单位。
+            合同提醒取已填期次中到期最晚的一期；无固定期限合同、已离职人员不提醒。签署公司≠销售单位。
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>

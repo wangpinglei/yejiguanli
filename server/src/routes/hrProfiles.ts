@@ -167,6 +167,7 @@ const HR_AUDIT_FIELD_LABELS: Record<string, string> = {
   contract2EndDate: "劳动合同2止",
   contract3StartDate: "劳动合同3起",
   contract3EndDate: "劳动合同3止",
+  isIndefiniteContract: "无固定期限合同",
   bankBelong: "所属银行",
   companyEmail: "企业邮箱",
   hireDate: "入职日期",
@@ -180,8 +181,12 @@ function buildHrUpdateDiff(
 ): { summary: string; changes: Array<{ field: string; label: string; from: string; to: string }> } {
   const changes: Array<{ field: string; label: string; from: string; to: string }> = [];
   for (const [field, label] of Object.entries(HR_AUDIT_FIELD_LABELS)) {
-    const from = text(before[field]);
-    const to = text(after[field]);
+    let from = text(before[field]);
+    let to = text(after[field]);
+    if (field === "isIndefiniteContract") {
+      from = before[field] ? "是" : "否";
+      to = after[field] ? "是" : "否";
+    }
     if (from === to) continue;
     changes.push({ field, label, from, to });
   }
@@ -235,6 +240,7 @@ const HR_SELECT = `
     h.contract2_end_date,
     h.contract3_start_date,
     h.contract3_end_date,
+    h.is_indefinite_contract,
     h.bank_belong,
     h.company_email,
     h.signed_documents,
@@ -478,6 +484,17 @@ function parseOptionalNumber(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** 解析是否类字段；未传时用 fallback（默认否） */
+function parseBoolFlag(v: unknown, fallback = false): boolean {
+  if (v === undefined || v === null || v === "") return fallback;
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v !== 0;
+  const s = String(v).trim().toLowerCase();
+  if (["1", "true", "yes", "y", "是"].includes(s)) return true;
+  if (["0", "false", "no", "n", "否"].includes(s)) return false;
+  return fallback;
+}
+
 /** 合同提醒用：取已填期次中到期日最晚的一期 */
 function resolveCurrentContract(
   c1s: string,
@@ -596,6 +613,10 @@ function upsertHrFields(body: Record<string, unknown>, fallback?: {
     contract2EndDate,
     contract3StartDate,
     contract3EndDate,
+    isIndefiniteContract: parseBoolFlag(
+      body.isIndefiniteContract ?? body.is_indefinite_contract,
+      false,
+    ),
     bankBelong: text(body.bankBelong ?? body.bank_belong),
     companyEmail: text(body.companyEmail ?? body.company_email),
   };
@@ -612,6 +633,7 @@ const HR_FIELD_COLUMNS = `
   contract1_start_date, contract1_end_date,
   contract2_start_date, contract2_end_date,
   contract3_start_date, contract3_end_date,
+  is_indefinite_contract,
   bank_belong, company_email
 `.replace(/\s+/g, " ").trim();
 
@@ -652,6 +674,7 @@ function hrFieldValues(fields: ReturnType<typeof upsertHrFields>): unknown[] {
     fields.contract2EndDate,
     fields.contract3StartDate,
     fields.contract3EndDate,
+    fields.isIndefiniteContract ? 1 : 0,
     fields.bankBelong,
     fields.companyEmail,
   ];
@@ -755,6 +778,10 @@ router.get("/reminders", (_req, res) => {
   let due30 = 0;
   let due60 = 0;
   for (const row of rows) {
+    // 离职 / 无固定期限：不计入到期提醒
+    const status = String(row.status || "active").trim() || "active";
+    if (status === "inactive") continue;
+    if (row.is_indefinite_contract) continue;
     const { contractAlert } = getContractAlert(row.contract_end_date);
     if (contractAlert === "expired") expired += 1;
     else if (contractAlert === "due30") due30 += 1;
@@ -928,6 +955,10 @@ router.put("/:id", requireModuleEdit("hr_management"), (req, res) => {
     contract2EndDate: req.body.contract2EndDate ?? existing.contract2_end_date,
     contract3StartDate: req.body.contract3StartDate ?? existing.contract3_start_date,
     contract3EndDate: req.body.contract3EndDate ?? existing.contract3_end_date,
+    isIndefiniteContract:
+      req.body.isIndefiniteContract !== undefined
+        ? req.body.isIndefiniteContract
+        : existing.is_indefinite_contract,
     bankBelong: req.body.bankBelong ?? existing.bank_belong,
     companyEmail: req.body.companyEmail ?? existing.company_email,
   });
