@@ -8,9 +8,15 @@ import {
 
   cancelFinanceNoticeSchedule,
 
+  cancelFinanceNoticePushTask,
+
+  createFinanceNoticePushTask,
+
   getFinanceNoticeConfig,
 
   getFinanceNoticePushLogs,
+
+  getFinanceNoticePushTasks,
 
   pushFinanceNoticeNow,
 
@@ -19,6 +25,8 @@ import {
   updateFinanceNoticeContent,
 
   updateFinanceNoticeSection,
+
+  type CreateFinanceNoticePushTaskInput,
 
   type FinanceNoticeContent,
 
@@ -49,6 +57,8 @@ router.get(
       config: getFinanceNoticeConfig(),
 
       logs: getFinanceNoticePushLogs(30),
+
+      tasks: getFinanceNoticePushTasks(50),
 
     });
 
@@ -110,7 +120,7 @@ router.put(
 
     }
 
-    res.json({ config, logs: getFinanceNoticePushLogs(30) });
+    res.json({ config, logs: getFinanceNoticePushLogs(30), tasks: getFinanceNoticePushTasks(50) });
 
   },
 
@@ -152,7 +162,7 @@ router.post(
 
       const config = scheduleFinanceNoticePush(scheduledAt, req.user!.name, pushOptions);
 
-      res.json({ config, logs: getFinanceNoticePushLogs(30) });
+      res.json({ config, logs: getFinanceNoticePushLogs(30), tasks: getFinanceNoticePushTasks(50) });
 
     } catch (e: unknown) {
 
@@ -178,7 +188,7 @@ router.delete(
 
     const config = cancelFinanceNoticeSchedule(_req.user!.name);
 
-    res.json({ config, logs: getFinanceNoticePushLogs(30) });
+    res.json({ config, logs: getFinanceNoticePushLogs(30), tasks: getFinanceNoticePushTasks(50) });
 
   },
 
@@ -292,11 +302,109 @@ router.post(
 
       const config = await pushFinanceNoticeNow(req.user!.name, overrideContent, pushOptions);
 
-      res.json({ config, logs: getFinanceNoticePushLogs(30) });
+      res.json({ config, logs: getFinanceNoticePushLogs(30), tasks: getFinanceNoticePushTasks(50) });
 
     } catch (e: unknown) {
 
       const msg = e instanceof Error ? e.message : "推送失败";
+
+      res.status(400).json({ error: msg });
+
+    }
+
+  },
+
+);
+
+
+
+router.post(
+
+  "/finance-notice/push-tasks",
+
+  requireModuleEdit("finance_notice"),
+
+  (req, res) => {
+
+    const body = req.body as Partial<CreateFinanceNoticePushTaskInput>;
+
+    const input: CreateFinanceNoticePushTaskInput = {
+
+      noticeText: String(body.noticeText ?? ""),
+
+      dutyRoster: Array.isArray(body.dutyRoster) ? body.dutyRoster : [],
+
+      pushIncludeNotice: body.pushIncludeNotice !== false,
+
+      pushIncludeDuty: body.pushIncludeDuty !== false,
+
+      scheduledAt: String(body.scheduledAt || ""),
+
+    };
+
+    if (!input.scheduledAt) {
+
+      return res.status(400).json({ error: "请填写推送时间" });
+
+    }
+
+    try {
+
+      const task = createFinanceNoticePushTask(input, req.user!.name);
+
+      res.json({
+
+        config: getFinanceNoticeConfig(),
+
+        logs: getFinanceNoticePushLogs(30),
+
+        tasks: getFinanceNoticePushTasks(50),
+
+        task,
+
+      });
+
+    } catch (e: unknown) {
+
+      const msg = e instanceof Error ? e.message : "创建失败";
+
+      res.status(400).json({ error: msg });
+
+    }
+
+  },
+
+);
+
+
+
+router.delete(
+
+  "/finance-notice/push-tasks/:id",
+
+  requireModuleEdit("finance_notice"),
+
+  (req, res) => {
+
+    try {
+
+      const task = cancelFinanceNoticePushTask(String(req.params.id), req.user!.name);
+
+      res.json({
+
+        config: getFinanceNoticeConfig(),
+
+        logs: getFinanceNoticePushLogs(30),
+
+        tasks: getFinanceNoticePushTasks(50),
+
+        task,
+
+      });
+
+    } catch (e: unknown) {
+
+      const msg = e instanceof Error ? e.message : "取消失败";
 
       res.status(400).json({ error: msg });
 

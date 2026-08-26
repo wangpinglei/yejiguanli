@@ -323,6 +323,20 @@ export const financeNoticeApi = {
       section: "duty",
       dutyRoster,
     }),
+  createPushTask: (
+    data: import("@/types/financeNoticeTypes").CreateFinanceNoticePushTaskInput,
+  ) =>
+    api.post<
+      import("@/types/financeNoticeTypes").FinanceNoticeResponse & {
+        task: import("@/types/financeNoticeTypes").FinanceNoticePushTask;
+      }
+    >("/finance-notice/push-tasks", data),
+  cancelPushTask: (taskId: string) =>
+    api.delete<
+      import("@/types/financeNoticeTypes").FinanceNoticeResponse & {
+        task: import("@/types/financeNoticeTypes").FinanceNoticePushTask;
+      }
+    >(`/finance-notice/push-tasks/${taskId}`),
   schedule: (
     scheduledAt: string,
     options?: import("@/types/financeNoticeTypes").FinanceNoticePushOptions,

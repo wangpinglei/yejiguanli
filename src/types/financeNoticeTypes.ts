@@ -39,9 +39,48 @@ export interface FinanceNoticePushLog {
   pushIncludeDuty?: boolean;
 }
 
+export type FinanceNoticePushTaskStatus = 'pending' | 'sent' | 'failed' | 'cancelled';
+
+export interface FinanceNoticePushTask {
+  id: string;
+  noticeText: string;
+  dutyRoster: FinanceDutyRow[];
+  pushIncludeNotice: boolean;
+  pushIncludeDuty: boolean;
+  scheduledAt: string;
+  status: FinanceNoticePushTaskStatus;
+  pushError: string | null;
+  pushedAt: string | null;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface CreateFinanceNoticePushTaskInput {
+  noticeText: string;
+  dutyRoster: FinanceDutyRow[];
+  pushIncludeNotice: boolean;
+  pushIncludeDuty: boolean;
+  scheduledAt: string;
+}
+
 export interface FinanceNoticeResponse {
   config: FinanceNoticeConfig;
   logs: FinanceNoticePushLog[];
+  tasks: FinanceNoticePushTask[];
+}
+
+export function countPushMessages(options: FinanceNoticePushOptions): number {
+  let count = 0;
+  if (options.pushIncludeNotice) count += 1;
+  if (options.pushIncludeDuty) count += 1;
+  return count;
+}
+
+export function getPushMessageLabels(options: FinanceNoticePushOptions): string[] {
+  const labels: string[] = [];
+  if (options.pushIncludeNotice) labels.push('通知');
+  if (options.pushIncludeDuty) labels.push('值班表');
+  return labels;
 }
 
 export const DEFAULT_NOTICE_TEXT = `【本周电子签温馨提醒】🤪🤪🤪

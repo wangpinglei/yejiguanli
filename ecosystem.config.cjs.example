@@ -20,6 +20,9 @@ module.exports = {
         NODE_ENV: 'production',
         PORT: 8100,
         // JWT_SECRET: '请换成强随机字符串',
+        // 财务通知钉钉群（单群）
+        // FINANCE_NOTICE_WEBHOOK_URL: 'https://oapi.dingtalk.com/robot/send?access_token=...',
+        // 多群逗号分隔时使用 FINANCE_NOTICE_WEBHOOK_URLS
       },
     },
   ],
