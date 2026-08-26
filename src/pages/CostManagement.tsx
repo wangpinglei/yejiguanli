@@ -877,39 +877,57 @@ export default function CostManagement() {
                                 return (
                                 <div
                                   key={d.personId}
-                                  className="grid gap-2 rounded-lg border bg-card px-4 py-2 text-sm"
-                                  style={{ gridTemplateColumns: 'repeat(13, minmax(0, 1fr))' }}
+                                  className="overflow-x-auto rounded-lg border bg-card px-4 py-2 text-sm"
                                 >
-                                  <span className="flex items-center gap-1 font-medium">
-                                    {d.name}
-                                    {isDistributionPerson ? (
-                                      <Badge variant="outline" className="border-violet-200 px-1 py-0 text-[10px] text-violet-700">
-                                        分销
-                                      </Badge>
-                                    ) : null}
-                                  </span>
-                                  <span className="text-muted-foreground">{d.position}</span>
-                                  <span className="text-right text-gray-600">底薪 {formatCurrency(d.baseSalary)}</span>
-                                  <span className="text-right text-blue-600">绩效 {formatCurrency(d.performance)}</span>
-                                  <span className="text-right text-amber-600">
-                                    个人 {formatCurrency(d.personalCommission)}
-                                  </span>
-                                  <span className="text-right text-sky-600">
-                                    分销奖金 {formatCurrency(d.internalSalesCommission)}
-                                  </span>
-                                  <span className="text-right text-emerald-600">
-                                    团队 {formatCurrency(d.managementCommission)}
-                                  </span>
-                                  <span className="text-right text-red-600">请假扣 {formatCurrency(d.leaveDeduction)}</span>
-                                  <span className="text-right text-amber-600">其他 {formatCurrency(d.otherBonus - d.otherDeduction)}</span>
-                                  <span className="text-right text-red-600">社保 {formatCurrency(d.socialInsurance)}</span>
-                                  <span className="text-right text-cyan-600">公积金 {formatCurrency(d.housingFund)}</span>
-                                  <span className="text-right text-blue-600">
-                                    薪酬 {formatCurrency(d.salaryTotal)}
-                                  </span>
-                                  <span className="text-right font-bold text-blue-700">
-                                    合计 {formatCurrency(d.total)}
-                                  </span>
+                                  <div className="flex min-w-[1080px] items-center gap-x-4 gap-y-1">
+                                    <div className="flex w-36 shrink-0 items-center gap-1.5">
+                                      <span className="truncate font-medium">{d.name}</span>
+                                      {isDistributionPerson ? (
+                                        <Badge
+                                          variant="outline"
+                                          className="shrink-0 border-violet-200 px-1 py-0 text-[10px] text-violet-700"
+                                        >
+                                          分销
+                                        </Badge>
+                                      ) : null}
+                                    </div>
+                                    <span className="w-24 shrink-0 truncate text-muted-foreground">
+                                      {d.position || '-'}
+                                    </span>
+                                    <span className="shrink-0 whitespace-nowrap text-gray-600">
+                                      底薪 {formatCurrency(d.baseSalary)}
+                                    </span>
+                                    <span className="shrink-0 whitespace-nowrap text-blue-600">
+                                      绩效 {formatCurrency(d.performance)}
+                                    </span>
+                                    <span className="shrink-0 whitespace-nowrap text-amber-600">
+                                      个人 {formatCurrency(d.personalCommission)}
+                                    </span>
+                                    <span className="shrink-0 whitespace-nowrap text-sky-600">
+                                      分销奖金 {formatCurrency(d.internalSalesCommission)}
+                                    </span>
+                                    <span className="shrink-0 whitespace-nowrap text-emerald-600">
+                                      团队 {formatCurrency(d.managementCommission)}
+                                    </span>
+                                    <span className="shrink-0 whitespace-nowrap text-red-600">
+                                      请假扣 {formatCurrency(d.leaveDeduction)}
+                                    </span>
+                                    <span className="shrink-0 whitespace-nowrap text-amber-600">
+                                      其他 {formatCurrency(d.otherBonus - d.otherDeduction)}
+                                    </span>
+                                    <span className="shrink-0 whitespace-nowrap text-red-600">
+                                      社保 {formatCurrency(d.socialInsurance)}
+                                    </span>
+                                    <span className="shrink-0 whitespace-nowrap text-cyan-600">
+                                      公积金 {formatCurrency(d.housingFund)}
+                                    </span>
+                                    <span className="shrink-0 whitespace-nowrap text-blue-600">
+                                      薪酬 {formatCurrency(d.salaryTotal)}
+                                    </span>
+                                    <span className="ml-auto shrink-0 whitespace-nowrap font-bold text-blue-700">
+                                      合计 {formatCurrency(d.total)}
+                                    </span>
+                                  </div>
                                 </div>
                               )})}
                               {unit.details.length === 0 && (
