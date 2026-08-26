@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useData } from '@/context/DataContext'
 import { formatCurrency } from '@/lib/format'
-import type { Personnel, Product, UnitProductSettlement } from '@/types'
+import type { Personnel, Product, ProductPersonCommission, UnitProductSettlement } from '@/types'
 import { Layers, Package, Pencil, Percent, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -78,6 +78,35 @@ function formatPpcSummary(opts: {
       ? `；奖励 ¥${opts.rewardAmount}/件（${rewardPeriod}）`
       : ''
   return base + reward
+}
+
+function hasInternalSalesPpc(ppc: ProductPersonCommission): boolean {
+  if (ppc.internalSalesCommissionType === 'fixed') {
+    return (ppc.internalSalesCommissionAmount || 0) > 0
+  }
+  return (ppc.internalSalesCommissionRate || 0) > 0
+}
+
+function formatInternalPpcSummary(ppc: ProductPersonCommission): string {
+  const type = ppc.internalSalesCommissionType || 'percentage'
+  if (type === 'fixed') {
+    return `按件 ¥${ppc.internalSalesCommissionAmount || 0}`
+  }
+  const threshold = ppc.internalSalesCommissionThreshold || 0
+  return (
+    `比例 ${ppc.internalSalesCommissionRate || 0}%` +
+    (threshold > 0 ? `（门槛 ${formatCurrency(threshold)}）` : '')
+  )
+}
+
+function getInternalRecipientName(
+  ppc: ProductPersonCommission,
+  person: Personnel,
+  colleagueList: Personnel[],
+): string | null {
+  const recipientId = (ppc.internalSalesCommissionRecipientId || '').trim()
+  if (!recipientId || recipientId === person.id) return null
+  return colleagueList.find((p) => p.id === recipientId)?.name || null
 }
 
 function toggleIdInList(list: string[], id: string): string[] {
@@ -499,6 +528,7 @@ export default function MPersonProductCommission({
                             </TableHead>
                           )}
                           <TableHead>产品</TableHead>
+                          <TableHead>分销奖金</TableHead>
                           <TableHead>个人提成</TableHead>
                           <TableHead className="text-right w-28">操作</TableHead>
                         </TableRow>
@@ -531,6 +561,32 @@ export default function MPersonProductCommission({
                                     ) : null}
                                   </div>
                                 </div>
+                              </TableCell>
+                              <TableCell>
+                                {ppc && hasInternalSalesPpc(ppc) ? (
+                                  <div className="space-y-1">
+                                    <Badge className="bg-sky-100 text-sky-800">
+                                      已配置
+                                    </Badge>
+                                    <p className="text-xs text-muted-foreground">
+                                      {formatInternalPpcSummary(ppc)}
+                                    </p>
+                                    {(() => {
+                                      const recipientName = getInternalRecipientName(
+                                        ppc,
+                                        person,
+                                        personnel,
+                                      )
+                                      return recipientName ? (
+                                        <p className="text-[10px] text-sky-700">
+                                          受益人：{recipientName}
+                                        </p>
+                                      ) : null
+                                    })()}
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">-</span>
+                                )}
                               </TableCell>
                               <TableCell>
                                 {ppc ? (
@@ -594,7 +650,7 @@ export default function MPersonProductCommission({
                         {productRows.length === 0 && (
                           <TableRow>
                             <TableCell
-                              colSpan={canEdit ? 4 : 3}
+                              colSpan={canEdit ? 5 : 4}
                               className="py-10 text-center text-sm text-muted-foreground"
                             >
                               暂无关联产品。可从销售记录产生关联，或上方选择产品进行配置。
