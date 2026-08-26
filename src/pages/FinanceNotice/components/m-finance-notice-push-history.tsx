@@ -76,8 +76,8 @@ export default function MFinanceNoticePushHistory({ logs, tasks }: Props) {
                   <TableBody>
                     {logs.map((log) => {
                       const contentParts: string[] = [];
-                      if (log.pushIncludeNotice !== false) contentParts.push('通知');
-                      if (log.pushIncludeDuty !== false) contentParts.push('值班表');
+                      if (log.pushIncludeNotice === true) contentParts.push('通知');
+                      if (log.pushIncludeDuty === true) contentParts.push('值班表');
                       return (
                         <TableRow key={log.id}>
                           <TableCell>{formatDateTime(log.pushedAt)}</TableCell>

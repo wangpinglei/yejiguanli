@@ -345,8 +345,8 @@ export const financeNoticeApi = {
       "/finance-notice/schedule",
       {
         scheduledAt,
-        pushIncludeNotice: options?.pushIncludeNotice !== false,
-        pushIncludeDuty: options?.pushIncludeDuty !== false,
+        pushIncludeNotice: options?.pushIncludeNotice === true,
+        pushIncludeDuty: options?.pushIncludeDuty === true,
       },
     ),
   cancelSchedule: () =>

@@ -146,9 +146,9 @@ router.post(
 
     const pushOptions: FinanceNoticePushOptions = {
 
-      pushIncludeNotice: req.body?.pushIncludeNotice !== false,
+      pushIncludeNotice: req.body?.pushIncludeNotice === true,
 
-      pushIncludeDuty: req.body?.pushIncludeDuty !== false,
+      pushIncludeDuty: req.body?.pushIncludeDuty === true,
 
     };
 
@@ -214,9 +214,9 @@ router.post(
 
       const pushOptions: FinanceNoticePushOptions = {
 
-        pushIncludeNotice: body.pushIncludeNotice !== false,
+        pushIncludeNotice: body.pushIncludeNotice === true,
 
-        pushIncludeDuty: body.pushIncludeDuty !== false,
+        pushIncludeDuty: body.pushIncludeDuty === true,
 
       };
 
@@ -334,9 +334,9 @@ router.post(
 
       dutyRoster: Array.isArray(body.dutyRoster) ? body.dutyRoster : [],
 
-      pushIncludeNotice: body.pushIncludeNotice !== false,
+      pushIncludeNotice: body.pushIncludeNotice === true,
 
-      pushIncludeDuty: body.pushIncludeDuty !== false,
+      pushIncludeDuty: body.pushIncludeDuty === true,
 
       scheduledAt: String(body.scheduledAt || ""),
 

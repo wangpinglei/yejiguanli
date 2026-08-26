@@ -68,7 +68,7 @@ export default function MFinanceNoticePushTaskPanel({
   );
   const [pushOptions, setPushOptions] = useState<FinanceNoticePushOptions>({
     pushIncludeNotice: true,
-    pushIncludeDuty: true,
+    pushIncludeDuty: false,
   });
   const [scheduleInput, setScheduleInput] = useState('');
   const [creating, setCreating] = useState(false);
@@ -99,6 +99,26 @@ export default function MFinanceNoticePushTaskPanel({
     });
   }
 
+  function handlePushIncludeDutyChange(checked: boolean) {
+    setPushOptions({ ...pushOptions, pushIncludeDuty: checked })
+    if (!checked) {
+      setTaskContent({
+        ...taskContent,
+        dutyRoster: [{ date: '', name: '', phone: '' }],
+      })
+    }
+  }
+
+  function buildTaskPayload(scheduledAt: string) {
+    return {
+      noticeText: pushOptions.pushIncludeNotice ? taskContent.noticeText : '',
+      dutyRoster: pushOptions.pushIncludeDuty ? taskContent.dutyRoster : [],
+      scheduledAt,
+      pushIncludeNotice: pushOptions.pushIncludeNotice,
+      pushIncludeDuty: pushOptions.pushIncludeDuty,
+    }
+  }
+
   async function handleCreateTask() {
     const scheduledAt = localInputToIso(scheduleInput);
     if (!scheduledAt) {
@@ -116,12 +136,7 @@ export default function MFinanceNoticePushTaskPanel({
 
     setCreating(true);
     try {
-      const res = await financeNoticeApi.createPushTask({
-        noticeText: taskContent.noticeText,
-        dutyRoster: taskContent.dutyRoster,
-        scheduledAt,
-        ...pushOptions,
-      });
+      const res = await financeNoticeApi.createPushTask(buildTaskPayload(scheduledAt));
       onTasksChange(res.tasks);
       await onLogsRefresh();
       setScheduleInput('');
@@ -146,9 +161,7 @@ export default function MFinanceNoticePushTaskPanel({
     setPushing(true);
     try {
       const res = await financeNoticeApi.pushNow({
-        noticeText: taskContent.noticeText,
-        dutyRoster: taskContent.dutyRoster,
-        ...pushOptions,
+        ...buildTaskPayload(''),
         saveBeforePush: false,
       });
       onTasksChange(res.tasks || tasks);
@@ -205,9 +218,7 @@ export default function MFinanceNoticePushTaskPanel({
               <Checkbox
                 id="taskPushDuty"
                 checked={pushOptions.pushIncludeDuty}
-                onCheckedChange={(checked) =>
-                  setPushOptions({ ...pushOptions, pushIncludeDuty: checked === true })
-                }
+                onCheckedChange={(checked) => handlePushIncludeDutyChange(checked === true)}
               />
               <Label htmlFor="taskPushDuty" className="cursor-pointer font-normal">
                 推送值班表

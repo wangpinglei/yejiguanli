@@ -299,8 +299,8 @@ export function buildFinanceNoticeMarkdown(
   content: FinanceNoticeContent,
   options?: FinanceNoticePushOptions,
 ): string {
-  const includeNotice = options?.pushIncludeNotice !== false;
-  const includeDuty = options?.pushIncludeDuty !== false;
+  const includeNotice = options?.pushIncludeNotice === true;
+  const includeDuty = options?.pushIncludeDuty === true;
   const parts: string[] = [];
 
   if (includeNotice) {
@@ -383,8 +383,8 @@ export async function pushFinanceNoticeToDingTalk(
 ): Promise<void> {
   const updateConfigStatus = options?.updateConfigStatus !== false;
   const pushOpts: FinanceNoticePushOptions = {
-    pushIncludeNotice: pushOptions?.pushIncludeNotice !== false,
-    pushIncludeDuty: pushOptions?.pushIncludeDuty !== false,
+    pushIncludeNotice: pushOptions?.pushIncludeNotice === true,
+    pushIncludeDuty: pushOptions?.pushIncludeDuty === true,
   };
   if (!pushOpts.pushIncludeNotice && !pushOpts.pushIncludeDuty) {
     throw new Error("请至少选择一项推送内容");
