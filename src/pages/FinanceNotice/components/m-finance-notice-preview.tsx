@@ -5,7 +5,11 @@ import type {
   FinanceNoticePushOptions,
 } from '@/types/financeNoticeTypes';
 
-import { countPushMessages, getPushMessageLabels } from '@/types/financeNoticeTypes';
+import {
+  countPushMessages,
+  getPushMessageLabels,
+  normalizePushOptions,
+} from '@/types/financeNoticeTypes';
 
 import {
   Table,
@@ -23,8 +27,9 @@ interface PreviewBodyProps {
 
 export function FinanceNoticePreviewBody({ content, pushOptions }: PreviewBodyProps) {
   const dutyRoster = content.dutyRoster.filter((row) => row.date || row.name || row.phone);
-  const showNotice = pushOptions.pushIncludeNotice;
-  const showDuty = pushOptions.pushIncludeDuty;
+  const normalized = normalizePushOptions(pushOptions);
+  const showNotice = normalized.pushIncludeNotice;
+  const showDuty = normalized.pushIncludeDuty;
 
   return (
     <div className="space-y-5 text-sm leading-relaxed">
@@ -116,12 +121,7 @@ export function getTotalPendingMessageCount(
   tasks: Array<{ pushIncludeNotice: boolean; pushIncludeDuty: boolean }>,
 ): number {
   return tasks.reduce(
-    (sum, task) =>
-      sum +
-      countPushMessages({
-        pushIncludeNotice: task.pushIncludeNotice,
-        pushIncludeDuty: task.pushIncludeDuty,
-      }),
+    (sum, task) => sum + countPushMessages(normalizePushOptions(task)),
     0,
   );
 }

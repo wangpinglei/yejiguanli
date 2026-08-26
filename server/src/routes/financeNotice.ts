@@ -328,15 +328,18 @@ router.post(
 
     const body = req.body as Partial<CreateFinanceNoticePushTaskInput>;
 
+    const pushIncludeNotice = body.pushIncludeNotice === true;
+    const pushIncludeDuty = body.pushIncludeDuty === true;
+
     const input: CreateFinanceNoticePushTaskInput = {
 
-      noticeText: String(body.noticeText ?? ""),
+      noticeText: pushIncludeNotice ? String(body.noticeText ?? "") : "",
 
-      dutyRoster: Array.isArray(body.dutyRoster) ? body.dutyRoster : [],
+      dutyRoster: pushIncludeDuty && Array.isArray(body.dutyRoster) ? body.dutyRoster : [],
 
-      pushIncludeNotice: body.pushIncludeNotice === true,
+      pushIncludeNotice,
 
-      pushIncludeDuty: body.pushIncludeDuty === true,
+      pushIncludeDuty,
 
       scheduledAt: String(body.scheduledAt || ""),
 

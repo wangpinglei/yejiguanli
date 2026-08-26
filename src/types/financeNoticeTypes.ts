@@ -69,18 +69,46 @@ export interface FinanceNoticeResponse {
   tasks: FinanceNoticePushTask[];
 }
 
+export function isPushOptionEnabled(value: unknown): boolean {
+  return value === true || value === 1 || value === '1';
+}
+
+export function normalizePushOptions(
+  options?: Partial<FinanceNoticePushOptions>,
+): FinanceNoticePushOptions {
+  return {
+    pushIncludeNotice: isPushOptionEnabled(options?.pushIncludeNotice),
+    pushIncludeDuty: isPushOptionEnabled(options?.pushIncludeDuty),
+  };
+}
+
 export function countPushMessages(options: FinanceNoticePushOptions): number {
+  const normalized = normalizePushOptions(options);
   let count = 0;
-  if (options.pushIncludeNotice) count += 1;
-  if (options.pushIncludeDuty) count += 1;
+  if (normalized.pushIncludeNotice) count += 1;
+  if (normalized.pushIncludeDuty) count += 1;
   return count;
 }
 
 export function getPushMessageLabels(options: FinanceNoticePushOptions): string[] {
+  const normalized = normalizePushOptions(options);
   const labels: string[] = [];
-  if (options.pushIncludeNotice) labels.push('通知');
-  if (options.pushIncludeDuty) labels.push('值班表');
+  if (normalized.pushIncludeNotice) labels.push('通知');
+  if (normalized.pushIncludeDuty) labels.push('值班表');
   return labels;
+}
+
+export function taskPreviewContent(
+  task: FinanceNoticePushTask,
+): { content: FinanceNoticeContent; pushOptions: FinanceNoticePushOptions } {
+  const pushOptions = normalizePushOptions(task);
+  return {
+    pushOptions,
+    content: {
+      noticeText: pushOptions.pushIncludeNotice ? task.noticeText : '',
+      dutyRoster: pushOptions.pushIncludeDuty ? task.dutyRoster : [],
+    },
+  };
 }
 
 export const DEFAULT_NOTICE_TEXT = `【本周电子签温馨提醒】🤪🤪🤪

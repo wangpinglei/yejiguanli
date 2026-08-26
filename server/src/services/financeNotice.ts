@@ -29,6 +29,10 @@ export interface FinanceNoticeConfig extends FinanceNoticeContent, FinanceNotice
   updatedAt: string | null;
 }
 
+function pushFlagEnabled(value: unknown): boolean {
+  return Number(value) === 1;
+}
+
 export interface FinanceNoticePushLog {
   id: string;
   pushedAt: string;
@@ -135,8 +139,8 @@ function rowToConfig(row: Record<string, unknown>): FinanceNoticeConfig {
   return {
     noticeText,
     dutyRoster: parseJson<FinanceDutyRow[]>(String(row.duty_roster_json || "[]"), []),
-    pushIncludeNotice: row.push_include_notice !== 0,
-    pushIncludeDuty: row.push_include_duty !== 0,
+    pushIncludeNotice: pushFlagEnabled(row.push_include_notice),
+    pushIncludeDuty: pushFlagEnabled(row.push_include_duty),
     scheduledAt: row.scheduled_at ? String(row.scheduled_at) : null,
     pushStatus: (String(row.push_status || "none") as FinancePushStatus) || "none",
     pushedAt: row.pushed_at ? String(row.pushed_at) : null,
@@ -178,8 +182,8 @@ export function getFinanceNoticePushLogs(limit = 20): FinanceNoticePushLog[] {
     status: String(row.status) === "failed" ? "failed" : "sent",
     error: row.error ? String(row.error) : null,
     snapshot: normalizeSnapshot(parseJson(String(row.snapshot_json || "{}"), {})),
-    pushIncludeNotice: row.push_include_notice !== 0,
-    pushIncludeDuty: row.push_include_duty !== 0,
+    pushIncludeNotice: pushFlagEnabled(row.push_include_notice),
+    pushIncludeDuty: pushFlagEnabled(row.push_include_duty),
   }));
 }
 
@@ -473,12 +477,16 @@ export async function pushFinanceNoticeNow(
 }
 
 function rowToPushTask(row: Record<string, unknown>): FinanceNoticePushTask {
+  const pushIncludeNotice = pushFlagEnabled(row.push_include_notice);
+  const pushIncludeDuty = pushFlagEnabled(row.push_include_duty);
   return {
     id: String(row.id),
     noticeText: String(row.notice_text || ""),
-    dutyRoster: parseJson<FinanceDutyRow[]>(String(row.duty_roster_json || "[]"), []),
-    pushIncludeNotice: row.push_include_notice !== 0,
-    pushIncludeDuty: row.push_include_duty !== 0,
+    dutyRoster: pushIncludeDuty
+      ? parseJson<FinanceDutyRow[]>(String(row.duty_roster_json || "[]"), [])
+      : [],
+    pushIncludeNotice,
+    pushIncludeDuty,
     scheduledAt: String(row.scheduled_at || ""),
     status: (String(row.status || "pending") as FinanceNoticePushTaskStatus) || "pending",
     pushError: row.push_error ? String(row.push_error) : null,
@@ -509,7 +517,9 @@ export function createFinanceNoticePushTask(
   if (at.getTime() <= Date.now()) {
     throw new Error("推送时间须晚于当前时间");
   }
-  if (!input.pushIncludeNotice && !input.pushIncludeDuty) {
+  const pushIncludeNotice = input.pushIncludeNotice === true;
+  const pushIncludeDuty = input.pushIncludeDuty === true;
+  if (!pushIncludeNotice && !pushIncludeDuty) {
     throw new Error("请至少选择一项推送内容");
   }
   const db = getDb();
@@ -522,10 +532,10 @@ export function createFinanceNoticePushTask(
     ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, datetime('now'), datetime('now'))
   `).run(
     id,
-    input.noticeText || "",
-    JSON.stringify(input.dutyRoster || []),
-    input.pushIncludeNotice ? 1 : 0,
-    input.pushIncludeDuty ? 1 : 0,
+    pushIncludeNotice ? String(input.noticeText || "") : "",
+    JSON.stringify(pushIncludeDuty ? input.dutyRoster || [] : []),
+    pushIncludeNotice ? 1 : 0,
+    pushIncludeDuty ? 1 : 0,
     input.scheduledAt,
     operator,
   );
@@ -623,8 +633,8 @@ export async function processScheduledFinanceNoticePushes(): Promise<void> {
   if (Number.isNaN(at.getTime()) || at.getTime() > Date.now()) return;
   const content = contentFromRow(row);
   const pushOptions: FinanceNoticePushOptions = {
-    pushIncludeNotice: row.push_include_notice !== 0,
-    pushIncludeDuty: row.push_include_duty !== 0,
+    pushIncludeNotice: pushFlagEnabled(row.push_include_notice),
+    pushIncludeDuty: pushFlagEnabled(row.push_include_duty),
   };
   try {
     await pushFinanceNoticeToDingTalk(content, "系统自动推送", scheduledAt, pushOptions);
@@ -657,7 +667,7 @@ export function migrateFinanceNoticeTextColumn() {
       notice_text TEXT DEFAULT '',
       duty_roster_json TEXT DEFAULT '[]',
       push_include_notice INTEGER DEFAULT 1,
-      push_include_duty INTEGER DEFAULT 1,
+      push_include_duty INTEGER DEFAULT 0,
       scheduled_at TEXT NOT NULL,
       status TEXT DEFAULT 'pending',
       push_error TEXT DEFAULT '',

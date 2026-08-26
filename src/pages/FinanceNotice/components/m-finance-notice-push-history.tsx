@@ -4,7 +4,7 @@ import { formatDateTime } from '@/lib/format';
 
 import type { FinanceNoticePushLog, FinanceNoticePushTask } from '@/types/financeNoticeTypes';
 
-import { getPushMessageLabels } from '@/types/financeNoticeTypes';
+import { getPushMessageLabels, isPushOptionEnabled, taskPreviewContent } from '@/types/financeNoticeTypes';
 
 import {
   Card,
@@ -76,8 +76,8 @@ export default function MFinanceNoticePushHistory({ logs, tasks }: Props) {
                   <TableBody>
                     {logs.map((log) => {
                       const contentParts: string[] = [];
-                      if (log.pushIncludeNotice === true) contentParts.push('通知');
-                      if (log.pushIncludeDuty === true) contentParts.push('值班表');
+                      if (isPushOptionEnabled(log.pushIncludeNotice)) contentParts.push('通知');
+                      if (isPushOptionEnabled(log.pushIncludeDuty)) contentParts.push('值班表');
                       return (
                         <TableRow key={log.id}>
                           <TableCell>{formatDateTime(log.pushedAt)}</TableCell>
@@ -113,10 +113,7 @@ export default function MFinanceNoticePushHistory({ logs, tasks }: Props) {
                   </TableHeader>
                   <TableBody>
                     {historyTasks.map((task) => {
-                      const opts = {
-                        pushIncludeNotice: task.pushIncludeNotice,
-                        pushIncludeDuty: task.pushIncludeDuty,
-                      };
+                      const { pushOptions: opts } = taskPreviewContent(task);
                       return (
                         <TableRow key={task.id}>
                           <TableCell>{formatDateTime(task.scheduledAt)}</TableCell>

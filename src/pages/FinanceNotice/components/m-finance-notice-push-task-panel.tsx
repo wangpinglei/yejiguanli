@@ -18,6 +18,7 @@ import {
   createEmptyFinanceNoticeForm,
   getPushMessageLabels,
   localInputToIso,
+  taskPreviewContent,
 } from '@/types/financeNoticeTypes';
 
 import { Button } from '@/components/ui/button';
@@ -346,10 +347,7 @@ export default function MFinanceNoticePushTaskPanel({
           )}
 
           {pendingTasks.map((task, index) => {
-            const opts = {
-              pushIncludeNotice: task.pushIncludeNotice,
-              pushIncludeDuty: task.pushIncludeDuty,
-            };
+            const { content, pushOptions: opts } = taskPreviewContent(task);
             return (
               <div
                 key={task.id}
@@ -380,13 +378,7 @@ export default function MFinanceNoticePushTaskPanel({
                     取消推送
                   </Button>
                 </div>
-                <FinanceNoticePreviewBody
-                  content={{
-                    noticeText: task.noticeText,
-                    dutyRoster: task.dutyRoster,
-                  }}
-                  pushOptions={opts}
-                />
+                <FinanceNoticePreviewBody content={content} pushOptions={opts} />
               </div>
             );
           })}
