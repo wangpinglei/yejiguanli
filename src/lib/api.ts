@@ -310,6 +310,46 @@ export const teamMgmtCommissionRulesApi = {
   delete: (id: string) => api.delete(`/team-mgmt-commission-rules/${id}`),
 };
 
+export const financeNoticeApi = {
+  get: () => api.get<import("@/types/financeNoticeTypes").FinanceNoticeResponse>("/finance-notice"),
+  saveNotice: (noticeText: string) =>
+    api.put<import("@/types/financeNoticeTypes").FinanceNoticeResponse>("/finance-notice", {
+      section: "notice",
+      noticeText,
+    }),
+  saveDuty: (dutyRoster: import("@/types/financeNoticeTypes").FinanceDutyRow[]) =>
+    api.put<import("@/types/financeNoticeTypes").FinanceNoticeResponse>("/finance-notice", {
+      section: "duty",
+      dutyRoster,
+    }),
+  schedule: (
+    scheduledAt: string,
+    options?: import("@/types/financeNoticeTypes").FinanceNoticePushOptions,
+  ) =>
+    api.post<import("@/types/financeNoticeTypes").FinanceNoticeResponse>(
+      "/finance-notice/schedule",
+      {
+        scheduledAt,
+        pushIncludeNotice: options?.pushIncludeNotice !== false,
+        pushIncludeDuty: options?.pushIncludeDuty !== false,
+      },
+    ),
+  cancelSchedule: () =>
+    api.delete<import("@/types/financeNoticeTypes").FinanceNoticeResponse>(
+      "/finance-notice/schedule",
+    ),
+  pushNow: (
+    data?: import("@/types/financeNoticeTypes").FinanceNoticeContent &
+      import("@/types/financeNoticeTypes").FinanceNoticePushOptions & {
+        saveBeforePush?: boolean;
+      },
+  ) =>
+    api.post<import("@/types/financeNoticeTypes").FinanceNoticeResponse>(
+      "/finance-notice/push-now",
+      data ?? {},
+    ),
+};
+
 export const migrateApi = {
   migrate: (data: Record<string, any>) =>
     api.post<{ message: string; stats: any }>("/migrate", data),

@@ -15,6 +15,8 @@ import syncOrdersRoutes from "./routes/syncOrders";
 import hrProfilesRoutes from "./routes/hrProfiles";
 import laborCompaniesRoutes from "./routes/laborCompanies";
 import extraRoutes from "./routes/extra";
+import financeNoticeRoutes from "./routes/financeNotice";
+import { startFinanceNoticeScheduler, migrateFinanceNoticeTextColumn } from "./services/financeNotice";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -79,6 +81,8 @@ app.use("/api", syncOrdersRoutes);
 // 单位战报（钉钉推送用，X-API-Key，无需登录）
 app.use("/api", battleReportRoutes);
 
+app.use("/api", financeNoticeRoutes);
+
 app.use("/api", extraRoutes);
 
 // ===================== 静态文件服务（生产环境） =====================
@@ -110,6 +114,8 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 
 // ===================== 启动 =====================
 getDb(); // 初始化数据库
+migrateFinanceNoticeTextColumn();
+startFinanceNoticeScheduler();
 
 app.listen(Number(PORT), "0.0.0.0", () => {
   console.log(`\n========================================`);

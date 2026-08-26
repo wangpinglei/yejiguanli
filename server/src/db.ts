@@ -397,6 +397,33 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_income_unit ON income_records(sales_unit_id);
     CREATE INDEX IF NOT EXISTS idx_pua_personnel ON personnel_unit_assignments(personnel_id);
     CREATE INDEX IF NOT EXISTS idx_pua_unit ON personnel_unit_assignments(sales_unit_id);
+
+    CREATE TABLE IF NOT EXISTS finance_notice_config (
+      id TEXT PRIMARY KEY DEFAULT 'default',
+      notice_text TEXT DEFAULT '',
+      esign_title TEXT DEFAULT '',
+      esign_intro TEXT DEFAULT '',
+      followups_json TEXT DEFAULT '[]',
+      esign_closing TEXT DEFAULT '',
+      deadline_text TEXT DEFAULT '',
+      duty_roster_json TEXT DEFAULT '[]',
+      scheduled_at TEXT,
+      push_status TEXT DEFAULT 'none',
+      pushed_at TEXT,
+      push_error TEXT DEFAULT '',
+      updated_by TEXT DEFAULT '',
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS finance_notice_push_logs (
+      id TEXT PRIMARY KEY,
+      snapshot_json TEXT NOT NULL,
+      scheduled_at TEXT,
+      pushed_at TEXT DEFAULT (datetime('now')),
+      operator TEXT DEFAULT '',
+      status TEXT DEFAULT 'sent',
+      error TEXT DEFAULT ''
+    );
   `);
 
   ensureColumns("sales_units", [
@@ -538,6 +565,34 @@ function initSchema() {
   cleanupInvalidLaborCompanyNames();
   // 清理人事导入曾自动创建的「人事挂靠」人员（人事档案一并删）；手动录入的人员管理数据保留
   cleanupHrAffiliateAutoCreated();
+  ensureFinanceNoticeDefault();
+}
+
+function ensureFinanceNoticeDefault() {
+  const row = db.prepare("SELECT id FROM finance_notice_config WHERE id='default'").get();
+  if (row) return;
+  const defaultNotice = `【本周电子签温馨提醒】🤪🤪🤪
+
+主动向客户传递公司背景，能有效增强信任——建议您在发起或跟进电子签时，顺带说明：「我们使用的是国家认可的电子签平台，合同合法有效，流程规范透明。」客户了解得越清楚，签约越放心！💪
+
+在此基础上，也请及时跟进签约进度：
+- 已发起未签：客户可能只是暂时忙忘了，一次善意的提醒往往就能推动完成。
+- 未发起签约：机会不等人，现在就发起，让客户第一时间收到邀请。
+- 已过期未签：请主动了解原因，反馈至财务登记。
+- 遇到问题：随时联系财务部小伙伴协助 🤝
+
+感谢大家的配合！！！👏👏👏
+
+8月生态圈录单截止时间为「9月2日24:00前」，请所有成交人员在规定时间内录好各自订单（包括电子合同的签署、收款/备注的填写规范！！）`;
+  const defaultDuty = JSON.stringify([
+    { date: "2026/8/22", name: "张苓", phone: "15315376012" },
+    { date: "2026/8/23", name: "胡欣欣", phone: "18200132086" },
+  ]);
+  db.prepare(`
+    INSERT INTO finance_notice_config (
+      id, notice_text, duty_roster_json, push_status, updated_at
+    ) VALUES (?, ?, ?, 'none', datetime('now'))
+  `).run("default", defaultNotice, defaultDuty);
 }
 
 /**

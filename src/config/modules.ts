@@ -6,6 +6,7 @@ export type ModuleKey =
   | "hr_management"
   | "sales_records"
   | "cost_management"
+  | "finance_notice"
   | "profit_analysis"
   | "sales_battle_report"
   | "product_settlement"
@@ -36,6 +37,7 @@ export const MODULE_DEFS: ModuleDef[] = [
   { key: "hr_management", label: "人事管理", path: "/hr-management", canEdit: true },
   { key: "sales_records", label: "销售记录", path: "/sales-records", canEdit: true },
   { key: "cost_management", label: "成本与收入录入", path: "/cost-management", canEdit: true },
+  { key: "finance_notice", label: "财务通知", path: "/finance-notice", canEdit: true },
   { key: "profit_analysis", label: "盈亏分析", path: "/profit-analysis", canEdit: true },
   { key: "sales_battle_report", label: "单位战报", path: "/sales-battle-report", canEdit: true },
   { key: "product_settlement", label: "业务域产品结算和分类", path: "/product-settlement", canEdit: true },
@@ -90,6 +92,7 @@ export function permissionsFromLegacyRole(role: string): UserPermissions {
       viewAll();
       empty.personnel = { view: true, edit: true };
       empty.cost_management = { view: true, edit: true };
+      empty.finance_notice = { view: true, edit: true };
       return empty;
     case "unit_leader":
     case "unit_manager":

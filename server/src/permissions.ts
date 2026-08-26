@@ -7,6 +7,7 @@ export type ModuleKey =
   | "hr_management"
   | "sales_records"
   | "cost_management"
+  | "finance_notice"
   | "profit_analysis"
   | "sales_battle_report"
   | "product_settlement"
@@ -26,6 +27,7 @@ const MODULE_KEYS: ModuleKey[] = [
   "hr_management",
   "sales_records",
   "cost_management",
+  "finance_notice",
   "profit_analysis",
   "sales_battle_report",
   "product_settlement",
@@ -41,6 +43,7 @@ const EDITABLE = new Set<ModuleKey>([
   "hr_management",
   "sales_records",
   "cost_management",
+  "finance_notice",
   "profit_analysis",
   "sales_battle_report",
   "product_settlement",
@@ -90,6 +93,7 @@ export function permissionsFromLegacyRole(role: string): UserPermissions {
       viewAll();
       empty.personnel = { view: true, edit: true };
       empty.cost_management = { view: true, edit: true };
+      empty.finance_notice = { view: true, edit: true };
       return empty;
     case "unit_leader":
     case "unit_manager":

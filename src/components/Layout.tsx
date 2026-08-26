@@ -17,6 +17,7 @@ import {
   Swords,
   Scale,
   IdCard,
+  Megaphone,
 } from "lucide-react";
 import { useAuth, ROLE_LABELS } from "@/context/AuthContext";
 import { useData } from "@/context/DataContext";
@@ -51,6 +52,7 @@ const navItems: NavItem[] = [
   { path: "/hr-management", label: "人事管理", icon: IdCard, moduleKey: "hr_management" },
   { path: "/sales-records", label: "销售记录", icon: ShoppingCart, moduleKey: "sales_records" },
   { path: "/cost-management", label: "成本与收入录入", icon: Wallet, moduleKey: "cost_management" },
+  { path: "/finance-notice", label: "财务通知", icon: Megaphone, moduleKey: "finance_notice" },
   { path: "/profit-analysis", label: "盈亏分析", icon: TrendingUp, moduleKey: "profit_analysis" },
   { path: "/sales-battle-report", label: "单位战报", icon: Swords, moduleKey: "sales_battle_report" },
   { path: "/product-settlement", label: "业务域产品结算和分类", icon: Scale, moduleKey: "product_settlement" },
