@@ -462,6 +462,12 @@ function initSchema() {
     { name: "reward_amount", ddl: "reward_amount REAL DEFAULT 0" },
     { name: "reward_from", ddl: "reward_from TEXT DEFAULT ''" },
     { name: "reward_to", ddl: "reward_to TEXT DEFAULT ''" },
+    { name: "internal_sales_commission_type", ddl: "internal_sales_commission_type TEXT DEFAULT 'percentage'" },
+    { name: "internal_sales_commission_rate", ddl: "internal_sales_commission_rate REAL DEFAULT 0" },
+    { name: "internal_sales_commission_amount", ddl: "internal_sales_commission_amount REAL DEFAULT 0" },
+    { name: "internal_sales_commission_threshold", ddl: "internal_sales_commission_threshold REAL DEFAULT 0" },
+    { name: "internal_sales_commission_condition", ddl: "internal_sales_commission_condition TEXT DEFAULT ''" },
+    { name: "internal_sales_commission_recipient_id", ddl: "internal_sales_commission_recipient_id TEXT DEFAULT ''" },
   ]);
 
   ensureColumns("unit_product_settlements", [
@@ -1494,6 +1500,14 @@ export function rowToProductPersonCommission(row: any) {
     personalCommissionAmount: row.personal_commission_amount || 0,
     personalCommissionThreshold: row.personal_commission_threshold || 0,
     personalCommissionCondition: row.personal_commission_condition || "",
+    internalSalesCommissionType: (row.internal_sales_commission_type === "fixed" ? "fixed" : "percentage") as
+      | "percentage"
+      | "fixed",
+    internalSalesCommissionRate: row.internal_sales_commission_rate || 0,
+    internalSalesCommissionAmount: row.internal_sales_commission_amount || 0,
+    internalSalesCommissionThreshold: row.internal_sales_commission_threshold || 0,
+    internalSalesCommissionCondition: row.internal_sales_commission_condition || "",
+    internalSalesCommissionRecipientId: row.internal_sales_commission_recipient_id || "",
     rewardAmount: row.reward_amount || 0,
     rewardFrom: row.reward_from || "",
     rewardTo: row.reward_to || "",

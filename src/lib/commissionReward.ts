@@ -34,6 +34,33 @@ export function calcSaleCommissionReward(
  * - percentage: 本单实收 × 比例%（门槛按月汇总，行级不含门槛扣减，仅作预览）
  * - 另加特殊时段按件奖励
  */
+export function calcSaleInternalSalesCommissionPreview(
+  sale: {
+    productId: string
+    salesUnitId: string
+    personnelId: string
+    quantity?: number
+    totalAmount?: number
+  },
+  ppcList: ProductPersonCommission[],
+): number {
+  const ppc = findProductPersonCommission(
+    ppcList,
+    sale.productId,
+    sale.salesUnitId,
+    sale.personnelId,
+  )
+  if (!ppc) return 0
+
+  if (ppc.internalSalesCommissionType === 'fixed') {
+    return (sale.quantity || 0) * (ppc.internalSalesCommissionAmount || 0)
+  }
+  if ((ppc.internalSalesCommissionRate || 0) > 0) {
+    return (sale.totalAmount || 0) * (ppc.internalSalesCommissionRate / 100)
+  }
+  return 0
+}
+
 export function calcSalePersonCommissionPreview(
   sale: {
     productId: string

@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, formatDate, formatDateTime, getYearMonth } from "@/lib/format";
 import { matchesRecurringYearMonth, RECURRING_ALL_MONTHS } from "@/utils/recurringRecord";
 import { getTotalSalaryCost, calcLeaveDeduction, MONTHLY_WORK_DAYS, isPersonnelOnDutyInMonth, filterByMonth } from "@/lib/salary";
-import { calcSalePersonCommissionPreview } from "@/lib/commissionReward";
+import { calcSaleInternalSalesCommissionPreview, calcSalePersonCommissionPreview } from "@/lib/commissionReward";
 import { getEffectiveConfirmAmount, getEffectiveManualCost } from "@/lib/confirmAmount";
 import { calcSaleSettlementIncome } from "@/lib/settlement";
 import type { CostRecord, CostItem, IncomeRecord, IncomeItem } from "@/types";
@@ -157,6 +157,16 @@ export default function CostManagement() {
     );
   }, [salesRecords, selectedMonth, filterUnit, productPersonCommissions]);
 
+  const internalSalesCommissionFromSales = useMemo(() => {
+    const monthly = filterByMonth(salesRecords, selectedMonth).filter(
+      (s) => filterUnit === "all" || s.salesUnitId === filterUnit,
+    );
+    return monthly.reduce(
+      (sum, s) => sum + calcSaleInternalSalesCommissionPreview(s, productPersonCommissions),
+      0,
+    );
+  }, [salesRecords, selectedMonth, filterUnit, productPersonCommissions]);
+
   const teamMgmtCommissionTotal = useMemo(() => {
     return salaryCosts.units.reduce(
       (sum, u) => sum + u.details.reduce((s, d) => s + d.managementCommission, 0),
@@ -165,7 +175,8 @@ export default function CostManagement() {
   }, [salaryCosts]);
 
   // 销售提成合计 = 个人（按销售明细）+ 团队管理提成
-  const productCommissionTotal = personalCommissionFromSales + teamMgmtCommissionTotal;
+  const productCommissionTotal =
+    personalCommissionFromSales + internalSalesCommissionFromSales + teamMgmtCommissionTotal;
 
   // 结算收入：与收支利润页同一口径（单位确认后以实际为准）
   const settlementIncomeTotal = useMemo(() => {
@@ -715,6 +726,7 @@ export default function CostManagement() {
               <p className="text-xl font-bold text-violet-600">{formatCurrency(productCommissionTotal)}</p>
               <p className="text-[10px] text-muted-foreground">
                 个人 {formatCurrency(personalCommissionFromSales)}
+                + 分销奖金 {formatCurrency(internalSalesCommissionFromSales)}
                 + 团队 {formatCurrency(teamMgmtCommissionTotal)}
                 · 已计入薪酬成本
               </p>
@@ -792,6 +804,7 @@ export default function CostManagement() {
                   <TableHead className="text-right">岗位补贴</TableHead>
                   <TableHead className="text-right">团队管理提成</TableHead>
                   <TableHead className="text-right">个人提成</TableHead>
+                  <TableHead className="text-right">分销奖金</TableHead>
                   <TableHead className="text-right">请假扣款</TableHead>
                   <TableHead className="text-right">其他调整</TableHead>
                   <TableHead className="text-right">社保</TableHead>
@@ -810,9 +823,10 @@ export default function CostManagement() {
                     pos: acc.pos + d.positionAllowance,
                     mgmt: acc.mgmt + d.managementCommission,
                     personal: acc.personal + d.personalCommission,
+                    internal: acc.internal + d.internalSalesCommission,
                     leave: acc.leave + d.leaveDeduction,
                     other: acc.other + d.otherBonus - d.otherDeduction,
-                  }), { base: 0, perf: 0, pos: 0, mgmt: 0, personal: 0, leave: 0, other: 0 });
+                  }), { base: 0, perf: 0, pos: 0, mgmt: 0, personal: 0, internal: 0, leave: 0, other: 0 });
                   return (
                     <>
                       <TableRow
@@ -833,7 +847,12 @@ export default function CostManagement() {
                         <TableCell className="text-right text-blue-600">{formatCurrency(sums.perf)}</TableCell>
                         <TableCell className="text-right text-violet-600">{formatCurrency(sums.pos)}</TableCell>
                         <TableCell className="text-right text-emerald-600">{formatCurrency(sums.mgmt)}</TableCell>
-                        <TableCell className="text-right text-amber-600">{formatCurrency(sums.personal)}</TableCell>
+                        <TableCell className="text-right text-amber-600">
+                          {formatCurrency(sums.personal)}
+                        </TableCell>
+                        <TableCell className="text-right text-sky-600">
+                          {formatCurrency(sums.internal)}
+                        </TableCell>
                         <TableCell className="text-right text-red-600">-{formatCurrency(sums.leave)}</TableCell>
                         <TableCell className="text-right text-amber-600">{sums.other >= 0 ? "+" : ""}{formatCurrency(sums.other)}</TableCell>
                         <TableCell className="text-right text-red-600">{formatCurrency(unit.totalSocialInsurance)}</TableCell>
@@ -850,15 +869,37 @@ export default function CostManagement() {
                       </TableRow>
                       {isExpanded && (
                         <TableRow key={unit.unitId + "-detail"} className="bg-blue-50/30">
-                          <TableCell colSpan={15} className="py-3">
+                          <TableCell colSpan={16} className="py-3">
                             <div className="ml-8 space-y-2">
-                              {unit.details.map((d) => (
-                                <div key={d.personId} className="grid grid-cols-11 gap-2 rounded-lg border bg-card px-4 py-2 text-sm">
-                                  <span className="font-medium">{d.name}</span>
+                              {unit.details.map((d) => {
+                                const personMeta = personnel.find((p) => p.id === d.personId);
+                                const isDistributionPerson = Boolean(personMeta?.highCommissionFrom);
+                                return (
+                                <div
+                                  key={d.personId}
+                                  className="grid gap-2 rounded-lg border bg-card px-4 py-2 text-sm"
+                                  style={{ gridTemplateColumns: 'repeat(13, minmax(0, 1fr))' }}
+                                >
+                                  <span className="flex items-center gap-1 font-medium">
+                                    {d.name}
+                                    {isDistributionPerson ? (
+                                      <Badge variant="outline" className="border-violet-200 px-1 py-0 text-[10px] text-violet-700">
+                                        分销
+                                      </Badge>
+                                    ) : null}
+                                  </span>
                                   <span className="text-muted-foreground">{d.position}</span>
                                   <span className="text-right text-gray-600">底薪 {formatCurrency(d.baseSalary)}</span>
                                   <span className="text-right text-blue-600">绩效 {formatCurrency(d.performance)}</span>
-                                  <span className="text-right text-emerald-600">提成 {formatCurrency(d.managementCommission + d.personalCommission)}</span>
+                                  <span className="text-right text-amber-600">
+                                    个人 {formatCurrency(d.personalCommission)}
+                                  </span>
+                                  <span className="text-right text-sky-600">
+                                    分销奖金 {formatCurrency(d.internalSalesCommission)}
+                                  </span>
+                                  <span className="text-right text-emerald-600">
+                                    团队 {formatCurrency(d.managementCommission)}
+                                  </span>
                                   <span className="text-right text-red-600">请假扣 {formatCurrency(d.leaveDeduction)}</span>
                                   <span className="text-right text-amber-600">其他 {formatCurrency(d.otherBonus - d.otherDeduction)}</span>
                                   <span className="text-right text-red-600">社保 {formatCurrency(d.socialInsurance)}</span>
@@ -870,7 +911,7 @@ export default function CostManagement() {
                                     合计 {formatCurrency(d.total)}
                                   </span>
                                 </div>
-                              ))}
+                              )})}
                               {unit.details.length === 0 && (
                                 <p className="text-center text-sm text-muted-foreground py-2">该单位暂无在职人员</p>
                               )}
@@ -883,7 +924,7 @@ export default function CostManagement() {
                 })}
                 {salaryCosts.units.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={15} className="text-center py-12 text-muted-foreground">暂无在职人员数据</TableCell>
+                    <TableCell colSpan={16} className="text-center py-12 text-muted-foreground">暂无在职人员数据</TableCell>
                   </TableRow>
                 )}
               </TableBody>

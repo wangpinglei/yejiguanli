@@ -49,6 +49,14 @@ export interface SalaryStructure {
   personalCommissionRate: number; // 个人提成比例（%）
   personalCommissionThreshold: number; // 个人提成起算门槛（个人销售额达到此值才开始计算）
   personalCommissionCondition: string; // 个人提成条件描述
+  // 关联内部销售提成（不计入销售业额，计入人力成本）
+  internalSalesCommissionType?: 'percentage' | 'fixed';
+  internalSalesCommissionRate: number; // 内部销售提成比例（%）
+  internalSalesCommissionAmount?: number; // 按件固定金额
+  internalSalesCommissionThreshold: number;
+  internalSalesCommissionCondition: string;
+  /** 内部销售提成受益人；空 = 成交人本人 */
+  internalSalesCommissionRecipientId?: string;
 }
 
 // 人员
@@ -105,6 +113,12 @@ export interface PersonnelRegularCompensation {
     personalCommissionAmount?: number;
     personalCommissionThreshold: number;
     personalCommissionCondition: string;
+    internalSalesCommissionType?: 'percentage' | 'fixed';
+    internalSalesCommissionRate: number;
+    internalSalesCommissionAmount?: number;
+    internalSalesCommissionThreshold: number;
+    internalSalesCommissionCondition: string;
+    internalSalesCommissionRecipientId?: string;
     rewardAmount?: number;
     rewardFrom?: string;
     rewardTo?: string;
@@ -437,6 +451,14 @@ export interface ProductPersonCommission {
   personalCommissionAmount?: number; // 每件提成 ¥，fixed 时生效
   personalCommissionThreshold: number; // 起算门槛 ¥（仅 percentage）
   personalCommissionCondition: string; // 条件描述
+  /** 关联内部销售提成（不计入销售业额） */
+  internalSalesCommissionType?: 'percentage' | 'fixed';
+  internalSalesCommissionRate: number;
+  internalSalesCommissionAmount?: number;
+  internalSalesCommissionThreshold: number;
+  internalSalesCommissionCondition: string;
+  /** 内部销售受益人；空 = 沿用人员默认或成交人本人 */
+  internalSalesCommissionRecipientId?: string;
   /** 特殊时段提成奖励：每件额外金额（¥），计入个人提成 */
   rewardAmount?: number;
   /** 奖励生效起（YYYY-MM-DD），空=不限 */

@@ -49,7 +49,49 @@ export const EMPTY_SALARY: SalaryStructure = {
   personalCommissionRate: 0,
   personalCommissionThreshold: 0,
   personalCommissionCondition: "",
+  internalSalesCommissionType: "percentage",
+  internalSalesCommissionRate: 0,
+  internalSalesCommissionAmount: 0,
+  internalSalesCommissionThreshold: 0,
+  internalSalesCommissionCondition: "",
+  internalSalesCommissionRecipientId: "",
 };
+
+type ProductCommissionKind = "personal" | "internalSales";
+
+function getSalaryCommissionFields(s: SalaryStructure, kind: ProductCommissionKind) {
+  if (kind === "personal") {
+    return {
+      type: "percentage" as const,
+      rate: s.personalCommissionRate || 0,
+      amount: 0,
+      threshold: s.personalCommissionThreshold || 0,
+    };
+  }
+  return {
+    type: s.internalSalesCommissionType || "percentage",
+    rate: s.internalSalesCommissionRate || 0,
+    amount: s.internalSalesCommissionAmount || 0,
+    threshold: s.internalSalesCommissionThreshold || 0,
+  };
+}
+
+function getPpcCommissionFields(ppc: ProductPersonCommission, kind: ProductCommissionKind) {
+  if (kind === "personal") {
+    return {
+      type: ppc.personalCommissionType || "percentage",
+      rate: ppc.personalCommissionRate || 0,
+      amount: ppc.personalCommissionAmount || 0,
+      threshold: ppc.personalCommissionThreshold || 0,
+    };
+  }
+  return {
+    type: ppc.internalSalesCommissionType || "percentage",
+    rate: ppc.internalSalesCommissionRate || 0,
+    amount: ppc.internalSalesCommissionAmount || 0,
+    threshold: ppc.internalSalesCommissionThreshold || 0,
+  };
+}
 
 /**
  * 按年月过滤销售记录
@@ -306,14 +348,219 @@ export function calcPersonalCommissionByProduct(
   person: Personnel,
   monthlyRecords: SalesRecord[],
   _products: Product[],
-  ppcList: ProductPersonCommission[]
+  ppcList: ProductPersonCommission[],
+): number {
+  return calcProductCommissionByKind(person, monthlyRecords, ppcList, "personal");
+}
+
+/** 关联内部销售提成（不计入销售业额） */
+export function calcInternalSalesCommissionByProduct(
+  person: Personnel,
+  monthlyRecords: SalesRecord[],
+  _products: Product[],
+  ppcList: ProductPersonCommission[],
+): number {
+  return calcProductCommissionByKind(person, monthlyRecords, ppcList, "internalSales");
+}
+
+/** 某薪酬段内部销售提成的受益人；空 = 成交人本人 */
+export function getInternalSalesRecipientId(
+  person: Personnel,
+  useRegularSalaryFallback: boolean,
+): string {
+  const s = useRegularSalaryFallback
+    ? (person.regularCompensation?.salary || person.salary || EMPTY_SALARY)
+    : (person.salary || EMPTY_SALARY);
+  const rid = (s.internalSalesCommissionRecipientId || "").trim();
+  return rid || person.id;
+}
+
+/** 产品级优先，否则沿用人员薪酬默认 */
+export function resolveInternalSalesRecipientId(
+  person: Personnel,
+  useRegularSalaryFallback: boolean,
+  ppc?: ProductPersonCommission,
+): string {
+  const ppcRid = (ppc?.internalSalesCommissionRecipientId || "").trim();
+  if (ppcRid) return ppcRid;
+  return getInternalSalesRecipientId(person, useRegularSalaryFallback);
+}
+
+function calcInternalCommissionChunkAmount(
+  sales: number,
+  qty: number,
+  fields: ReturnType<typeof getPpcCommissionFields>,
+): number {
+  if (fields.type === "fixed") return qty * (fields.amount || 0);
+  if (sales > (fields.threshold || 0) && (fields.rate || 0) > 0) {
+    return (sales - fields.threshold) * (fields.rate / 100);
+  }
+  return 0;
+}
+
+function calcInternalCommissionForRecordsRouted(
+  source: Personnel,
+  personRecords: SalesRecord[],
+  personPpcList: ProductPersonCommission[],
+  useRegularSalaryFallback: boolean,
+  recipientId: string,
+): number {
+  if (personRecords.length === 0) return 0;
+
+  const s = useRegularSalaryFallback
+    ? (source.regularCompensation?.salary || source.salary || EMPTY_SALARY)
+    : (source.salary || EMPTY_SALARY);
+  const salaryFields = getSalaryCommissionFields(s, "internalSales");
+
+  let total = 0;
+  const productSalesMap = new Map<string, number>();
+  const productQtyMap = new Map<string, number>();
+  personRecords.forEach((r) => {
+    productSalesMap.set(r.productId, (productSalesMap.get(r.productId) || 0) + r.totalAmount);
+    productQtyMap.set(r.productId, (productQtyMap.get(r.productId) || 0) + (r.quantity || 0));
+  });
+
+  const configuredProducts = new Set<string>();
+  const saleUnitIds = new Set(personRecords.map((r) => r.salesUnitId).filter(Boolean));
+  const scopedPpc = personPpcList.filter(
+    (ppc) =>
+      ppc.personnelId === source.id &&
+      (ppc.salesUnitId === source.salesUnitId || saleUnitIds.has(ppc.salesUnitId)),
+  );
+
+  const productUnitKeys = new Map<string, Set<string>>();
+  personRecords.forEach((r) => {
+    if (!r.productId) return;
+    if (!productUnitKeys.has(r.productId)) productUnitKeys.set(r.productId, new Set());
+    if (r.salesUnitId) productUnitKeys.get(r.productId)!.add(r.salesUnitId);
+  });
+
+  productUnitKeys.forEach((unitIds, productId) => {
+    unitIds.forEach((unitId) => {
+      const ppc = scopedPpc.find(
+        (x) => x.productId === productId && x.salesUnitId === unitId,
+      ) || scopedPpc.find(
+        (x) => x.productId === productId && x.salesUnitId === source.salesUnitId,
+      );
+      if (!ppc) return;
+
+      const unitRecords = personRecords.filter(
+        (r) => r.productId === productId && r.salesUnitId === unitId,
+      );
+      const sales = unitRecords.reduce((sum, r) => sum + r.totalAmount, 0);
+      const qty = unitRecords.reduce((sum, r) => sum + (r.quantity || 0), 0);
+      if (sales <= 0 && qty <= 0) return;
+      if (resolveInternalSalesRecipientId(source, useRegularSalaryFallback, ppc) !== recipientId) {
+        return;
+      }
+      configuredProducts.add(productId);
+      const fields = getPpcCommissionFields(ppc, "internalSales");
+      total += calcInternalCommissionChunkAmount(sales, qty, fields);
+    });
+  });
+
+  let unconfiguredSales = 0;
+  productSalesMap.forEach((sales, pid) => {
+    if (!configuredProducts.has(pid)) unconfiguredSales += sales;
+  });
+  if (
+    unconfiguredSales > 0
+    && resolveInternalSalesRecipientId(source, useRegularSalaryFallback) === recipientId
+    && salaryFields.type !== "fixed"
+    && unconfiguredSales > (salaryFields.threshold || 0)
+    && (salaryFields.rate || 0) > 0
+  ) {
+    total += (unconfiguredSales - salaryFields.threshold) * (salaryFields.rate / 100);
+  }
+
+  return total;
+}
+
+function calcInternalSalesRoutedToRecipient(
+  source: Personnel,
+  recipientId: string,
+  monthlyRecords: SalesRecord[],
+  ppcList: ProductPersonCommission[],
+): number {
+  const personRecords = monthlyRecords
+    .map((r) => scaleSaleForPerson(r, source.id))
+    .filter((r): r is SalesRecord => r != null);
+  if (personRecords.length === 0) return 0;
+
+  const regularRecords: SalesRecord[] = [];
+  const distributionRecords: SalesRecord[] = [];
+  for (const r of personRecords) {
+    if (isDistributionDay(source, r.saleDate || "")) distributionRecords.push(r);
+    else regularRecords.push(r);
+  }
+
+  let total = 0;
+  if (regularRecords.length > 0) {
+    total += calcInternalCommissionForRecordsRouted(
+      source,
+      regularRecords,
+      resolvePpcListForSaleDate(
+        source,
+        regularRecords[0]?.saleDate || "1900-01-01",
+        ppcList,
+      ),
+      true,
+      recipientId,
+    );
+  }
+  if (distributionRecords.length > 0) {
+    total += calcInternalCommissionForRecordsRouted(
+      source,
+      distributionRecords,
+      resolvePpcListForSaleDate(
+        source,
+        distributionRecords[0]?.saleDate || "9999-12-31",
+        ppcList,
+      ),
+      false,
+      recipientId,
+    );
+  }
+  return total;
+}
+
+/** 汇总发给指定人员的内部销售提成（含他人指定其为受益人的部分） */
+export function calcInternalSalesCommissionReceived(
+  recipient: Personnel,
+  allPersonnel: Personnel[],
+  monthlyRecords: SalesRecord[],
+  ppcList: ProductPersonCommission[],
+): number {
+  let total = 0;
+  for (const source of allPersonnel) {
+    total += calcInternalSalesRoutedToRecipient(
+      source,
+      recipient.id,
+      monthlyRecords,
+      ppcList,
+    );
+  }
+  return total;
+}
+
+export type SalaryCalcOptions = {
+  /** 用于内部销售受益人路由；默认仅本人 */
+  allPersonnel?: Personnel[];
+  /** 内部销售提成统计用的销售记录；默认同 salesRecords */
+  internalSalesRecords?: SalesRecord[];
+};
+
+function calcProductCommissionByKind(
+  person: Personnel,
+  monthlyRecords: SalesRecord[],
+  ppcList: ProductPersonCommission[],
+  kind: ProductCommissionKind,
 ): number {
   const personRecords = monthlyRecords
     .map((r) => scaleSaleForPerson(r, person.id))
     .filter((r): r is SalesRecord => r != null);
   if (personRecords.length === 0) return 0;
 
-  // 按「常规 / 分销」拆开，各自汇总门槛，避免跨段混算
   const regularRecords: SalesRecord[] = [];
   const distributionRecords: SalesRecord[] = [];
   for (const r of personRecords) {
@@ -323,7 +570,7 @@ export function calcPersonalCommissionByProduct(
 
   let total = 0;
   if (regularRecords.length > 0) {
-    total += calcPersonalCommissionForRecords(
+    total += calcCommissionForRecords(
       person,
       regularRecords,
       resolvePpcListForSaleDate(
@@ -332,10 +579,11 @@ export function calcPersonalCommissionByProduct(
         ppcList,
       ),
       true,
+      kind,
     );
   }
   if (distributionRecords.length > 0) {
-    total += calcPersonalCommissionForRecords(
+    total += calcCommissionForRecords(
       person,
       distributionRecords,
       resolvePpcListForSaleDate(
@@ -344,24 +592,27 @@ export function calcPersonalCommissionByProduct(
         ppcList,
       ),
       false,
+      kind,
     );
   }
   return total;
 }
 
-function calcPersonalCommissionForRecords(
+function calcCommissionForRecords(
   person: Personnel,
   personRecords: SalesRecord[],
   personPpcList: ProductPersonCommission[],
   useRegularSalaryFallback: boolean,
+  kind: ProductCommissionKind,
 ): number {
   if (personRecords.length === 0) return 0;
 
   const s = useRegularSalaryFallback
     ? (person.regularCompensation?.salary || person.salary || EMPTY_SALARY)
     : (person.salary || EMPTY_SALARY);
+  const salaryFields = getSalaryCommissionFields(s, kind);
 
-  let totalPersonal = 0;
+  let total = 0;
 
   const productSalesMap = new Map<string, number>();
   const productQtyMap = new Map<string, number>();
@@ -401,13 +652,13 @@ function calcPersonalCommissionForRecords(
       const qty = unitRecords.reduce((sum, r) => sum + (r.quantity || 0), 0);
       if (sales <= 0 && qty <= 0) return;
       configuredProducts.add(productId);
-      if (ppc.personalCommissionType === "fixed") {
-        totalPersonal += qty * (ppc.personalCommissionAmount || 0);
+      const fields = getPpcCommissionFields(ppc, kind);
+      if (fields.type === "fixed") {
+        total += qty * (fields.amount || 0);
         return;
       }
-      if (sales > (ppc.personalCommissionThreshold || 0)) {
-        totalPersonal +=
-          (sales - ppc.personalCommissionThreshold) * (ppc.personalCommissionRate / 100);
+      if (sales > (fields.threshold || 0) && (fields.rate || 0) > 0) {
+        total += (sales - fields.threshold) * (fields.rate / 100);
       }
     });
   });
@@ -416,18 +667,28 @@ function calcPersonalCommissionForRecords(
   productSalesMap.forEach((sales, pid) => {
     if (!configuredProducts.has(pid)) unconfiguredSales += sales;
   });
-  if (unconfiguredSales > (s.personalCommissionThreshold || 0) && (s.personalCommissionRate || 0) > 0) {
-    totalPersonal += (unconfiguredSales - s.personalCommissionThreshold) * (s.personalCommissionRate / 100);
+  if (
+    unconfiguredSales > (salaryFields.threshold || 0) &&
+    (salaryFields.rate || 0) > 0
+  ) {
+    if (salaryFields.type === "fixed") {
+      // 默认 salary 无按件 internal 汇总逻辑，percentage 为主
+    } else {
+      total +=
+        (unconfiguredSales - salaryFields.threshold) * (salaryFields.rate / 100);
+    }
   }
 
-  for (const r of personRecords) {
-    const ppc = scopedPpc.find(
-      (x) => x.productId === r.productId && x.salesUnitId === r.salesUnitId,
-    ) || scopedPpc.find((x) => x.productId === r.productId);
-    totalPersonal += calcSaleCommissionReward(r, ppc);
+  if (kind === "personal") {
+    for (const r of personRecords) {
+      const ppc = scopedPpc.find(
+        (x) => x.productId === r.productId && x.salesUnitId === r.salesUnitId,
+      ) || scopedPpc.find((x) => x.productId === r.productId);
+      total += calcSaleCommissionReward(r, ppc);
+    }
   }
 
-  return totalPersonal;
+  return total;
 }
 
 /**
@@ -457,12 +718,14 @@ export function calculateMonthlySalary(
   productPersonCommissions?: ProductPersonCommission[],
   teamMgmtContext?: TeamMgmtSalaryContext,
   forUnitId?: string,
+  calcOptions?: SalaryCalcOptions,
 ): {
   baseSalary: number;
   performance: number;
   positionAllowance: number;
   managementCommission: number;
   personalCommission: number;
+  internalSalesCommission: number;
   productCommission: number;
   leaveDeduction: number;
   otherBonus: number;
@@ -497,6 +760,21 @@ export function calculateMonthlySalary(
   const personalCommission = usePpc
     ? calcPersonalCommissionByProduct(person, monthlyRecords, products, productPersonCommissions)
     : calcPersonalCommission(s, personalSales);
+  const internalRecords = filterByMonth(
+    calcOptions?.internalSalesRecords ?? salesRecords,
+    yearMonth,
+  );
+  const internalSources = calcOptions?.allPersonnel?.length
+    ? calcOptions.allPersonnel
+    : [person];
+  const internalSalesCommission = usePpc
+    ? calcInternalSalesCommissionReceived(
+        person,
+        internalSources,
+        internalRecords,
+        productPersonCommissions,
+      )
+    : 0;
 
   // 管理提成：仅团队规则分摊；未传上下文则为 0（停用旧每人×产品管理提成）
   const mgmtUnitId = forUnitId || person.salesUnitId;
@@ -530,7 +808,8 @@ export function calculateMonthlySalary(
     performance +
     positionAllowance +
     managementCommission +
-    personalCommission -
+    personalCommission +
+    internalSalesCommission -
     leaveDeduction +
     otherBonus -
     otherDeduction;
@@ -541,6 +820,7 @@ export function calculateMonthlySalary(
     positionAllowance,
     managementCommission,
     personalCommission,
+    internalSalesCommission,
     productCommission,
     leaveDeduction,
     otherBonus,
@@ -584,6 +864,7 @@ export interface UnitSalaryCost {
     positionAllowance: number;
     managementCommission: number;
     personalCommission: number;
+    internalSalesCommission: number;
     productCommission: number;
     leaveDeduction: number;
     otherBonus: number;
@@ -648,6 +929,10 @@ export function getUnitSalaryCost(
       productPersonCommissions,
       teamMgmtContext,
       unitId,
+      {
+        allPersonnel: personnel,
+        internalSalesRecords: salesRecords,
+      },
     );
     const socialInsurance = calc.socialInsurance;
     const housingFund = calc.housingFund;
@@ -661,6 +946,7 @@ export function getUnitSalaryCost(
       positionAllowance: calc.positionAllowance,
       managementCommission: calc.managementCommission,
       personalCommission: calc.personalCommission,
+      internalSalesCommission: calc.internalSalesCommission,
       productCommission: calc.productCommission,
       leaveDeduction: calc.leaveDeduction,
       otherBonus: calc.otherBonus,
@@ -678,7 +964,7 @@ export function getUnitSalaryCost(
   const totalHousingFund = details.reduce((sum, d) => sum + d.housingFund, 0);
   const totalProductCommission = details.reduce((sum, d) => sum + d.productCommission, 0);
   const totalSalesCommission = details.reduce(
-    (sum, d) => sum + d.managementCommission + d.personalCommission,
+    (sum, d) => sum + d.managementCommission + d.personalCommission + d.internalSalesCommission,
     0
   );
   const totalLeaveDeduction = details.reduce((sum, d) => sum + d.leaveDeduction, 0);

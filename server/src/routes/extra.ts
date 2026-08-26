@@ -332,6 +332,9 @@ router.post("/product-person-commissions/upsert", requireEditPermission, (req, r
         management_commission_rate=?, management_commission_threshold=?, management_commission_condition=?,
         personal_commission_type=?, personal_commission_rate=?, personal_commission_amount=?,
         personal_commission_threshold=?, personal_commission_condition=?,
+        internal_sales_commission_type=?, internal_sales_commission_rate=?, internal_sales_commission_amount=?,
+        internal_sales_commission_threshold=?, internal_sales_commission_condition=?,
+        internal_sales_commission_recipient_id=?,
         reward_amount=?, reward_from=?, reward_to=?, updated_at=?
       WHERE id=?
     `).run(
@@ -339,6 +342,10 @@ router.post("/product-person-commissions/upsert", requireEditPermission, (req, r
       b.personalCommissionType === "fixed" ? "fixed" : "percentage",
       b.personalCommissionRate ?? 0, b.personalCommissionAmount ?? 0,
       b.personalCommissionThreshold ?? 0, b.personalCommissionCondition || "",
+      b.internalSalesCommissionType === "fixed" ? "fixed" : "percentage",
+      b.internalSalesCommissionRate ?? 0, b.internalSalesCommissionAmount ?? 0,
+      b.internalSalesCommissionThreshold ?? 0, b.internalSalesCommissionCondition || "",
+      b.internalSalesCommissionRecipientId || "",
       b.rewardAmount ?? 0, b.rewardFrom || "", b.rewardTo || "",
       now, existing.id
     );
@@ -351,14 +358,21 @@ router.post("/product-person-commissions/upsert", requireEditPermission, (req, r
       management_commission_rate, management_commission_threshold, management_commission_condition,
       personal_commission_type, personal_commission_rate, personal_commission_amount,
       personal_commission_threshold, personal_commission_condition,
+      internal_sales_commission_type, internal_sales_commission_rate, internal_sales_commission_amount,
+      internal_sales_commission_threshold, internal_sales_commission_condition,
+      internal_sales_commission_recipient_id,
       reward_amount, reward_from, reward_to, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id, b.salesUnitId, b.productId, b.personnelId,
     b.managementCommissionRate ?? 0, b.managementCommissionThreshold ?? 0, b.managementCommissionCondition || "",
     b.personalCommissionType === "fixed" ? "fixed" : "percentage",
     b.personalCommissionRate ?? 0, b.personalCommissionAmount ?? 0,
     b.personalCommissionThreshold ?? 0, b.personalCommissionCondition || "",
+    b.internalSalesCommissionType === "fixed" ? "fixed" : "percentage",
+    b.internalSalesCommissionRate ?? 0, b.internalSalesCommissionAmount ?? 0,
+    b.internalSalesCommissionThreshold ?? 0, b.internalSalesCommissionCondition || "",
+    b.internalSalesCommissionRecipientId || "",
     b.rewardAmount ?? 0, b.rewardFrom || "", b.rewardTo || "", now
   );
   res.json(rowToProductPersonCommission(db.prepare("SELECT * FROM product_person_commissions WHERE id=?").get(id)));
@@ -375,6 +389,9 @@ router.post("/product-person-commissions/batch", requireEditPermission, (req, re
         managementCommissionRate, managementCommissionThreshold, managementCommissionCondition,
         personalCommissionType, personalCommissionRate, personalCommissionAmount,
         personalCommissionThreshold, personalCommissionCondition,
+        internalSalesCommissionType, internalSalesCommissionRate, internalSalesCommissionAmount,
+        internalSalesCommissionThreshold, internalSalesCommissionCondition,
+        internalSalesCommissionRecipientId,
         rewardAmount, rewardFrom, rewardTo,
       } = item;
       if (!salesUnitId || !productId || !personnelId) continue;
@@ -383,18 +400,25 @@ router.post("/product-person-commissions/batch", requireEditPermission, (req, re
       ).get(salesUnitId, productId, personnelId);
       const now = new Date().toISOString();
       const typeVal = personalCommissionType === "fixed" ? "fixed" : "percentage";
+      const internalTypeVal = internalSalesCommissionType === "fixed" ? "fixed" : "percentage";
       if (existing) {
         db.prepare(`
           UPDATE product_person_commissions SET
             management_commission_rate=?, management_commission_threshold=?, management_commission_condition=?,
             personal_commission_type=?, personal_commission_rate=?, personal_commission_amount=?,
             personal_commission_threshold=?, personal_commission_condition=?,
+            internal_sales_commission_type=?, internal_sales_commission_rate=?, internal_sales_commission_amount=?,
+            internal_sales_commission_threshold=?, internal_sales_commission_condition=?,
+            internal_sales_commission_recipient_id=?,
             reward_amount=?, reward_from=?, reward_to=?, updated_at=?
           WHERE id=?
         `).run(
           managementCommissionRate ?? 0, managementCommissionThreshold ?? 0, managementCommissionCondition || "",
           typeVal, personalCommissionRate ?? 0, personalCommissionAmount ?? 0,
           personalCommissionThreshold ?? 0, personalCommissionCondition || "",
+          internalTypeVal, internalSalesCommissionRate ?? 0, internalSalesCommissionAmount ?? 0,
+          internalSalesCommissionThreshold ?? 0, internalSalesCommissionCondition || "",
+          internalSalesCommissionRecipientId || "",
           rewardAmount ?? 0, rewardFrom || "", rewardTo || "",
           now, existing.id
         );
@@ -409,13 +433,19 @@ router.post("/product-person-commissions/batch", requireEditPermission, (req, re
             management_commission_rate, management_commission_threshold, management_commission_condition,
             personal_commission_type, personal_commission_rate, personal_commission_amount,
             personal_commission_threshold, personal_commission_condition,
+            internal_sales_commission_type, internal_sales_commission_rate, internal_sales_commission_amount,
+            internal_sales_commission_threshold, internal_sales_commission_condition,
+            internal_sales_commission_recipient_id,
             reward_amount, reward_from, reward_to, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           id, salesUnitId, productId, personnelId,
           managementCommissionRate ?? 0, managementCommissionThreshold ?? 0, managementCommissionCondition || "",
           typeVal, personalCommissionRate ?? 0, personalCommissionAmount ?? 0,
           personalCommissionThreshold ?? 0, personalCommissionCondition || "",
+          internalTypeVal, internalSalesCommissionRate ?? 0, internalSalesCommissionAmount ?? 0,
+          internalSalesCommissionThreshold ?? 0, internalSalesCommissionCondition || "",
+          internalSalesCommissionRecipientId || "",
           rewardAmount ?? 0, rewardFrom || "", rewardTo || "", now
         );
         results.push(rowToProductPersonCommission(

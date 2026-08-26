@@ -145,6 +145,7 @@ export const personnelApi = {
       highCommissionFrom: string
       resignDate?: string | null
       distributionPersonalRate?: number | null
+      distributionInternalSalesRate?: number | null
     },
   ) =>
     api.post<{

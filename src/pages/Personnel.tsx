@@ -3,7 +3,7 @@ import { useData } from "@/context/DataContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, formatDate } from "@/lib/format";
-import { EMPTY_SALARY, calculateMonthlySalary, getFixedSalary, filterByMonth, MONTHLY_WORK_DAYS, isSalesBattlePosition, getPersonalSales } from "@/lib/salary";
+import { EMPTY_SALARY, calculateMonthlySalary, getFixedSalary, filterByMonth, MONTHLY_WORK_DAYS, isSalesBattlePosition, getPersonalSales, getInternalSalesRecipientId } from "@/lib/salary";
 import type { Personnel, SalaryStructure } from "@/types";
 import {
   Plus,
@@ -386,7 +386,7 @@ export default function PersonnelPage() {
       position: person.position,
       phone: person.phone,
       email: person.email,
-      salary: { ...person.salary },
+      salary: { ...EMPTY_SALARY, ...person.salary },
       socialInsurance: person.socialInsurance || 0,
       housingFund: person.housingFund || 0,
       hireDate: person.hireDate,
@@ -580,8 +580,28 @@ export default function PersonnelPage() {
     const adj = monthlyAdjustments.find(
       (a) => a.personnelId === salaryDetailPerson.id && a.yearMonth === salaryDetailMonth
     );
-    return calculateMonthlySalary(salaryDetailPerson, salesRecords, products, salaryDetailMonth, adj, productPersonCommissions, teamMgmtContext);
-  }, [salaryDetailPerson, salaryDetailMonth, salesRecords, products, monthlyAdjustments, productPersonCommissions, teamMgmtContext]);
+    return calculateMonthlySalary(
+      salaryDetailPerson,
+      salesRecords,
+      products,
+      salaryDetailMonth,
+      adj,
+      productPersonCommissions,
+      teamMgmtContext,
+      undefined,
+      { allPersonnel: personnel },
+    );
+  }, [salaryDetailPerson, salaryDetailMonth, salesRecords, products, monthlyAdjustments, productPersonCommissions, teamMgmtContext, personnel]);
+
+  const internalSalesPartnerSources = useMemo(() => {
+    if (!salaryDetailPerson) return [];
+    return personnel.filter(
+      (p) =>
+        p.id !== salaryDetailPerson.id
+        && getInternalSalesRecipientId(p, false) === salaryDetailPerson.id
+        && (p.salary.internalSalesCommissionRate || 0) > 0,
+    );
+  }, [salaryDetailPerson, personnel]);
 
   // 月度销售额（含订单分业绩）
   const monthlyPersonnelSales = useMemo(() => {
@@ -1240,6 +1260,75 @@ export default function PersonnelPage() {
                     </div>
                   </div>
 
+                  {/* 提成默认（无产品级配置时使用） */}
+                  <div className="space-y-2 rounded-md bg-muted/30 p-3">
+                    <div className="flex items-center gap-2">
+                      <Badge className="bg-orange-100 text-orange-700">提成默认</Badge>
+                      <span className="text-xs text-muted-foreground">产品级未配置时使用；内部销售不计业绩</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <Label className="text-xs">个人/分销提成 (%)</Label>
+                        <Input
+                          type="number"
+                          step="0.1"
+                          value={form.salary.personalCommissionRate}
+                          onChange={(e) => updateSalary('personalCommissionRate', Number(e.target.value))}
+                          placeholder="如：25"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">内部销售提成 (%)</Label>
+                        <Input
+                          type="number"
+                          step="0.1"
+                          value={form.salary.internalSalesCommissionRate}
+                          onChange={(e) =>
+                            updateSalary('internalSalesCommissionRate', Number(e.target.value))
+                          }
+                          placeholder="如：5"
+                        />
+                      </div>
+                    </div>
+                    {(form.salary.internalSalesCommissionRate || 0) > 0 && (
+                      <div className="space-y-1">
+                        <Label className="text-xs">内部销售受益人</Label>
+                        <Select
+                          value={form.salary.internalSalesCommissionRecipientId || '__self__'}
+                          onValueChange={(v) =>
+                            updateSalary(
+                              'internalSalesCommissionRecipientId',
+                              v === '__self__' ? '' : v,
+                            )
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="选择受益人" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__self__">成交人本人</SelectItem>
+                            {personnel
+                              .filter(
+                                (p) =>
+                                  p.status === 'active'
+                                  && p.salesUnitId === form.salesUnitId
+                                  && p.id !== editingPerson?.id,
+                              )
+                              .map((p) => (
+                                <SelectItem key={p.id} value={p.id}>
+                                  {p.name}
+                                  {p.position ? `（${p.position}）` : ''}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-[10px] text-muted-foreground">
+                          仅显示本单位在职同事；固定搭档时选对应内部销售
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
                 </div>
 
                 {/* 社保公积金 */}
@@ -1334,6 +1423,21 @@ export default function PersonnelPage() {
                   <span className="text-muted-foreground">个人提成</span>
                   <span className="font-medium text-orange-600">{formatCurrency(salaryDetail.personalCommission)}</span>
                 </div>
+                {salaryDetail.internalSalesCommission > 0 && (
+                  <div className="flex justify-between rounded-md border border-sky-200 bg-sky-50/30 px-3 py-2 col-span-2">
+                    <div>
+                      <span className="text-muted-foreground">内部销售提成</span>
+                      {internalSalesPartnerSources.length > 0 && (
+                        <p className="text-[10px] text-sky-700 mt-0.5">
+                          含搭档：{internalSalesPartnerSources.map((p) => p.name).join('、')}
+                        </p>
+                      )}
+                    </div>
+                    <span className="font-medium text-sky-600">
+                      {formatCurrency(salaryDetail.internalSalesCommission)}
+                    </span>
+                  </div>
+                )}
                 {salaryDetail.leaveDeduction > 0 && (
                   <div className="flex justify-between rounded-md border border-red-200 bg-red-50/30 px-3 py-2">
                     <span className="text-muted-foreground">请假扣款</span>
@@ -1397,6 +1501,21 @@ export default function PersonnelPage() {
                 {salaryDetailPerson.salary.personalCommissionCondition && (
                   <p className="text-xs">· 个人提成：{salaryDetailPerson.salary.personalCommissionCondition}（个人销售额超 {formatCurrency(salaryDetailPerson.salary.personalCommissionThreshold)} 部分按 {salaryDetailPerson.salary.personalCommissionRate}% 计算）</p>
                 )}
+                {(salaryDetailPerson.salary.internalSalesCommissionRate || 0) > 0 && (() => {
+                  const recipientId = getInternalSalesRecipientId(salaryDetailPerson, false);
+                  const recipientName =
+                    recipientId === salaryDetailPerson.id
+                      ? '成交人本人'
+                      : (personnel.find((p) => p.id === recipientId)?.name || '指定销售');
+                  return (
+                    <p className="text-xs">
+                      · 内部销售提成：
+                      {salaryDetailPerson.salary.internalSalesCommissionCondition || '关联内部销售，不计业绩'}
+                      （按 {salaryDetailPerson.salary.internalSalesCommissionRate}% 计算，不计入业额
+                      {recipientId !== salaryDetailPerson.id ? `，发给 ${recipientName}` : ''}）
+                    </p>
+                  );
+                })()}
               </div>
             </div>
           )}

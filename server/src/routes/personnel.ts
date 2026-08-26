@@ -571,6 +571,11 @@ router.post("/:id/enable-distribution", requireEditPermission, (req, res) => {
     req.body.distributionPersonalRate === undefined || req.body.distributionPersonalRate === null
       ? null
       : Number(req.body.distributionPersonalRate);
+  const distributionInternalRate =
+    req.body.distributionInternalSalesRate === undefined ||
+    req.body.distributionInternalSalesRate === null
+      ? null
+      : Number(req.body.distributionInternalSalesRate);
 
   const db = getDb();
   const existing: any = db.prepare("SELECT * FROM personnel WHERE id = ?").get(id);
@@ -601,6 +606,11 @@ router.post("/:id/enable-distribution", requireEditPermission, (req, res) => {
         personalCommissionAmount: x.personalCommissionAmount || 0,
         personalCommissionThreshold: x.personalCommissionThreshold || 0,
         personalCommissionCondition: x.personalCommissionCondition || "",
+        internalSalesCommissionType: x.internalSalesCommissionType || "percentage",
+        internalSalesCommissionRate: x.internalSalesCommissionRate || 0,
+        internalSalesCommissionAmount: x.internalSalesCommissionAmount || 0,
+        internalSalesCommissionThreshold: x.internalSalesCommissionThreshold || 0,
+        internalSalesCommissionCondition: x.internalSalesCommissionCondition || "",
         rewardAmount: x.rewardAmount || 0,
         rewardFrom: x.rewardFrom || "",
         rewardTo: x.rewardTo || "",
@@ -620,6 +630,14 @@ router.post("/:id/enable-distribution", requireEditPermission, (req, res) => {
         : (oldSalary.personalCommissionRate || 0),
     personalCommissionThreshold: 0,
     personalCommissionCondition: "分销高提成",
+    internalSalesCommissionType: "percentage",
+    internalSalesCommissionRate:
+      distributionInternalRate != null && Number.isFinite(distributionInternalRate)
+        ? distributionInternalRate
+        : (oldSalary.internalSalesCommissionRate || 0),
+    internalSalesCommissionThreshold: 0,
+    internalSalesCommissionCondition: "关联内部销售，不计业绩",
+    internalSalesCommissionRecipientId: oldSalary.internalSalesCommissionRecipientId || "",
   };
 
   let nextResign = existing.resign_date;
@@ -659,9 +677,23 @@ router.post("/:id/enable-distribution", requireEditPermission, (req, res) => {
         personal_commission_amount = 0,
         personal_commission_threshold = 0,
         personal_commission_condition = ?,
+        internal_sales_commission_type = 'percentage',
+        internal_sales_commission_rate = ?,
+        internal_sales_commission_amount = 0,
+        internal_sales_commission_threshold = 0,
+        internal_sales_commission_condition = ?,
         updated_at = ?
       WHERE personnel_id = ?
-    `).run(distributionRate, `分销高提成（自 ${highCommissionFrom}）`, now, id);
+    `).run(
+      distributionRate,
+      `分销高提成（自 ${highCommissionFrom}）`,
+      distributionInternalRate != null && Number.isFinite(distributionInternalRate)
+        ? distributionInternalRate
+        : 0,
+      `关联内部销售（自 ${highCommissionFrom}，不计业绩）`,
+      now,
+      id,
+    );
   }
 
   const row = db.prepare("SELECT * FROM personnel WHERE id = ?").get(id);

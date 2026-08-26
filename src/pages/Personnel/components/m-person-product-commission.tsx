@@ -28,6 +28,12 @@ const EMPTY_FORM = {
   personalCommissionAmount: 0,
   personalCommissionThreshold: 0,
   personalCommissionCondition: '',
+  internalSalesCommissionType: 'percentage' as PersonalCommissionType,
+  internalSalesCommissionRate: 0,
+  internalSalesCommissionAmount: 0,
+  internalSalesCommissionThreshold: 0,
+  internalSalesCommissionCondition: '',
+  internalSalesCommissionRecipientId: '',
   rewardAmount: 0,
   rewardFrom: '',
   rewardTo: '',
@@ -97,6 +103,7 @@ export default function MPersonProductCommission({
     productPersonCommissions: ppcList,
     unitProductSettlements: upsList,
     salesUnits,
+    personnel,
     upsertProductPersonCommission,
     batchUpsertProductPersonCommissions,
     deleteProductPersonCommission,
@@ -114,6 +121,33 @@ export default function MPersonProductCommission({
     if (!person) return ''
     return salesUnits.find((u) => u.id === person.salesUnitId)?.name || '未分配单位'
   }, [person, salesUnits])
+
+  const unitColleagues = useMemo(() => {
+    if (!person) return []
+    return personnel
+      .filter(
+        (p) =>
+          p.status === 'active'
+          && p.salesUnitId === person.salesUnitId
+          && p.id !== person.id,
+      )
+      .sort((a, b) => a.name.localeCompare(b.name, 'zh'))
+  }, [person, personnel])
+
+  function getInternalRecipientSelectValue(recipientId?: string): string {
+    if (!person) return '__inherit__'
+    const rid = (recipientId || '').trim()
+    if (!rid) return '__inherit__'
+    if (rid === person.id) return '__self__'
+    return rid
+  }
+
+  function parseInternalRecipientSelectValue(value: string): string {
+    if (!person) return ''
+    if (value === '__inherit__') return ''
+    if (value === '__self__') return person.id
+    return value
+  }
 
   const personProductIds = useMemo(() => {
     if (!person) return new Set<string>()
@@ -201,6 +235,12 @@ export default function MPersonProductCommission({
         personalCommissionAmount: ppc.personalCommissionAmount || 0,
         personalCommissionThreshold: ppc.personalCommissionThreshold || 0,
         personalCommissionCondition: ppc.personalCommissionCondition || '',
+        internalSalesCommissionType: ppc.internalSalesCommissionType || 'percentage',
+        internalSalesCommissionRate: ppc.internalSalesCommissionRate || 0,
+        internalSalesCommissionAmount: ppc.internalSalesCommissionAmount || 0,
+        internalSalesCommissionThreshold: ppc.internalSalesCommissionThreshold || 0,
+        internalSalesCommissionCondition: ppc.internalSalesCommissionCondition || '',
+        internalSalesCommissionRecipientId: ppc.internalSalesCommissionRecipientId || '',
         rewardAmount: ppc.rewardAmount || 0,
         rewardFrom: ppc.rewardFrom || '',
         rewardTo: ppc.rewardTo || '',
@@ -247,6 +287,12 @@ export default function MPersonProductCommission({
       personalCommissionAmount: form.personalCommissionAmount || 0,
       personalCommissionThreshold: form.personalCommissionThreshold || 0,
       personalCommissionCondition: form.personalCommissionCondition,
+      internalSalesCommissionType: form.internalSalesCommissionType || 'percentage',
+      internalSalesCommissionRate: form.internalSalesCommissionRate || 0,
+      internalSalesCommissionAmount: form.internalSalesCommissionAmount || 0,
+      internalSalesCommissionThreshold: form.internalSalesCommissionThreshold || 0,
+      internalSalesCommissionCondition: form.internalSalesCommissionCondition,
+      internalSalesCommissionRecipientId: form.internalSalesCommissionRecipientId || '',
       rewardAmount: form.rewardAmount || 0,
       rewardFrom: form.rewardFrom || '',
       rewardTo: form.rewardTo || '',
@@ -715,6 +761,114 @@ export default function MPersonProductCommission({
                   }
                   placeholder="如：个人达标后发放"
                 />
+              </div>
+            </div>
+
+            <div className="rounded-lg border-2 border-sky-200 bg-sky-50/40 p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Badge className="bg-sky-100 text-sky-800">内部销售提成</Badge>
+                <span className="text-xs text-muted-foreground">不计入业额，计入人力成本</span>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">提成方式</Label>
+                <Select
+                  value={form.internalSalesCommissionType}
+                  disabled={!canEdit}
+                  onValueChange={(v) =>
+                    setForm({
+                      ...form,
+                      internalSalesCommissionType: v as PersonalCommissionType,
+                    })
+                  }
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="percentage">按销售额比例</SelectItem>
+                    <SelectItem value="fixed">按件固定金额</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {form.internalSalesCommissionType === 'fixed' ? (
+                <div className="space-y-1">
+                  <Label className="text-xs">每件提成金额 (¥)</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    disabled={!canEdit}
+                    value={form.internalSalesCommissionAmount}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        internalSalesCommissionAmount: Number(e.target.value),
+                      })
+                    }
+                    placeholder="如：20"
+                  />
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <Label className="text-xs">提成比例 (%)</Label>
+                    <Input
+                      type="number"
+                      step="0.1"
+                      disabled={!canEdit}
+                      value={form.internalSalesCommissionRate}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          internalSalesCommissionRate: Number(e.target.value),
+                        })
+                      }
+                      placeholder="如：5"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">起算门槛 (¥)</Label>
+                    <Input
+                      type="number"
+                      disabled={!canEdit}
+                      value={form.internalSalesCommissionThreshold}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          internalSalesCommissionThreshold: Number(e.target.value),
+                        })
+                      }
+                      placeholder="如：0"
+                    />
+                  </div>
+                </div>
+              )}
+              <div className="space-y-1">
+                <Label className="text-xs">内部销售受益人</Label>
+                <Select
+                  disabled={!canEdit}
+                  value={getInternalRecipientSelectValue(form.internalSalesCommissionRecipientId)}
+                  onValueChange={(v) =>
+                    setForm({
+                      ...form,
+                      internalSalesCommissionRecipientId: parseInternalRecipientSelectValue(v),
+                    })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择受益人" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__inherit__">沿用人员薪酬默认</SelectItem>
+                    <SelectItem value="__self__">成交人本人</SelectItem>
+                    {unitColleagues.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                        {p.position ? `（${p.position}）` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[10px] text-muted-foreground">
+                  仅显示本单位在职同事；未单独设置时沿用人员薪酬中的受益人
+                </p>
               </div>
             </div>
 

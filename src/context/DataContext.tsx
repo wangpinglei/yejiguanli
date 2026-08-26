@@ -134,6 +134,7 @@ interface DataContextType {
       highCommissionFrom: string
       resignDate?: string | null
       distributionPersonalRate?: number | null
+      distributionInternalSalesRate?: number | null
     },
   ) => Promise<void>;
   transferPersonnel: (
@@ -431,6 +432,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         highCommissionFrom: string
         resignDate?: string | null
         distributionPersonalRate?: number | null
+      distributionInternalSalesRate?: number | null
       },
     ) => {
       const result = await personnelApi.enableDistribution(id, data);
