@@ -110,6 +110,92 @@ router.get("/", (req, res) => {
   res.json(rows.map((r) => rowToPersonnel(r, assignMap.get(r.id) || [])));
 });
 
+function loadPersonnelWithAssignments(db: ReturnType<typeof getDb>, personnelId: string) {
+  const existing: any = db.prepare("SELECT * FROM personnel WHERE id = ?").get(personnelId);
+  if (!existing) return null;
+  const assigns = db
+    .prepare(
+      "SELECT * FROM personnel_unit_assignments WHERE personnel_id = ? ORDER BY start_date",
+    )
+    .all(personnelId);
+  return rowToPersonnel(existing, assigns);
+}
+
+/**
+ * PUT /api/personnel/:id/assignments/:assignmentId
+ * 直接修改单条调岗/归属记录（归属单位、起止日）
+ */
+router.put(
+  "/:id/assignments/:assignmentId",
+  requireRole("superadmin"),
+  (req, res) => {
+    const { id, assignmentId } = req.params;
+    const salesUnitId = String(req.body?.salesUnitId || "").trim();
+    const startDate = String(req.body?.startDate || "").trim().slice(0, 10);
+    const endDateRaw = req.body?.endDate;
+    const endDate =
+      endDateRaw === null || endDateRaw === undefined || endDateRaw === ""
+        ? null
+        : String(endDateRaw).trim().slice(0, 10);
+    const remark = String(req.body?.remark ?? "").trim();
+
+    if (!salesUnitId) {
+      return res.status(400).json({ error: "请选择归属单位" });
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+      return res.status(400).json({ error: "请填写有效的开始日" });
+    }
+    if (endDate && endDate <= startDate) {
+      return res.status(400).json({ error: "结束日须晚于开始日" });
+    }
+
+    const db = getDb();
+    const existing: any = db.prepare("SELECT * FROM personnel WHERE id = ?").get(id);
+    if (!existing) return res.status(404).json({ error: "人员不存在" });
+
+    const row: any = db
+      .prepare(
+        "SELECT * FROM personnel_unit_assignments WHERE id = ? AND personnel_id = ?",
+      )
+      .get(assignmentId, id);
+    if (!row) return res.status(404).json({ error: "归属记录不存在" });
+
+    const unit = db.prepare("SELECT id FROM sales_units WHERE id = ?").get(salesUnitId);
+    if (!unit) return res.status(400).json({ error: "归属单位不存在" });
+
+    const operator = getOperator(req);
+
+    db.prepare(`
+      UPDATE personnel_unit_assignments
+      SET sales_unit_id = ?, start_date = ?, end_date = ?, remark = ?,
+          operator = ?, operator_id = ?
+      WHERE id = ?
+    `).run(
+      salesUnitId,
+      startDate,
+      endDate,
+      remark,
+      operator.name,
+      operator.id,
+      assignmentId,
+    );
+
+    const isOpen = !endDate;
+    if (isOpen) {
+      db.prepare("UPDATE personnel SET sales_unit_id = ? WHERE id = ?").run(
+        salesUnitId,
+        id,
+      );
+    }
+
+    runUnitDataReconcile();
+
+    const personnel = loadPersonnelWithAssignments(db, id);
+    if (!personnel) return res.status(404).json({ error: "人员不存在" });
+    res.json(personnel);
+  },
+);
+
 /**
  * DELETE /api/personnel/:id/assignments/:assignmentId
  * 删除单条调岗/归属记录（至少保留一条）
@@ -144,12 +230,9 @@ router.delete(
     db.prepare("DELETE FROM personnel_unit_assignments WHERE id = ?").run(assignmentId);
     runUnitDataReconcile();
 
-    const assigns = db
-      .prepare(
-        "SELECT * FROM personnel_unit_assignments WHERE personnel_id = ? ORDER BY start_date",
-      )
-      .all(id);
-    res.json(rowToPersonnel(existing, assigns));
+    const personnel = loadPersonnelWithAssignments(db, id);
+    if (!personnel) return res.status(404).json({ error: "人员不存在" });
+    res.json(personnel);
   },
 );
 

@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { personnelApi } from "@/lib/api";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
 import { EMPTY_SALARY, calculateMonthlySalary, getFixedSalary, filterByMonth, MONTHLY_WORK_DAYS, isSalesBattlePosition, getPersonalSales, getInternalSalesRecipientId } from "@/lib/salary";
-import type { Personnel, SalaryStructure } from "@/types";
+import type { Personnel, PersonnelUnitAssignment, SalaryStructure } from "@/types";
 import {
   Plus,
   Search,
@@ -156,6 +156,12 @@ export default function PersonnelPage() {
   );
   const [transferRemark, setTransferRemark] = useState("");
   const [transferring, setTransferring] = useState(false);
+  const [editingAssignment, setEditingAssignment] = useState<PersonnelUnitAssignment | null>(null);
+  const [editAssignmentUnitId, setEditAssignmentUnitId] = useState("");
+  const [editAssignmentStart, setEditAssignmentStart] = useState("");
+  const [editAssignmentEnd, setEditAssignmentEnd] = useState("");
+  const [editAssignmentRemark, setEditAssignmentRemark] = useState("");
+  const [savingAssignment, setSavingAssignment] = useState(false);
   const [reconcilingUnits, setReconcilingUnits] = useState(false);
   const [diagnosisOpen, setDiagnosisOpen] = useState(false);
   const [diagnosisLoading, setDiagnosisLoading] = useState(false);
@@ -578,6 +584,50 @@ export default function PersonnelPage() {
       alert(e instanceof Error ? e.message : "清洗失败");
     } finally {
       setReconcilingUnits(false);
+    }
+  }
+
+  function openEditAssignment(row: PersonnelUnitAssignment) {
+    setEditingAssignment(row);
+    setEditAssignmentUnitId(row.salesUnitId);
+    setEditAssignmentStart(String(row.startDate || "").slice(0, 10));
+    setEditAssignmentEnd(row.endDate ? String(row.endDate).slice(0, 10) : "");
+    setEditAssignmentRemark(row.remark || "");
+  }
+
+  async function handleSaveAssignment() {
+    if (!transferPerson || !editingAssignment) return;
+    if (!editAssignmentUnitId) {
+      alert("请选择归属单位");
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(editAssignmentStart)) {
+      alert("请填写有效的开始日");
+      return;
+    }
+    if (editAssignmentEnd && editAssignmentEnd <= editAssignmentStart) {
+      alert("结束日须晚于开始日");
+      return;
+    }
+    setSavingAssignment(true);
+    try {
+      const updated = await personnelApi.updateAssignment(
+        transferPerson.id,
+        editingAssignment.id,
+        {
+          salesUnitId: editAssignmentUnitId,
+          startDate: editAssignmentStart,
+          endDate: editAssignmentEnd || null,
+          remark: editAssignmentRemark.trim() || undefined,
+        },
+      );
+      setTransferPerson(updated);
+      setEditingAssignment(null);
+      await refreshAll();
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "保存失败");
+    } finally {
+      setSavingAssignment(false);
     }
   }
 
@@ -1689,7 +1739,7 @@ export default function PersonnelPage() {
                           <TableHead>说明</TableHead>
                           <TableHead>操作人</TableHead>
                           <TableHead>记录时间</TableHead>
-                          {isSuperadmin && <TableHead className="w-[72px]">操作</TableHead>}
+                          {isSuperadmin && <TableHead className="w-[120px]">操作</TableHead>}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1709,18 +1759,30 @@ export default function PersonnelPage() {
                             </TableCell>
                             {isSuperadmin && (
                               <TableCell>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 text-destructive hover:text-destructive"
-                                  disabled={
-                                    transferring
-                                    || transferAssignmentRows.length <= 1
-                                  }
-                                  onClick={() => void handleDeleteAssignment(row.id)}
-                                >
-                                  删除
-                                </Button>
+                                <div className="flex gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 px-2"
+                                    disabled={transferring || savingAssignment}
+                                    onClick={() => openEditAssignment(row)}
+                                  >
+                                    编辑
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 px-2 text-destructive hover:text-destructive"
+                                    disabled={
+                                      transferring
+                                      || savingAssignment
+                                      || transferAssignmentRows.length <= 1
+                                    }
+                                    onClick={() => void handleDeleteAssignment(row.id)}
+                                  >
+                                    删除
+                                  </Button>
+                                </div>
                               </TableCell>
                             )}
                           </TableRow>
@@ -1729,8 +1791,10 @@ export default function PersonnelPage() {
                     </Table>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    结束日为空表示当前仍在该单位；有结束日时，当天起归属下一段。
-                    {isSuperadmin && " 超级管理员可删除错误或重复的调岗记录。"}
+                    结束日为空表示当前仍在该单位。成本管理按此时间轴切分固定薪；
+                    {isSuperadmin
+                      ? " 单位填错可直接点「编辑」改归属单位，不必删记录。"
+                      : ""}
                   </p>
                 </div>
               )}
@@ -1906,6 +1970,83 @@ export default function PersonnelPage() {
               onClick={() => void handleMerge()}
             >
               {merging ? "合并中…" : "确认合并"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!editingAssignment}
+        onOpenChange={(open) => {
+          if (!open) setEditingAssignment(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-4 w-4" />
+              编辑归属记录
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            <div className="space-y-2">
+              <Label>归属单位 *</Label>
+              <Select
+                value={editAssignmentUnitId || undefined}
+                onValueChange={setEditAssignmentUnitId}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="选择单位" />
+                </SelectTrigger>
+                <SelectContent>
+                  {salesUnits.map((u) => (
+                    <SelectItem key={u.id} value={u.id}>
+                      {u.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>开始日 *</Label>
+              <Input
+                type="date"
+                value={editAssignmentStart}
+                onChange={(e) => setEditAssignmentStart(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>结束日（留空表示至今）</Label>
+              <Input
+                type="date"
+                value={editAssignmentEnd}
+                onChange={(e) => setEditAssignmentEnd(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>说明</Label>
+              <Input
+                value={editAssignmentRemark}
+                onChange={(e) => setEditAssignmentRemark(e.target.value)}
+                placeholder="可选"
+              />
+            </div>
+            {!editAssignmentEnd && (
+              <p className="text-xs text-muted-foreground">
+                当前段无结束日时，保存后会同步更新人员管理里的「所属单位」。
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={savingAssignment}
+              onClick={() => setEditingAssignment(null)}
+            >
+              取消
+            </Button>
+            <Button disabled={savingAssignment} onClick={() => void handleSaveAssignment()}>
+              {savingAssignment ? "保存中…" : "保存"}
             </Button>
           </DialogFooter>
         </DialogContent>

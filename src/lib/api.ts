@@ -161,6 +161,20 @@ export const personnelApi = {
     api.delete<import("@/types").Personnel>(
       `/personnel/${personnelId}/assignments/${assignmentId}`,
     ),
+  updateAssignment: (
+    personnelId: string,
+    assignmentId: string,
+    data: {
+      salesUnitId: string;
+      startDate: string;
+      endDate?: string | null;
+      remark?: string;
+    },
+  ) =>
+    api.put<import("@/types").Personnel>(
+      `/personnel/${personnelId}/assignments/${assignmentId}`,
+      data,
+    ),
   reconcileUnitData: () =>
     api.post<{
       message: string;
