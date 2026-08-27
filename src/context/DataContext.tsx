@@ -140,7 +140,7 @@ interface DataContextType {
   transferPersonnel: (
     id: string,
     data: { salesUnitId: string; effectiveDate: string; remark?: string },
-  ) => Promise<void>;
+  ) => Promise<Personnel>;
   ensurePersonnelByName: (
     name: string,
     salesUnitId: string,
@@ -451,6 +451,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     ) => {
       const updated = await personnelApi.transfer(id, data);
       setPersonnel((prev) => prev.map((x) => (x.id === id ? updated : x)));
+      return updated;
     },
     [],
   );

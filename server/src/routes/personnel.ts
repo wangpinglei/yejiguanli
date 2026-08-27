@@ -5,11 +5,18 @@ import {
   rowToProductPersonCommission,
   generateId,
   runInTransaction,
+  runUnitDataReconcile,
 } from "../db";
 import { authMiddleware } from "../auth";
-import { getVisibleUnitIds, requireEditPermission, isOrgDept, isReadOnly } from "../middleware";
+import { getVisibleUnitIds, requireEditPermission, isOrgDept, isReadOnly, requireRole } from "../middleware";
 
 const router = Router();
+
+function getOperator(req: { user?: { id?: string; name?: string; username?: string } }) {
+  const name = (req.user?.name || req.user?.username || "").trim() || "未知用户";
+  const id = (req.user?.id || "").trim();
+  return { name, id };
+}
 
 function loadAssignmentsByPersonnelIds(
   db: ReturnType<typeof getDb>,
@@ -39,12 +46,22 @@ function insertOpenAssignment(
   salesUnitId: string,
   startDate: string,
   remark = "",
+  operator?: { name: string; id: string },
 ) {
   db.prepare(`
     INSERT INTO personnel_unit_assignments (
-      id, personnel_id, sales_unit_id, start_date, end_date, remark, created_at
-    ) VALUES (?, ?, ?, ?, NULL, ?, datetime('now'))
-  `).run(generateId("pua"), personnelId, salesUnitId, startDate, remark);
+      id, personnel_id, sales_unit_id, start_date, end_date, remark, created_at,
+      operator, operator_id
+    ) VALUES (?, ?, ?, ?, NULL, ?, datetime('now'), ?, ?)
+  `).run(
+    generateId("pua"),
+    personnelId,
+    salesUnitId,
+    startDate,
+    remark,
+    operator?.name || "",
+    operator?.id || "",
+  );
 }
 
 /**
@@ -92,6 +109,24 @@ router.get("/", (req, res) => {
   res.json(rows.map((r) => rowToPersonnel(r, assignMap.get(r.id) || [])));
 });
 
+/**
+ * POST /api/personnel/reconcile-unit-data
+ * 校正人员单位时间轴与销售记录单位，修复成本管理错挂单位
+ */
+router.post(
+  "/reconcile-unit-data",
+  requireRole("superadmin"),
+  (req, res) => {
+    const report = runUnitDataReconcile();
+    res.json({
+      message: report.totalFixed > 0
+        ? `已校正 ${report.totalFixed} 条数据`
+        : "未发现需要校正的数据",
+      ...report,
+    });
+  },
+);
+
 // POST /api/personnel - 创建人员
 router.post("/", requireEditPermission, (req, res) => {
   const {
@@ -133,7 +168,7 @@ router.post("/", requireEditPermission, (req, res) => {
       highCommissionFrom || "",
       regularJson,
     );
-    insertOpenAssignment(db, id, salesUnitId, startDate, "入职建档");
+    insertOpenAssignment(db, id, salesUnitId, startDate, "入职建档", getOperator(req));
   });
 
   const row = db.prepare("SELECT * FROM personnel WHERE id = ?").get(id);
@@ -538,6 +573,7 @@ router.post("/:id/transfer", requireEditPermission, (req, res) => {
       toUnitId,
       effectiveDate,
       remark || "转岗",
+      getOperator(req),
     );
     db.prepare("UPDATE personnel SET sales_unit_id = ? WHERE id = ?").run(toUnitId, id);
   });
@@ -820,7 +856,7 @@ router.put("/:id", requireEditPermission, (req, res) => {
           today,
         );
       }
-      insertOpenAssignment(db, id, String(nextUnitId), today, "编辑改单位");
+      insertOpenAssignment(db, id, String(nextUnitId), today, "编辑改单位", getOperator(req));
     }
   });
 

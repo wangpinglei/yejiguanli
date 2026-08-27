@@ -1,4 +1,5 @@
-import type { SalesRecord, SaleCollaborator, SaleShareMode } from '@/types'
+import type { SalesRecord, SaleCollaborator, SaleShareMode, Personnel } from '@/types'
+import { resolveUnitIdAt } from '@/lib/unitAssignment'
 
 export type { SaleCollaborator, SaleShareMode }
 
@@ -274,4 +275,83 @@ export function formatShareLabel(
     return `${name} ¥${(Number(c.shareAmount) || 0).toFixed(0)}`
   }
   return `${name} ${Number(c.sharePercent) || 0}%`
+}
+
+/** 分摊行上的业绩归属单位（优先 collaborators.salesUnitId，否则按人员时间轴） */
+export function resolveCollaboratorUnitId(
+  c: SaleCollaborator,
+  saleDate: string,
+  personnel: Personnel[],
+): string {
+  if (c.salesUnitId) return c.salesUnitId
+  const person = personnel.find((p) => p.id === c.personnelId)
+  if (!person) return ''
+  return resolveUnitIdAt(person, saleDate) || person.salesUnitId || ''
+}
+
+/** 单笔订单在某单位上的分摊（分业绩按 collaborators.salesUnitId；否则看整单 salesUnitId） */
+export function getSaleSharesInUnit(
+  sale: SalesRecord,
+  unitId: string,
+  personnel: Personnel[],
+): Array<{ personId: string; scaled: SalesRecord }> {
+  const cols = sale.collaborators || []
+  if (cols.length > 1) {
+    const hits: Array<{ personId: string; scaled: SalesRecord }> = []
+    const saleDate = sale.saleDate || ''
+    for (const c of cols) {
+      if (!c.personnelId) continue
+      const colUnit = resolveCollaboratorUnitId(c, saleDate, personnel)
+      if (colUnit !== unitId) continue
+      const scaled = scaleSaleForPerson(sale, c.personnelId)
+      if (!scaled) continue
+      hits.push({
+        personId: c.personnelId,
+        scaled: { ...scaled, salesUnitId: unitId },
+      })
+    }
+    return hits
+  }
+
+  if (sale.salesUnitId !== unitId) return []
+  if (sale.personnelId) {
+    const scaled = scaleSaleForPerson(sale, sale.personnelId)
+    if (scaled) {
+      return [{
+        personId: sale.personnelId,
+        scaled: { ...scaled, salesUnitId: unitId },
+      }]
+    }
+  }
+  return []
+}
+
+/** 成本/提成：只保留「业绩归属该单位」的成交（含分业绩 collaborators） */
+export function buildUnitScopedSalesRecords(
+  salesRecords: SalesRecord[],
+  unitId: string,
+  personnel: Personnel[],
+): SalesRecord[] {
+  const out: SalesRecord[] = []
+  for (const sale of salesRecords) {
+    for (const hit of getSaleSharesInUnit(sale, unitId, personnel)) {
+      out.push(hit.scaled)
+    }
+  }
+  return out
+}
+
+/** 当月在某单位有业绩分摊的人员 id（含分业绩） */
+export function getPersonIdsWithSalesInUnit(
+  salesRecords: SalesRecord[],
+  unitId: string,
+  personnel: Personnel[],
+): Set<string> {
+  const set = new Set<string>()
+  for (const sale of salesRecords) {
+    for (const hit of getSaleSharesInUnit(sale, unitId, personnel)) {
+      set.add(hit.personId)
+    }
+  }
+  return set
 }

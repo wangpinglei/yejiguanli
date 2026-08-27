@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getDb, runInTransaction } from "../db";
+import { getDb, runInTransaction, runUnitDataReconcile } from "../db";
 import { authMiddleware } from "../auth";
 import { requireRole } from "../middleware";
 
@@ -383,6 +383,8 @@ router.post("/", (req, res) => {
       })
     );
     });
+
+    runUnitDataReconcile();
 
     res.json({ message: "数据迁移成功", stats });
   } catch (err: any) {

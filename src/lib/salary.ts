@@ -8,6 +8,8 @@ import {
   getPersonShareAmount,
   saleInvolvesPerson,
   scaleSaleForPerson,
+  buildUnitScopedSalesRecords,
+  getPersonIdsWithSalesInUnit,
 } from "@/lib/saleCollaborators";
 import { getPersonTeamMgmtCommission } from "@/lib/teamMgmtCommission";
 import {
@@ -894,12 +896,8 @@ export function getUnitSalaryCost(
   teamMgmtContext?: TeamMgmtSalaryContext,
 ): UnitSalaryCost {
   const monthlySales = filterByMonth(salesRecords, yearMonth);
-  // 当月在该单位有成交的人员（销售记录侧），避免「有提成预估但成本为 0」
-  const salesPersonIdSet = new Set(
-    monthlySales
-      .filter((r) => r.salesUnitId === unitId && r.personnelId)
-      .map((r) => r.personnelId),
-  );
+  // 含分业绩：按 collaborators 上的单位归属，不单看整单 sales_unit_id
+  const salesPersonIdSet = getPersonIdsWithSalesInUnit(monthlySales, unitId, personnel);
 
   const memberMap = new Map<string, Personnel>();
   personnel.forEach((p) => {
@@ -918,8 +916,8 @@ export function getUnitSalaryCost(
     const adj = monthlyAdjustments.find(
       (a) => a.personnelId === p.id && a.yearMonth === yearMonth
     );
-    // 提成只认本单位成交；固定成本按归属时间轴切到本单位
-    const unitSalesRecords = salesRecords.filter((r) => r.salesUnitId === unitId);
+    // 提成只认本单位成交（分业绩按 collaborators.salesUnitId）；固定成本按归属时间轴
+    const unitSalesRecords = buildUnitScopedSalesRecords(salesRecords, unitId, personnel);
     const calc = calculateMonthlySalary(
       p,
       unitSalesRecords,

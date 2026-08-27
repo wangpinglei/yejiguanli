@@ -157,6 +157,15 @@ export const personnelApi = {
     data: { salesUnitId: string; effectiveDate: string; remark?: string },
   ) =>
     api.post<import("@/types").Personnel>(`/personnel/${id}/transfer`, data),
+  reconcileUnitData: () =>
+    api.post<{
+      message: string;
+      assignmentFixed: number;
+      salesUnitIdFixed: number;
+      collaboratorsFixed: number;
+      misplacedSalesFixed: number;
+      totalFixed: number;
+    }>("/personnel/reconcile-unit-data", {}),
 };
 
 export const hrProfilesApi = {

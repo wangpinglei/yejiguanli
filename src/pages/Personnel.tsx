@@ -2,7 +2,8 @@ import { useState, useMemo } from "react";
 import { useData } from "@/context/DataContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/PageHeader";
-import { formatCurrency, formatDate } from "@/lib/format";
+import { personnelApi } from "@/lib/api";
+import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
 import { EMPTY_SALARY, calculateMonthlySalary, getFixedSalary, filterByMonth, MONTHLY_WORK_DAYS, isSalesBattlePosition, getPersonalSales, getInternalSalesRecipientId } from "@/lib/salary";
 import type { Personnel, SalaryStructure } from "@/types";
 import {
@@ -19,6 +20,7 @@ import {
   ArrowUpDown,
   Merge,
   ArrowRightLeft,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -121,7 +123,7 @@ const RANGE_LABELS: Record<SalesRange, string> = {
 };
 
 export default function PersonnelPage() {
-  const { addPersonnel, updatePersonnel, deletePersonnel, mergePersonnel, transferPersonnel, products, monthlyAdjustments, productPersonCommissions, teamMgmtCommissionRules, performanceTargets, unitProductSettlements } = useData();
+  const { addPersonnel, updatePersonnel, deletePersonnel, mergePersonnel, transferPersonnel, refreshAll, products, monthlyAdjustments, productPersonCommissions, teamMgmtCommissionRules, performanceTargets, unitProductSettlements } = useData();
   const teamMgmtContext = useMemo(() => ({
     rules: teamMgmtCommissionRules,
     targets: performanceTargets,
@@ -153,6 +155,7 @@ export default function PersonnelPage() {
   );
   const [transferRemark, setTransferRemark] = useState("");
   const [transferring, setTransferring] = useState(false);
+  const [reconcilingUnits, setReconcilingUnits] = useState(false);
   const [commissionPerson, setCommissionPerson] = useState<Personnel | null>(null);
   const [salaryDetailPerson, setSalaryDetailPerson] = useState<Personnel | null>(null);
   const [salaryDetailMonth, setSalaryDetailMonth] = useState(new Date().toISOString().slice(0, 7));
@@ -161,6 +164,7 @@ export default function PersonnelPage() {
 
   // 组织部只能编辑入离职日期
   const isOrgDept = role === "org_department";
+  const isSuperadmin = role === "superadmin";
   const datesOnly = isOrgDept && !canEditPersonnel;
 
   /** 每人：已售产品数 / 已配提成数 / 缺少提成的产品数与名称 */
@@ -480,11 +484,19 @@ export default function PersonnelPage() {
   }
 
   function openTransfer(person: Personnel) {
-    setTransferPerson(person);
+    const fresh = personnel.find((p) => p.id === person.id) || person;
+    setTransferPerson(fresh);
     setTransferUnitId("");
     setTransferDate(new Date().toISOString().slice(0, 10));
     setTransferRemark("");
   }
+
+  const transferAssignmentRows = useMemo(() => {
+    if (!transferPerson?.unitAssignments?.length) return [];
+    return [...transferPerson.unitAssignments].sort((a, b) =>
+      a.startDate.localeCompare(b.startDate),
+    );
+  }, [transferPerson]);
 
   async function handleTransfer() {
     if (!transferPerson) return;
@@ -512,16 +524,46 @@ export default function PersonnelPage() {
     }
     setTransferring(true);
     try {
-      await transferPersonnel(transferPerson.id, {
+      const updated = await transferPersonnel(transferPerson.id, {
         salesUnitId: transferUnitId,
         effectiveDate: transferDate,
         remark: transferRemark.trim() || undefined,
       });
-      setTransferPerson(null);
+      setTransferPerson(updated);
+      setTransferUnitId("");
+      setTransferRemark("");
+      setTransferDate(new Date().toISOString().slice(0, 10));
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : "转岗失败");
     } finally {
       setTransferring(false);
+    }
+  }
+
+  async function handleReconcileUnitData() {
+    if (
+      !window.confirm(
+        "将按人员管理当前单位校正归属时间轴，并修正错挂单位的销售记录。\n"
+          + "用于清理成本管理中仍出现在错误单位（如海南）的人员。\n\n是否继续？",
+      )
+    ) {
+      return;
+    }
+    setReconcilingUnits(true);
+    try {
+      const report = await personnelApi.reconcileUnitData();
+      await refreshAll();
+      alert(
+        `${report.message}\n\n`
+          + `归属时间轴：${report.assignmentFixed} 条\n`
+          + `销售记录单位名匹配：${report.salesUnitIdFixed} 条\n`
+          + `分业绩补全：${report.collaboratorsFixed} 条\n`
+          + `人员单位错挂成交：${report.misplacedSalesFixed} 条`,
+      );
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "校正失败");
+    } finally {
+      setReconcilingUnits(false);
     }
   }
 
@@ -621,6 +663,16 @@ export default function PersonnelPage() {
         action={
           showActions && !isReadOnly && (
             <div className="flex flex-wrap gap-2">
+              {isSuperadmin && (
+                <Button
+                  variant="outline"
+                  disabled={reconcilingUnits}
+                  onClick={() => void handleReconcileUnitData()}
+                >
+                  <RefreshCw className={`mr-2 h-4 w-4 ${reconcilingUnits ? "animate-spin" : ""}`} />
+                  {reconcilingUnits ? "校正中…" : "校正单位归属"}
+                </Button>
+              )}
               <Button variant="outline" onClick={() => openMergeDialog()}>
                 <Merge className="mr-2 h-4 w-4" />
                 合并人员
@@ -1532,7 +1584,7 @@ export default function PersonnelPage() {
           if (!open) setTransferPerson(null);
         }}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <ArrowRightLeft className="h-5 w-5" />
@@ -1545,6 +1597,51 @@ export default function PersonnelPage() {
                 「{transferPerson.name}」当前：{getUnitName(transferPerson.salesUnitId)}。
                 调动日前业绩与人力成本留在原部门，从调动日起归新部门。
               </p>
+
+              {transferAssignmentRows.length > 0 && (
+                <div className="space-y-2">
+                  <Label>归属 / 调岗记录</Label>
+                  <div className="rounded-md border overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>归属单位</TableHead>
+                          <TableHead>开始日</TableHead>
+                          <TableHead>结束日</TableHead>
+                          <TableHead>说明</TableHead>
+                          <TableHead>操作人</TableHead>
+                          <TableHead>记录时间</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {transferAssignmentRows.map((row) => (
+                          <TableRow key={row.id}>
+                            <TableCell>{getUnitName(row.salesUnitId)}</TableCell>
+                            <TableCell>{formatDate(row.startDate)}</TableCell>
+                            <TableCell>
+                              {row.endDate ? formatDate(row.endDate) : "至今"}
+                            </TableCell>
+                            <TableCell className="max-w-[120px] truncate">
+                              {row.remark || "—"}
+                            </TableCell>
+                            <TableCell>{row.operator || "—"}</TableCell>
+                            <TableCell className="text-muted-foreground text-xs">
+                              {row.createdAt ? formatDateTime(row.createdAt) : "—"}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    结束日为空表示当前仍在该单位；有结束日时，当天起归属下一段。
+                  </p>
+                </div>
+              )}
+
+              <div className="space-y-2 border-t pt-4">
+                <Label className="text-base font-medium">新建调动</Label>
+              </div>
               <div className="space-y-2">
                 <Label>目标部门 *</Label>
                 <Select value={transferUnitId || undefined} onValueChange={setTransferUnitId}>

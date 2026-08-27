@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import path from "path";
 import type { SystemUser, UserRole } from "./types";
 import { createFullPermissions, normalizePermissions } from "./permissions";
+import { parsePerformanceSplitText } from "./lib/parsePerformanceSplit";
 
 const DB_PATH = path.join(__dirname, "..", "data", "database.db");
 
@@ -442,6 +443,11 @@ function initSchema() {
     { name: "regular_compensation", ddl: "regular_compensation TEXT DEFAULT ''" },
   ]);
 
+  ensureColumns("personnel_unit_assignments", [
+    { name: "operator", ddl: "operator TEXT DEFAULT ''" },
+    { name: "operator_id", ddl: "operator_id TEXT DEFAULT ''" },
+  ]);
+
   ensureColumns("products", [
     { name: "sales_unit_id", ddl: "sales_unit_id TEXT" },
     { name: "cost_type", ddl: "cost_type TEXT DEFAULT 'fixed'" },
@@ -559,6 +565,7 @@ function initSchema() {
 
   // 人员单位归属时间轴：存量补一段当前单位
   ensurePersonnelUnitAssignments();
+  runUnitDataReconcile();
 
   // 已废弃「单位整体业绩目标」（personnel_id 为空），仅保留个人目标
   db.prepare("DELETE FROM performance_targets WHERE personnel_id IS NULL OR TRIM(personnel_id) = ''").run();
@@ -745,6 +752,240 @@ function ensurePersonnelUnitAssignments() {
 
   // 表刚创建时上面循环已覆盖；hasAny 仅用于避免无意义日志
   void hasAny;
+}
+
+/**
+ * 人员管理 sales_unit_id 与单位时间轴不一致时，按人员管理当前单位纠正。
+ * 典型场景：云同步/导入只改了 personnel，未同步 personnel_unit_assignments。
+ */
+function reconcilePersonnelUnitAssignmentsWithSalesUnit(): number {
+  const people = db
+    .prepare(
+      "SELECT id, sales_unit_id, hire_date FROM personnel WHERE TRIM(sales_unit_id) != ''",
+    )
+    .all() as Array<{ id: string; sales_unit_id: string; hire_date: string }>;
+  if (people.length === 0) return 0;
+
+  const today = new Date().toISOString().slice(0, 10);
+  const selectAll = db.prepare(`
+    SELECT id, sales_unit_id, start_date, end_date
+    FROM personnel_unit_assignments
+    WHERE personnel_id = ?
+    ORDER BY start_date ASC, created_at ASC
+  `);
+  const updateAssign = db.prepare(
+    "UPDATE personnel_unit_assignments SET sales_unit_id = ? WHERE id = ?",
+  );
+  const updateEnd = db.prepare(
+    "UPDATE personnel_unit_assignments SET end_date = ? WHERE id = ?",
+  );
+  const insert = db.prepare(`
+    INSERT INTO personnel_unit_assignments (
+      id, personnel_id, sales_unit_id, start_date, end_date, remark, created_at,
+      operator, operator_id
+    ) VALUES (?, ?, ?, ?, NULL, '数据校正', datetime('now'), '系统', '')
+  `);
+
+  let fixed = 0;
+  for (const p of people) {
+    const target = String(p.sales_unit_id || "").trim();
+    if (!target) continue;
+
+    const rows = selectAll.all(p.id) as Array<{
+      id: string;
+      sales_unit_id: string;
+      start_date: string;
+      end_date: string | null;
+    }>;
+    if (rows.length === 0) continue;
+
+    const openRows = rows.filter((r) => !String(r.end_date || "").trim());
+
+    if (openRows.length > 1) {
+      for (let i = 0; i < openRows.length - 1; i++) {
+        const r = openRows[i];
+        const endDate = String(r.start_date || "").slice(0, 10) || today;
+        updateEnd.run(endDate, r.id);
+        fixed += 1;
+      }
+    }
+
+    const open = openRows.length > 0 ? openRows[openRows.length - 1] : null;
+
+    if (open && String(open.sales_unit_id) !== target) {
+      updateAssign.run(target, open.id);
+      fixed += 1;
+    } else if (!open) {
+      const last = rows[rows.length - 1];
+      const lastEnd = String(last.end_date || "").slice(0, 10);
+      const start = lastEnd && lastEnd <= today ? lastEnd : today;
+      insert.run(generateId("pua"), p.id, target, start);
+      fixed += 1;
+    } else if (rows.length === 1 && String(rows[0].sales_unit_id) !== target) {
+      updateAssign.run(target, rows[0].id);
+      fixed += 1;
+    }
+  }
+
+  if (fixed > 0) {
+    console.info(`[db] reconcilePersonnelUnitAssignments: fixed ${fixed} row(s)`);
+  }
+  return fixed;
+}
+
+/**
+ * sales_unit_name 能匹配销售单位时，纠正 sales_unit_id。
+ * 典型场景：订单同步单位名「云拆单」但 id 仍为空或挂在旧单位。
+ */
+function reconcileSalesRecordUnitIds(): number {
+  const units = db.prepare("SELECT id, name FROM sales_units").all() as Array<{
+    id: string;
+    name: string;
+  }>;
+  const nameToId = new Map<string, string>();
+  for (const u of units) {
+    const key = u.name.trim().toLowerCase();
+    if (key) nameToId.set(key, u.id);
+  }
+  if (nameToId.size === 0) return 0;
+
+  const rows = db
+    .prepare(
+      "SELECT id, sales_unit_id, sales_unit_name FROM sales_records WHERE TRIM(sales_unit_name) != ''",
+    )
+    .all() as Array<{ id: string; sales_unit_id: string; sales_unit_name: string }>;
+
+  const update = db.prepare("UPDATE sales_records SET sales_unit_id = ? WHERE id = ?");
+  let fixed = 0;
+  for (const r of rows) {
+    const matched = nameToId.get(r.sales_unit_name.trim().toLowerCase());
+    if (!matched) continue;
+    if (String(r.sales_unit_id || "") !== matched) {
+      update.run(matched, r.id);
+      fixed += 1;
+    }
+  }
+  if (fixed > 0) {
+    console.info(`[db] reconcileSalesRecordUnitIds: fixed ${fixed} row(s)`);
+  }
+  return fixed;
+}
+
+/**
+ * 无分业绩的销售记录：人员当前单位与记录 sales_unit_id 不一致时，按人员单位纠正。
+ * 避免成本管理把固定薪/提成挂到错误单位（如人事已不在海南仍出现在海南成本里）。
+ */
+function reconcileMisplacedPersonnelSalesRecords(): number {
+  const rows = db.prepare(`
+    SELECT sr.id, sr.sales_unit_id, sr.sales_unit_name, p.sales_unit_id AS person_unit_id
+    FROM sales_records sr
+    INNER JOIN personnel p ON p.id = sr.personnel_id
+    WHERE TRIM(sr.personnel_id) != ''
+      AND TRIM(p.sales_unit_id) != ''
+      AND (sr.collaborators IS NULL OR TRIM(sr.collaborators) = '')
+      AND sr.sales_unit_id != p.sales_unit_id
+  `).all() as Array<{
+    id: string;
+    sales_unit_id: string;
+    sales_unit_name: string;
+    person_unit_id: string;
+  }>;
+
+  const unitNames = db.prepare("SELECT id, name FROM sales_units").all() as Array<{
+    id: string;
+    name: string;
+  }>;
+  const unitNameMap = new Map(unitNames.map((u) => [u.id, u.name]));
+
+  const update = db.prepare("UPDATE sales_records SET sales_unit_id = ? WHERE id = ?");
+  let fixed = 0;
+  for (const r of rows) {
+    const personUnitName = (unitNameMap.get(r.person_unit_id) || "").trim().toLowerCase();
+    const recordUnitName = (r.sales_unit_name || "").trim().toLowerCase();
+    const recordUnitEmpty = !String(r.sales_unit_id || "").trim();
+    const nameMatchesPerson =
+      !recordUnitName || recordUnitName === personUnitName;
+    if (!recordUnitEmpty && !nameMatchesPerson) continue;
+
+    update.run(r.person_unit_id, r.id);
+    fixed += 1;
+  }
+  if (fixed > 0) {
+    console.info(`[db] reconcileMisplacedPersonnelSalesRecords: fixed ${fixed} row(s)`);
+  }
+  return fixed;
+}
+
+/**
+ * 销售人员字段已是「单位·姓名 50% / …」但 collaborators 为空时，补写分业绩 JSON
+ */
+function reconcileSalesCollaboratorsFromPersonText(): number {
+  const findUnitId = (name: string): string => {
+    if (!name) return "";
+    const row = db
+      .prepare("SELECT id FROM sales_units WHERE name = ? COLLATE NOCASE LIMIT 1")
+      .get(name) as { id: string } | undefined;
+    return row?.id || "";
+  };
+  const findPersonnelId = (name: string, unitId: string): string => {
+    if (!name) return "";
+    if (unitId) {
+      const inUnit = db
+        .prepare(
+          "SELECT id FROM personnel WHERE name = ? COLLATE NOCASE AND sales_unit_id = ? LIMIT 1",
+        )
+        .get(name, unitId) as { id: string } | undefined;
+      if (inUnit?.id) return inUnit.id;
+    }
+    const row = db
+      .prepare("SELECT id FROM personnel WHERE name = ? COLLATE NOCASE LIMIT 1")
+      .get(name) as { id: string } | undefined;
+    return row?.id || "";
+  };
+
+  const rows = db
+    .prepare(
+      "SELECT id, sales_person_name FROM sales_records WHERE TRIM(sales_person_name) != '' AND (collaborators IS NULL OR TRIM(collaborators) = '')",
+    )
+    .all() as Array<{ id: string; sales_person_name: string }>;
+
+  const update = db.prepare("UPDATE sales_records SET collaborators = ? WHERE id = ?");
+  let fixed = 0;
+  for (const r of rows) {
+    const json = parsePerformanceSplitText(r.sales_person_name, findUnitId, findPersonnelId);
+    if (!json) continue;
+    update.run(json, r.id);
+    fixed += 1;
+  }
+  if (fixed > 0) {
+    console.info(`[db] reconcileSalesCollaboratorsFromPersonText: fixed ${fixed} row(s)`);
+  }
+  return fixed;
+}
+
+export type UnitDataReconcileReport = {
+  assignmentFixed: number;
+  salesUnitIdFixed: number;
+  collaboratorsFixed: number;
+  misplacedSalesFixed: number;
+  totalFixed: number;
+};
+
+/** 纠正单位时间轴与销售记录上的单位 id，供启动与云同步后调用 */
+export function runUnitDataReconcile(): UnitDataReconcileReport {
+  const assignmentFixed = reconcilePersonnelUnitAssignmentsWithSalesUnit();
+  const salesUnitIdFixed = reconcileSalesRecordUnitIds();
+  const collaboratorsFixed = reconcileSalesCollaboratorsFromPersonText();
+  const misplacedSalesFixed = reconcileMisplacedPersonnelSalesRecords();
+  const totalFixed =
+    assignmentFixed + salesUnitIdFixed + collaboratorsFixed + misplacedSalesFixed;
+  return {
+    assignmentFixed,
+    salesUnitIdFixed,
+    collaboratorsFixed,
+    misplacedSalesFixed,
+    totalFixed,
+  };
 }
 
 /**
@@ -1101,6 +1342,8 @@ export function rowToPersonnelUnitAssignment(row: any) {
     endDate: row.end_date || undefined,
     remark: row.remark || "",
     createdAt: row.created_at || "",
+    operator: row.operator || undefined,
+    operatorId: row.operator_id || undefined,
   };
 }
 

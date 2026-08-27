@@ -93,6 +93,8 @@ export interface PersonnelUnitAssignment {
   endDate?: string;
   remark?: string;
   createdAt?: string;
+  operator?: string;
+  operatorId?: string;
 }
 
 /** 分销切换前快照：保证历史成交仍按原底薪/原产品提成计算 */

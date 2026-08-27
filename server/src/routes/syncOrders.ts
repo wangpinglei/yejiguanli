@@ -1,6 +1,7 @@
 import { createHash } from 'crypto'
 import { Router, Request, Response } from 'express'
 import { getDb, generateId, rowToSalesRecord } from '../db'
+import { parsePerformanceSplitText } from '../lib/parsePerformanceSplit'
 
 const router = Router()
 
@@ -187,8 +188,28 @@ function upsertSyncedOrder(order: SyncOrderInput): {
   const db = getDb()
   const externalOrderId = buildExternalOrderId(order)
   const unitId = findUnitId(db, order.salesUnitName)
-  const personnelId = findPersonnelId(db, order.salesPersonName, unitId)
-  const productId = findOrCreateProductId(db, order.productName, unitId)
+  const splitJson = parsePerformanceSplitText(
+    order.salesPersonName,
+    (name) => findUnitId(db, name),
+    (name, uId) => findPersonnelId(db, name, uId),
+  )
+  let collaboratorsJson = ''
+  let personnelId = findPersonnelId(db, order.salesPersonName, unitId)
+  let recordUnitId = unitId
+  if (splitJson) {
+    collaboratorsJson = splitJson
+    try {
+      const parsed = JSON.parse(splitJson) as {
+        shares?: Array<{ personnelId?: string; salesUnitId?: string }>
+      }
+      const first = parsed.shares?.[0]
+      if (first?.personnelId) personnelId = first.personnelId
+      if (first?.salesUnitId) recordUnitId = first.salesUnitId
+    } catch {
+      // ignore
+    }
+  }
+  const productId = findOrCreateProductId(db, order.productName, recordUnitId || unitId)
   const qty = order.quantity && order.quantity > 0 ? order.quantity : 1
   const unitPrice =
     order.unitPrice && order.unitPrice > 0
@@ -208,10 +229,11 @@ function upsertSyncedOrder(order: SyncOrderInput): {
         sales_unit_id=?, personnel_id=?, product_id=?, quantity=?, unit_price=?,
         total_amount=?, sale_date=?, remark=?,
         synced=1, customer_name=?, sales_unit_name=?, sales_person_name=?,
-        product_name=?, order_number=?, order_amount=?, order_type=?, activity_name=?
+        product_name=?, order_number=?, order_amount=?, order_type=?, activity_name=?,
+        collaborators=?
       WHERE id=?
     `).run(
-      unitId,
+      recordUnitId || unitId,
       personnelId,
       productId,
       qty,
@@ -227,6 +249,7 @@ function upsertSyncedOrder(order: SyncOrderInput): {
       order.orderAmount,
       order.orderType,
       order.activityName,
+      collaboratorsJson,
       existing.id,
     )
     return { action: 'updated', id: existing.id }
@@ -237,11 +260,11 @@ function upsertSyncedOrder(order: SyncOrderInput): {
     INSERT INTO sales_records (
       id, sales_unit_id, personnel_id, product_id, quantity, unit_price, total_amount, sale_date, remark,
       synced, external_order_id, customer_name, sales_unit_name, sales_person_name, product_name, synced_at,
-      order_number, product_module, order_amount, order_type, activity_name
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)
+      order_number, product_module, order_amount, order_type, activity_name, collaborators
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)
   `).run(
     id,
-    unitId,
+    recordUnitId || unitId,
     personnelId,
     productId,
     qty,
@@ -259,6 +282,7 @@ function upsertSyncedOrder(order: SyncOrderInput): {
     order.orderAmount,
     order.orderType,
     order.activityName,
+    collaboratorsJson,
   )
   return { action: 'added', id }
 }
