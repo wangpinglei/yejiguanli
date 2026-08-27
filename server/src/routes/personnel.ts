@@ -65,6 +65,41 @@ function insertOpenAssignment(
   );
 }
 
+function listOpenAssignments(
+  db: ReturnType<typeof getDb>,
+  personnelId: string,
+): Array<{ id: string; start_date: string; sales_unit_id: string }> {
+  return db
+    .prepare(`
+      SELECT id, start_date, sales_unit_id
+      FROM personnel_unit_assignments
+      WHERE personnel_id = ?
+        AND (end_date IS NULL OR TRIM(end_date) = '')
+      ORDER BY start_date ASC, created_at ASC
+    `)
+    .all(personnelId) as Array<{ id: string; start_date: string; sales_unit_id: string }>;
+}
+
+/** 转岗/改单位时关闭全部「至今」段，避免只关一条导致海南+云拆单同时 open */
+function closeAllOpenAssignments(
+  db: ReturnType<typeof getDb>,
+  personnelId: string,
+  endDate: string,
+): number {
+  const openRows = listOpenAssignments(db, personnelId);
+  const updateEnd = db.prepare(
+    "UPDATE personnel_unit_assignments SET end_date = ? WHERE id = ?",
+  );
+  let closed = 0;
+  for (const row of openRows) {
+    const openStart = String(row.start_date || "").slice(0, 10);
+    const end = openStart && endDate < openStart ? openStart : endDate;
+    updateEnd.run(end, row.id);
+    closed += 1;
+  }
+  return closed;
+}
+
 /**
  * 入参可显式清空：null / "" → 写 null；undefined → 保留原值
  */
@@ -678,28 +713,23 @@ router.post("/:id/transfer", requireEditPermission, (req, res) => {
     }
   }
 
-  const openRow: any = db
-    .prepare(`
-      SELECT * FROM personnel_unit_assignments
-      WHERE personnel_id = ? AND (end_date IS NULL OR TRIM(end_date) = '')
-      ORDER BY start_date DESC LIMIT 1
-    `)
-    .get(id);
+  const openRows = listOpenAssignments(db, id);
 
-  if (openRow) {
-    const openStart = String(openRow.start_date || "").slice(0, 10);
-    if (openStart && effectiveDate < openStart) {
+  if (openRows.length > 0) {
+    const latestStart = openRows
+      .map((r) => String(r.start_date || "").slice(0, 10))
+      .sort()
+      .pop();
+    if (latestStart && effectiveDate < latestStart) {
       return res.status(400).json({
-        error: `调动日不能早于当前段开始日 ${openStart}`,
+        error: `调动日不能早于当前归属段开始日 ${latestStart}`,
       });
     }
   }
 
   runInTransaction(() => {
-    if (openRow) {
-      db.prepare(`
-        UPDATE personnel_unit_assignments SET end_date = ? WHERE id = ?
-      `).run(effectiveDate, openRow.id);
+    if (openRows.length > 0) {
+      closeAllOpenAssignments(db, id, effectiveDate);
     } else {
       // 无时间轴时补旧段再关闭
       const hire = String(existing.hire_date || "").slice(0, 10) || "1970-01-01";
@@ -723,13 +753,11 @@ router.post("/:id/transfer", requireEditPermission, (req, res) => {
     db.prepare("UPDATE personnel SET sales_unit_id = ? WHERE id = ?").run(toUnitId, id);
   });
 
-  const row = db.prepare("SELECT * FROM personnel WHERE id = ?").get(id);
-  const assigns = db
-    .prepare(
-      "SELECT * FROM personnel_unit_assignments WHERE personnel_id = ? ORDER BY start_date",
-    )
-    .all(id);
-  res.json(rowToPersonnel(row, assigns));
+  runUnitDataReconcile();
+
+  const personnel = loadPersonnelWithAssignments(db, id);
+  if (!personnel) return res.status(404).json({ error: "人员不存在" });
+  res.json(personnel);
 });
 
 /**
@@ -974,19 +1002,9 @@ router.put("/:id", requireEditPermission, (req, res) => {
     // 编辑里改单位：按今天生效写入时间轴（精确日期请用「转岗」）
     if (unitChanged) {
       const today = new Date().toISOString().slice(0, 10);
-      const openRow: any = db
-        .prepare(`
-          SELECT * FROM personnel_unit_assignments
-          WHERE personnel_id = ? AND (end_date IS NULL OR TRIM(end_date) = '')
-          ORDER BY start_date DESC LIMIT 1
-        `)
-        .get(id);
-      if (openRow) {
-        const openStart = String(openRow.start_date || "").slice(0, 10);
-        const endDate = openStart && today < openStart ? openStart : today;
-        db.prepare(`
-          UPDATE personnel_unit_assignments SET end_date = ? WHERE id = ?
-        `).run(endDate, openRow.id);
+      const openRows = listOpenAssignments(db, id);
+      if (openRows.length > 0) {
+        closeAllOpenAssignments(db, id, today);
       } else {
         const hire = String(existing.hire_date || "").slice(0, 10) || "1970-01-01";
         db.prepare(`
@@ -1001,9 +1019,20 @@ router.put("/:id", requireEditPermission, (req, res) => {
           today,
         );
       }
-      insertOpenAssignment(db, id, String(nextUnitId), today, "编辑改单位", getOperator(req));
+      insertOpenAssignment(
+        db,
+        id,
+        String(nextUnitId),
+        today,
+        "编辑改单位",
+        getOperator(req),
+      );
     }
   });
+
+  if (unitChanged) {
+    runUnitDataReconcile();
+  }
 
   const row = db.prepare("SELECT * FROM personnel WHERE id = ?").get(id);
   const assigns = db

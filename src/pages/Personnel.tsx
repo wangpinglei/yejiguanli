@@ -1724,6 +1724,7 @@ export default function PersonnelPage() {
               <p className="text-sm text-muted-foreground">
                 「{transferPerson.name}」当前：{getUnitName(transferPerson.salesUnitId)}。
                 调动日前业绩与人力成本留在原部门，从调动日起归新部门。
+                若成本仍出现在旧单位，请检查下方是否有多条「至今」记录，可编辑或删除多余段。
               </p>
 
               {transferAssignmentRows.length > 0 && (
