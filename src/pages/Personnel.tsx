@@ -1774,12 +1774,17 @@ export default function PersonnelPage() {
                                     variant="ghost"
                                     size="sm"
                                     className="h-8 px-2 text-destructive hover:text-destructive"
-                                    disabled={
-                                      transferring
-                                      || savingAssignment
-                                      || transferAssignmentRows.length <= 1
-                                    }
-                                    onClick={() => void handleDeleteAssignment(row.id)}
+                                    disabled={transferring || savingAssignment}
+                                    onClick={() => {
+                                      if (transferAssignmentRows.length <= 1) {
+                                        alert(
+                                          "至少保留一条归属记录。\n"
+                                            + "若单位不对，请点「编辑」改归属单位，不必删除。",
+                                        );
+                                        return;
+                                      }
+                                      void handleDeleteAssignment(row.id);
+                                    }}
                                   >
                                     删除
                                   </Button>

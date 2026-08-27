@@ -7,6 +7,7 @@ import {
   runInTransaction,
   runUnitDataReconcile,
   getPersonnelUnitDiagnosis,
+  afterManualAssignmentChange,
 } from "../db";
 import { authMiddleware } from "../auth";
 import { getVisibleUnitIds, requireEditPermission, isOrgDept, isReadOnly, requireRole } from "../middleware";
@@ -223,7 +224,7 @@ router.put(
       );
     }
 
-    runUnitDataReconcile();
+    afterManualAssignmentChange(id);
 
     const personnel = loadPersonnelWithAssignments(db, id);
     if (!personnel) return res.status(404).json({ error: "人员不存在" });
@@ -263,7 +264,7 @@ router.delete(
     }
 
     db.prepare("DELETE FROM personnel_unit_assignments WHERE id = ?").run(assignmentId);
-    runUnitDataReconcile();
+    afterManualAssignmentChange(id);
 
     const personnel = loadPersonnelWithAssignments(db, id);
     if (!personnel) return res.status(404).json({ error: "人员不存在" });
@@ -753,7 +754,7 @@ router.post("/:id/transfer", requireEditPermission, (req, res) => {
     db.prepare("UPDATE personnel SET sales_unit_id = ? WHERE id = ?").run(toUnitId, id);
   });
 
-  runUnitDataReconcile();
+  afterManualAssignmentChange(id);
 
   const personnel = loadPersonnelWithAssignments(db, id);
   if (!personnel) return res.status(404).json({ error: "人员不存在" });
@@ -1031,7 +1032,7 @@ router.put("/:id", requireEditPermission, (req, res) => {
   });
 
   if (unitChanged) {
-    runUnitDataReconcile();
+    afterManualAssignmentChange(id);
   }
 
   const row = db.prepare("SELECT * FROM personnel WHERE id = ?").get(id);

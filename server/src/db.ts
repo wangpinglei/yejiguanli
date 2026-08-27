@@ -818,10 +818,17 @@ function reconcilePersonnelUnitAssignmentsWithSalesUnit(): number {
       fixed += 1;
     } else if (!open) {
       const last = rows[rows.length - 1];
-      const lastEnd = String(last.end_date || "").slice(0, 10);
-      const start = lastEnd && lastEnd <= today ? lastEnd : today;
-      insert.run(generateId("pua"), p.id, target, start);
-      fixed += 1;
+      if (String(last.sales_unit_id) === target) {
+        db.prepare(
+          "UPDATE personnel_unit_assignments SET end_date = NULL WHERE id = ?",
+        ).run(last.id);
+        fixed += 1;
+      } else {
+        const lastEnd = String(last.end_date || "").slice(0, 10);
+        const start = lastEnd && lastEnd <= today ? lastEnd : today;
+        insert.run(generateId("pua"), p.id, target, start);
+        fixed += 1;
+      }
     } else if (rows.length === 1 && String(rows[0].sales_unit_id) !== target) {
       deleteAssign.run(rows[0].id);
       const start =
@@ -877,6 +884,113 @@ function reconcileOverlappingUnitAssignments(): number {
     console.info(`[db] reconcileOverlappingUnitAssignments: fixed ${fixed} row(s)`);
   }
   return fixed;
+}
+
+/** 仅截断某人的重叠归属段（手动删/改后调用，不批量补录） */
+function fixAssignmentOverlapsForPerson(personnelId: string): number {
+  const selectAll = db.prepare(`
+    SELECT id, start_date, end_date
+    FROM personnel_unit_assignments
+    WHERE personnel_id = ?
+    ORDER BY start_date ASC, created_at ASC
+  `);
+  const updateEnd = db.prepare(
+    "UPDATE personnel_unit_assignments SET end_date = ? WHERE id = ?",
+  );
+  const rows = selectAll.all(personnelId) as Array<{
+    id: string;
+    start_date: string;
+    end_date: string | null;
+  }>;
+  let fixed = 0;
+  for (let i = 0; i < rows.length - 1; i++) {
+    const cur = rows[i];
+    const next = rows[i + 1];
+    const nextStart = String(next.start_date || "").slice(0, 10);
+    if (!nextStart) continue;
+    const curEnd = String(cur.end_date || "").trim();
+    if (!curEnd || curEnd > nextStart) {
+      updateEnd.run(nextStart, cur.id);
+      cur.end_date = nextStart;
+      fixed += 1;
+    }
+  }
+  return fixed;
+}
+
+/**
+ * 手动删除/编辑调岗记录后的收尾：只整理该人时间轴，不跑全库清洗、避免删了又补回来。
+ */
+export function afterManualAssignmentChange(personnelId: string): void {
+  const person = db
+    .prepare("SELECT sales_unit_id, hire_date FROM personnel WHERE id = ?")
+    .get(personnelId) as { sales_unit_id: string; hire_date: string } | undefined;
+  if (!person) return;
+
+  const target = String(person.sales_unit_id || "").trim();
+  fixAssignmentOverlapsForPerson(personnelId);
+
+  const selectAll = db.prepare(`
+    SELECT id, sales_unit_id, start_date, end_date
+    FROM personnel_unit_assignments
+    WHERE personnel_id = ?
+    ORDER BY start_date ASC, created_at ASC
+  `);
+  const insert = db.prepare(`
+    INSERT INTO personnel_unit_assignments (
+      id, personnel_id, sales_unit_id, start_date, end_date, remark, created_at,
+      operator, operator_id
+    ) VALUES (?, ?, ?, ?, NULL, '手动调整后补全', datetime('now'), '系统', '')
+  `);
+  const clearEnd = db.prepare(
+    "UPDATE personnel_unit_assignments SET end_date = NULL WHERE id = ?",
+  );
+
+  let rows = selectAll.all(personnelId) as Array<{
+    id: string;
+    sales_unit_id: string;
+    start_date: string;
+    end_date: string | null;
+  }>;
+
+  if (rows.length === 0 && target) {
+    const start =
+      String(person.hire_date || "").trim().slice(0, 10) || "1970-01-01";
+    insert.run(generateId("pua"), personnelId, target, start);
+    return;
+  }
+
+  const openRows = rows.filter((r) => !String(r.end_date || "").trim());
+  if (openRows.length > 1 && target) {
+    const keep =
+      openRows.find((r) => String(r.sales_unit_id) === target)
+      || openRows[openRows.length - 1];
+    const updateEnd = db.prepare(
+      "UPDATE personnel_unit_assignments SET end_date = ? WHERE id = ?",
+    );
+    const today = new Date().toISOString().slice(0, 10);
+    const endDate =
+      String(keep.start_date || "").slice(0, 10) || today;
+    for (const r of openRows) {
+      if (r.id !== keep.id) {
+        updateEnd.run(endDate, r.id);
+      }
+    }
+    rows = selectAll.all(personnelId) as typeof rows;
+  }
+
+  const openAfter = rows.filter((r) => !String(r.end_date || "").trim());
+  if (openAfter.length === 0 && target && rows.length > 0) {
+    const last = rows[rows.length - 1];
+    if (String(last.sales_unit_id) === target) {
+      clearEnd.run(last.id);
+    } else {
+      const today = new Date().toISOString().slice(0, 10);
+      const lastEnd = String(last.end_date || "").slice(0, 10);
+      const start = lastEnd && lastEnd <= today ? lastEnd : today;
+      insert.run(generateId("pua"), personnelId, target, start);
+    }
+  }
 }
 
 function isAssignmentContainedIn(
