@@ -168,6 +168,40 @@ export const personnelApi = {
       totalFixed: number;
       remainingIssues: string[];
     }>("/personnel/reconcile-unit-data", {}),
+  unitDiagnosis: (params?: {
+    name?: string;
+    yearMonth?: string;
+    onlyIssues?: boolean;
+  }) => {
+    const q = new URLSearchParams();
+    if (params?.name) q.set("name", params.name);
+    if (params?.yearMonth) q.set("yearMonth", params.yearMonth);
+    if (params?.onlyIssues === false) q.set("onlyIssues", "0");
+    const suffix = q.toString() ? `?${q.toString()}` : "";
+    return api.get<{
+      yearMonth: string;
+      items: Array<{
+        personnelId: string;
+        name: string;
+        hrUnitId: string;
+        hrUnitName: string;
+        assignments: Array<{
+          unitId: string;
+          unitName: string;
+          startDate: string;
+          endDate: string | null;
+          isOpen: boolean;
+        }>;
+        issues: string[];
+        belongsUnitsInMonth: string[];
+        salesSummaryInMonth: Array<{
+          unitName: string;
+          wholeOrder: number;
+          splitShare: number;
+        }>;
+      }>;
+    }>(`/personnel/unit-diagnosis${suffix}`);
+  },
 };
 
 export const hrProfilesApi = {

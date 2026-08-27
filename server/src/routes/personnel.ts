@@ -6,6 +6,7 @@ import {
   generateId,
   runInTransaction,
   runUnitDataReconcile,
+  getPersonnelUnitDiagnosis,
 } from "../db";
 import { authMiddleware } from "../auth";
 import { getVisibleUnitIds, requireEditPermission, isOrgDept, isReadOnly, requireRole } from "../middleware";
@@ -128,6 +129,22 @@ router.post(
     });
   },
 );
+
+/**
+ * GET /api/personnel/unit-diagnosis?name=李燚&yearMonth=2026-08&onlyIssues=1
+ * 查看人员人事单位、归属时间轴、当月成交挂账（排查成本错挂）
+ */
+router.get("/unit-diagnosis", requireRole("superadmin"), (req, res) => {
+  const name = String(req.query.name || "").trim();
+  const yearMonth = String(req.query.yearMonth || "").trim();
+  const onlyIssues = String(req.query.onlyIssues ?? "1") !== "0";
+  const result = getPersonnelUnitDiagnosis({
+    name: name || undefined,
+    yearMonth: yearMonth || undefined,
+    onlyIssues,
+  });
+  res.json(result);
+});
 
 // POST /api/personnel - 创建人员
 router.post("/", requireEditPermission, (req, res) => {

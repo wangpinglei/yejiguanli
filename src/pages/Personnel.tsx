@@ -21,6 +21,7 @@ import {
   Merge,
   ArrowRightLeft,
   RefreshCw,
+  Stethoscope,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -156,6 +157,14 @@ export default function PersonnelPage() {
   const [transferRemark, setTransferRemark] = useState("");
   const [transferring, setTransferring] = useState(false);
   const [reconcilingUnits, setReconcilingUnits] = useState(false);
+  const [diagnosisOpen, setDiagnosisOpen] = useState(false);
+  const [diagnosisLoading, setDiagnosisLoading] = useState(false);
+  const [diagnosisName, setDiagnosisName] = useState("");
+  const [diagnosisMonth, setDiagnosisMonth] = useState("2026-08");
+  const [diagnosisOnlyIssues, setDiagnosisOnlyIssues] = useState(true);
+  const [diagnosisResult, setDiagnosisResult] = useState<Awaited<
+    ReturnType<typeof personnelApi.unitDiagnosis>
+  > | null>(null);
   const [commissionPerson, setCommissionPerson] = useState<Personnel | null>(null);
   const [salaryDetailPerson, setSalaryDetailPerson] = useState<Personnel | null>(null);
   const [salaryDetailMonth, setSalaryDetailMonth] = useState(new Date().toISOString().slice(0, 7));
@@ -571,6 +580,33 @@ export default function PersonnelPage() {
     }
   }
 
+  async function loadUnitDiagnosis(
+    name = diagnosisName,
+    month = diagnosisMonth,
+    onlyIssues = diagnosisOnlyIssues,
+  ) {
+    setDiagnosisLoading(true);
+    try {
+      const result = await personnelApi.unitDiagnosis({
+        name: name.trim() || undefined,
+        yearMonth: month,
+        onlyIssues,
+      });
+      setDiagnosisResult(result);
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "加载诊断失败");
+    } finally {
+      setDiagnosisLoading(false);
+    }
+  }
+
+  function openUnitDiagnosis(name?: string) {
+    const nextName = name ?? diagnosisName;
+    if (name !== undefined) setDiagnosisName(name);
+    setDiagnosisOpen(true);
+    void loadUnitDiagnosis(nextName, diagnosisMonth, diagnosisOnlyIssues);
+  }
+
   async function handleMerge() {
     if (!mergeKeepId || !mergeRemoveId) {
       alert("请选择保留人员与被合并人员");
@@ -668,14 +704,24 @@ export default function PersonnelPage() {
           showActions && !isReadOnly && (
             <div className="flex flex-wrap gap-2">
               {isSuperadmin && (
-                <Button
-                  variant="outline"
-                  disabled={reconcilingUnits}
-                  onClick={() => void handleReconcileUnitData()}
-                >
-                  <RefreshCw className={`mr-2 h-4 w-4 ${reconcilingUnits ? "animate-spin" : ""}`} />
-                  {reconcilingUnits ? "校正中…" : "校正单位归属"}
-                </Button>
+                <>
+                  <Button
+                    variant="outline"
+                    disabled={diagnosisLoading}
+                    onClick={() => openUnitDiagnosis()}
+                  >
+                    <Stethoscope className={`mr-2 h-4 w-4 ${diagnosisLoading ? "animate-pulse" : ""}`} />
+                    查看归属诊断
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={reconcilingUnits}
+                    onClick={() => void handleReconcileUnitData()}
+                  >
+                    <RefreshCw className={`mr-2 h-4 w-4 ${reconcilingUnits ? "animate-spin" : ""}`} />
+                    {reconcilingUnits ? "校正中…" : "校正单位归属"}
+                  </Button>
+                </>
               )}
               <Button variant="outline" onClick={() => openMergeDialog()}>
                 <Merge className="mr-2 h-4 w-4" />
@@ -1816,6 +1862,127 @@ export default function PersonnelPage() {
               {merging ? "合并中…" : "确认合并"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={diagnosisOpen} onOpenChange={setDiagnosisOpen}>
+        <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>单位归属诊断</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            对照「人事所属单位」「归属时间轴」「当月成交挂账」，排查成本为何出现在某单位（如海南）。
+          </p>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="diagnosisName">姓名（可选）</Label>
+              <Input
+                id="diagnosisName"
+                placeholder="如：李燚、星雨"
+                value={diagnosisName}
+                onChange={(e) => setDiagnosisName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="diagnosisMonth">月份</Label>
+              <Input
+                id="diagnosisMonth"
+                type="month"
+                value={diagnosisMonth}
+                onChange={(e) => setDiagnosisMonth(e.target.value)}
+              />
+            </div>
+            <label className="flex items-center gap-2 pb-2 text-sm">
+              <input
+                type="checkbox"
+                checked={diagnosisOnlyIssues}
+                onChange={(e) => setDiagnosisOnlyIssues(e.target.checked)}
+              />
+              仅显示有异常
+            </label>
+            <Button
+              disabled={diagnosisLoading}
+              onClick={() => void loadUnitDiagnosis()}
+            >
+              {diagnosisLoading ? "查询中…" : "查询"}
+            </Button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {["李燚", "星雨", "卞星雨"].map((n) => (
+              <Button
+                key={n}
+                variant="secondary"
+                size="sm"
+                onClick={() => openUnitDiagnosis(n)}
+              >
+                {n}
+              </Button>
+            ))}
+          </div>
+          {diagnosisResult && (
+            <div className="space-y-4 pt-2">
+              <p className="text-sm font-medium">
+                {diagnosisResult.yearMonth} · 共 {diagnosisResult.items.length} 人
+              </p>
+              {diagnosisResult.items.length === 0 ? (
+                <p className="text-sm text-muted-foreground">未找到符合条件的人员。</p>
+              ) : (
+                diagnosisResult.items.map((item) => (
+                  <Card key={item.personnelId}>
+                    <CardContent className="space-y-3 pt-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold">{item.name}</span>
+                        <Badge variant="outline">人事：{item.hrUnitName}</Badge>
+                        {item.belongsUnitsInMonth.length > 0 && (
+                          <Badge variant="secondary">
+                            当月归属：{item.belongsUnitsInMonth.join("、")}
+                          </Badge>
+                        )}
+                      </div>
+                      {item.issues.length > 0 && (
+                        <ul className="list-disc space-y-1 pl-5 text-sm text-amber-800">
+                          {item.issues.map((issue) => (
+                            <li key={issue}>{issue}</li>
+                          ))}
+                        </ul>
+                      )}
+                      <div>
+                        <p className="mb-1 text-xs font-medium text-muted-foreground">归属时间轴</p>
+                        {item.assignments.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">无记录（按人事当前单位）</p>
+                        ) : (
+                          <ul className="space-y-1 text-sm">
+                            {item.assignments.map((a, idx) => (
+                              <li key={`${a.unitId}-${a.startDate}-${idx}`}>
+                                {a.unitName} · {a.startDate}
+                                {a.endDate ? ` → ${a.endDate}` : " → 至今"}
+                                {a.isOpen ? "（当前段）" : ""}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                      <div>
+                        <p className="mb-1 text-xs font-medium text-muted-foreground">当月成交挂账</p>
+                        {item.salesSummaryInMonth.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">无成交</p>
+                        ) : (
+                          <ul className="space-y-1 text-sm">
+                            {item.salesSummaryInMonth.map((s) => (
+                              <li key={s.unitName}>
+                                {s.unitName}：整单 {s.wholeOrder} 笔
+                                {s.splitShare > 0 ? `，分业绩 ${s.splitShare} 笔` : ""}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))
+              )}
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

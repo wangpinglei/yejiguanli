@@ -1087,6 +1087,284 @@ export function runUnitDataReconcile(): UnitDataReconcileReport {
   };
 }
 
+export type PersonUnitDiagnosisItem = {
+  personnelId: string;
+  name: string;
+  hrUnitId: string;
+  hrUnitName: string;
+  assignments: Array<{
+    unitId: string;
+    unitName: string;
+    startDate: string;
+    endDate: string | null;
+    isOpen: boolean;
+  }>;
+  issues: string[];
+  belongsUnitsInMonth: string[];
+  salesSummaryInMonth: Array<{
+    unitName: string;
+    wholeOrder: number;
+    splitShare: number;
+  }>;
+};
+
+function eachDateInMonthForDiagnosis(yearMonth: string): string[] {
+  const [y, m] = yearMonth.split("-").map(Number);
+  if (!y || !m) return [];
+  const last = new Date(y, m, 0).getDate();
+  const out: string[] = [];
+  for (let day = 1; day <= last; day += 1) {
+    out.push(`${yearMonth}-${String(day).padStart(2, "0")}`);
+  }
+  return out;
+}
+
+function isAssignmentActiveOnDate(
+  startDate: string,
+  endDate: string | null | undefined,
+  day: string,
+): boolean {
+  const d = String(day).slice(0, 10);
+  const start = String(startDate || "").slice(0, 10);
+  if (!start || d < start) return false;
+  const end = String(endDate || "").trim().slice(0, 10);
+  if (end && d >= end) return false;
+  return true;
+}
+
+function resolveUnitIdAtForDiagnosis(
+  hrUnitId: string,
+  assignments: Array<{
+    sales_unit_id: string;
+    start_date: string;
+    end_date: string | null;
+  }>,
+  asOfDate: string,
+): string {
+  const d = String(asOfDate).slice(0, 10);
+  if (assignments.length > 0) {
+    const active = assignments.filter((a) =>
+      isAssignmentActiveOnDate(a.start_date, a.end_date, d),
+    );
+    if (active.length > 0) {
+      active.sort((a, b) =>
+        String(a.start_date || "").localeCompare(String(b.start_date || "")),
+      );
+      const hit = active[active.length - 1];
+      if (hit?.sales_unit_id) return hit.sales_unit_id;
+    }
+  }
+  return hrUnitId || "";
+}
+
+function collectPersonAssignmentIssues(
+  name: string,
+  hrUnitId: string,
+  rows: Array<{
+    sales_unit_id: string;
+    start_date: string;
+    end_date: string | null;
+  }>,
+  unitNames: Map<string, string>,
+): string[] {
+  const issues: string[] = [];
+  if (rows.length === 0) return issues;
+
+  const openCount = rows.filter((r) => !String(r.end_date || "").trim()).length;
+  if (openCount > 1) {
+    issues.push(`仍有 ${openCount} 段未结束的归属`);
+  }
+
+  for (let i = 0; i < rows.length - 1; i++) {
+    const cur = rows[i];
+    const next = rows[i + 1];
+    const nextStart = String(next.start_date || "").slice(0, 10);
+    const curEnd = String(cur.end_date || "").trim();
+    if (nextStart && (!curEnd || curEnd > nextStart)) {
+      const a = unitNames.get(cur.sales_unit_id) || cur.sales_unit_id;
+      const b = unitNames.get(next.sales_unit_id) || next.sales_unit_id;
+      issues.push(`${a} 与 ${b} 时间段重叠`);
+      break;
+    }
+  }
+
+  const open = rows.filter((r) => !String(r.end_date || "").trim()).pop();
+  if (open && String(open.sales_unit_id) !== String(hrUnitId)) {
+    const curName = unitNames.get(open.sales_unit_id) || open.sales_unit_id;
+    const targetName = unitNames.get(hrUnitId) || hrUnitId;
+    issues.push(`当前 open 段在「${curName}」，人事显示「${targetName}」`);
+  }
+
+  return issues;
+}
+
+/** 查看人员单位归属与销售挂账（成本错挂排查） */
+export function getPersonnelUnitDiagnosis(options?: {
+  name?: string;
+  yearMonth?: string;
+  onlyIssues?: boolean;
+}): { yearMonth: string; items: PersonUnitDiagnosisItem[] } {
+  const yearMonth =
+    String(options?.yearMonth || new Date().toISOString().slice(0, 7)).slice(0, 7);
+  const nameFilter = String(options?.name || "").trim();
+  const onlyIssues = options?.onlyIssues !== false;
+
+  const unitNames = new Map(
+    (
+      db.prepare("SELECT id, name FROM sales_units").all() as Array<{
+        id: string;
+        name: string;
+      }>
+    ).map((u) => [u.id, u.name]),
+  );
+
+  let people = db
+    .prepare(
+      "SELECT id, name, sales_unit_id FROM personnel ORDER BY name",
+    )
+    .all() as Array<{ id: string; name: string; sales_unit_id: string }>;
+
+  if (nameFilter) {
+    const key = nameFilter.toLowerCase();
+    people = people.filter((p) => p.name.toLowerCase().includes(key));
+  }
+
+  const selectAssign = db.prepare(`
+    SELECT sales_unit_id, start_date, end_date
+    FROM personnel_unit_assignments
+    WHERE personnel_id = ?
+    ORDER BY start_date ASC, created_at ASC
+  `);
+  const selectSales = db.prepare(`
+    SELECT id, sales_unit_id, sales_unit_name, collaborators, personnel_id
+    FROM sales_records
+    WHERE strftime('%Y-%m', sale_date) = ?
+      AND (
+        personnel_id = ?
+        OR (collaborators IS NOT NULL AND TRIM(collaborators) != '' AND collaborators LIKE ?)
+      )
+  `);
+
+  const days = eachDateInMonthForDiagnosis(yearMonth);
+  const items: PersonUnitDiagnosisItem[] = [];
+
+  for (const p of people) {
+    const assignRows = selectAssign.all(p.id) as Array<{
+      sales_unit_id: string;
+      start_date: string;
+      end_date: string | null;
+    }>;
+    const issues = collectPersonAssignmentIssues(
+      p.name,
+      p.sales_unit_id,
+      assignRows,
+      unitNames,
+    );
+
+    const belongsSet = new Set<string>();
+    if (assignRows.length === 0) {
+      const n = unitNames.get(p.sales_unit_id);
+      if (n) belongsSet.add(n);
+    } else {
+      for (const d of days) {
+        const uid = resolveUnitIdAtForDiagnosis(
+          p.sales_unit_id,
+          assignRows,
+          d,
+        );
+        const n = unitNames.get(uid);
+        if (n) belongsSet.add(n);
+      }
+    }
+
+    const salesRows = selectSales.all(
+      yearMonth,
+      p.id,
+      `%"personnelId":"${p.id}"%`,
+    ) as Array<{
+      id: string;
+      sales_unit_id: string;
+      sales_unit_name: string;
+      collaborators: string | null;
+      personnel_id: string;
+    }>;
+
+    const salesMap = new Map<string, { wholeOrder: number; splitShare: number }>();
+    for (const sr of salesRows) {
+      let splitHandled = false;
+      if (sr.collaborators && String(sr.collaborators).trim()) {
+        try {
+          const parsed = JSON.parse(sr.collaborators) as Array<{
+            personnelId?: string;
+            salesUnitId?: string;
+          }>;
+          for (const c of parsed) {
+            if (String(c.personnelId || "") !== p.id) continue;
+            splitHandled = true;
+            const uid = String(c.salesUnitId || sr.sales_unit_id || "");
+            const un = unitNames.get(uid) || sr.sales_unit_name || uid || "未知单位";
+            const cur = salesMap.get(un) || { wholeOrder: 0, splitShare: 0 };
+            cur.splitShare += 1;
+            salesMap.set(un, cur);
+          }
+        } catch {
+          // ignore bad json
+        }
+      }
+      if (!splitHandled && String(sr.personnel_id || "") === p.id) {
+        const uid = String(sr.sales_unit_id || "");
+        const un = unitNames.get(uid) || sr.sales_unit_name || uid || "未知单位";
+        const cur = salesMap.get(un) || { wholeOrder: 0, splitShare: 0 };
+        cur.wholeOrder += 1;
+        salesMap.set(un, cur);
+      }
+    }
+
+    const belongsUnitsInMonth = [...belongsSet];
+    const salesSummaryInMonth = [...salesMap.entries()].map(([unitName, v]) => ({
+      unitName,
+      wholeOrder: v.wholeOrder,
+      splitShare: v.splitShare,
+    }));
+
+    if (belongsUnitsInMonth.includes("海南运营中心")
+      || salesSummaryInMonth.some((s) => s.unitName.includes("海南"))) {
+      if (!issues.some((i) => i.includes("海南"))) {
+        issues.push("当月仍与海南运营中心有关联（归属或成交）");
+      }
+    }
+
+    if (onlyIssues && issues.length === 0 && salesSummaryInMonth.length === 0) {
+      continue;
+    }
+    if (onlyIssues && issues.length === 0) {
+      const hrName = unitNames.get(p.sales_unit_id) || "";
+      const onlyHrBelongs = belongsUnitsInMonth.length === 1
+        && belongsUnitsInMonth[0] === hrName;
+      if (onlyHrBelongs) continue;
+    }
+
+    items.push({
+      personnelId: p.id,
+      name: p.name,
+      hrUnitId: p.sales_unit_id,
+      hrUnitName: unitNames.get(p.sales_unit_id) || p.sales_unit_id || "—",
+      assignments: assignRows.map((r) => ({
+        unitId: r.sales_unit_id,
+        unitName: unitNames.get(r.sales_unit_id) || r.sales_unit_id,
+        startDate: String(r.start_date || "").slice(0, 10),
+        endDate: r.end_date ? String(r.end_date).slice(0, 10) : null,
+        isOpen: !String(r.end_date || "").trim(),
+      })),
+      issues,
+      belongsUnitsInMonth,
+      salesSummaryInMonth,
+    });
+  }
+
+  return { yearMonth, items };
+}
+
 /**
  * 将 hr_profiles.personnel_id 改为可空，并补齐档案侧姓名等镜像字段，
  * 以便导入时匹配不到人员管理仍可只建人事档。
