@@ -157,14 +157,16 @@ export const personnelApi = {
     data: { salesUnitId: string; effectiveDate: string; remark?: string },
   ) =>
     api.post<import("@/types").Personnel>(`/personnel/${id}/transfer`, data),
+  deleteAssignment: (personnelId: string, assignmentId: string) =>
+    api.delete<import("@/types").Personnel>(
+      `/personnel/${personnelId}/assignments/${assignmentId}`,
+    ),
   reconcileUnitData: () =>
     api.post<{
       message: string;
       overlapFixed: number;
+      assignmentsDeleted: number;
       assignmentFixed: number;
-      salesUnitIdFixed: number;
-      collaboratorsFixed: number;
-      misplacedSalesFixed: number;
       totalFixed: number;
       remainingIssues: string[];
     }>("/personnel/reconcile-unit-data", {}),

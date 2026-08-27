@@ -111,8 +111,51 @@ router.get("/", (req, res) => {
 });
 
 /**
+ * DELETE /api/personnel/:id/assignments/:assignmentId
+ * 删除单条调岗/归属记录（至少保留一条）
+ */
+router.delete(
+  "/:id/assignments/:assignmentId",
+  requireRole("superadmin"),
+  (req, res) => {
+    const { id, assignmentId } = req.params;
+    const db = getDb();
+    const existing: any = db.prepare("SELECT * FROM personnel WHERE id = ?").get(id);
+    if (!existing) return res.status(404).json({ error: "人员不存在" });
+
+    const row: any = db
+      .prepare(
+        "SELECT * FROM personnel_unit_assignments WHERE id = ? AND personnel_id = ?",
+      )
+      .get(assignmentId, id);
+    if (!row) return res.status(404).json({ error: "归属记录不存在" });
+
+    const countRow = db
+      .prepare(
+        "SELECT COUNT(*) AS c FROM personnel_unit_assignments WHERE personnel_id = ?",
+      )
+      .get(id) as { c: number };
+    if (Number(countRow?.c || 0) <= 1) {
+      return res.status(400).json({
+        error: "至少保留一条归属记录；若单位不对，请转岗或清洗调岗记录",
+      });
+    }
+
+    db.prepare("DELETE FROM personnel_unit_assignments WHERE id = ?").run(assignmentId);
+    runUnitDataReconcile();
+
+    const assigns = db
+      .prepare(
+        "SELECT * FROM personnel_unit_assignments WHERE personnel_id = ? ORDER BY start_date",
+      )
+      .all(id);
+    res.json(rowToPersonnel(existing, assigns));
+  },
+);
+
+/**
  * POST /api/personnel/reconcile-unit-data
- * 校正人员单位时间轴与销售记录单位，修复成本管理错挂单位
+ * 清洗调岗/归属时间轴（删除错误段、截断重叠、补全与人事一致的当前段）
  */
 router.post(
   "/reconcile-unit-data",
@@ -121,10 +164,10 @@ router.post(
     const report = runUnitDataReconcile();
     res.json({
       message: report.totalFixed > 0
-        ? `已校正 ${report.totalFixed} 条数据`
+        ? `已清洗 ${report.totalFixed} 条调岗/归属记录`
         : report.remainingIssues.length > 0
-          ? "未发现可自动校正项，但仍有归属异常，请查看 remainingIssues"
-          : "未发现需要校正的数据",
+          ? "未发现可自动清洗项，但仍有归属异常，请查看 remainingIssues"
+          : "调岗记录正常，无需清洗",
       ...report,
     });
   },

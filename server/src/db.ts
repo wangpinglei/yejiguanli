@@ -566,6 +566,7 @@ function initSchema() {
   // 人员单位归属时间轴：存量补一段当前单位
   ensurePersonnelUnitAssignments();
   runUnitDataReconcile();
+  runSalesDataReconcile();
 
   // 已废弃「单位整体业绩目标」（personnel_id 为空），仅保留个人目标
   db.prepare("DELETE FROM performance_targets WHERE personnel_id IS NULL OR TRIM(personnel_id) = ''").run();
@@ -773,11 +774,11 @@ function reconcilePersonnelUnitAssignmentsWithSalesUnit(): number {
     WHERE personnel_id = ?
     ORDER BY start_date ASC, created_at ASC
   `);
-  const updateAssign = db.prepare(
-    "UPDATE personnel_unit_assignments SET sales_unit_id = ? WHERE id = ?",
-  );
   const updateEnd = db.prepare(
     "UPDATE personnel_unit_assignments SET end_date = ? WHERE id = ?",
+  );
+  const deleteAssign = db.prepare(
+    "DELETE FROM personnel_unit_assignments WHERE id = ?",
   );
   const insert = db.prepare(`
     INSERT INTO personnel_unit_assignments (
@@ -813,7 +814,7 @@ function reconcilePersonnelUnitAssignmentsWithSalesUnit(): number {
     const open = openRows.length > 0 ? openRows[openRows.length - 1] : null;
 
     if (open && String(open.sales_unit_id) !== target) {
-      updateAssign.run(target, open.id);
+      deleteAssign.run(open.id);
       fixed += 1;
     } else if (!open) {
       const last = rows[rows.length - 1];
@@ -822,7 +823,10 @@ function reconcilePersonnelUnitAssignmentsWithSalesUnit(): number {
       insert.run(generateId("pua"), p.id, target, start);
       fixed += 1;
     } else if (rows.length === 1 && String(rows[0].sales_unit_id) !== target) {
-      updateAssign.run(target, rows[0].id);
+      deleteAssign.run(rows[0].id);
+      const start =
+        (p.hire_date || "").trim().slice(0, 10) || "1970-01-01";
+      insert.run(generateId("pua"), p.id, target, start);
       fixed += 1;
     }
   }
@@ -873,6 +877,102 @@ function reconcileOverlappingUnitAssignments(): number {
     console.info(`[db] reconcileOverlappingUnitAssignments: fixed ${fixed} row(s)`);
   }
   return fixed;
+}
+
+function isAssignmentContainedIn(
+  inner: { start_date: string; end_date: string | null },
+  outer: { start_date: string; end_date: string | null },
+): boolean {
+  const iStart = String(inner.start_date || "").slice(0, 10);
+  const iEnd = String(inner.end_date || "").trim().slice(0, 10) || "9999-12-31";
+  const oStart = String(outer.start_date || "").slice(0, 10);
+  const oEnd = String(outer.end_date || "").trim().slice(0, 10) || "9999-12-31";
+  return iStart >= oStart && iEnd <= oEnd;
+}
+
+/**
+ * 删除错误或残留的调岗/归属记录（不改销售记录）：
+ * - 未结束且单位与人事不一致的段
+ * - 多段「至今」时除保留段外的重复 open
+ * - 被另一段完全包含的重复段
+ */
+function deleteStaleWrongUnitAssignments(): number {
+  const people = db
+    .prepare(
+      "SELECT id, sales_unit_id FROM personnel WHERE TRIM(sales_unit_id) != ''",
+    )
+    .all() as Array<{ id: string; sales_unit_id: string }>;
+  const selectAll = db.prepare(`
+    SELECT id, sales_unit_id, start_date, end_date
+    FROM personnel_unit_assignments
+    WHERE personnel_id = ?
+    ORDER BY start_date ASC, created_at ASC
+  `);
+  const deleteRow = db.prepare(
+    "DELETE FROM personnel_unit_assignments WHERE id = ?",
+  );
+
+  let deleted = 0;
+  for (const p of people) {
+    const target = String(p.sales_unit_id || "").trim();
+    if (!target) continue;
+
+    let rows = selectAll.all(p.id) as Array<{
+      id: string;
+      sales_unit_id: string;
+      start_date: string;
+      end_date: string | null;
+    }>;
+    const toDelete = new Set<string>();
+
+    for (const r of rows) {
+      if (
+        !String(r.end_date || "").trim()
+        && String(r.sales_unit_id) !== target
+      ) {
+        toDelete.add(r.id);
+      }
+    }
+
+    rows = rows.filter((r) => !toDelete.has(r.id));
+
+    const openRows = rows.filter((r) => !String(r.end_date || "").trim());
+    if (openRows.length > 1) {
+      const keep =
+        openRows.find((r) => String(r.sales_unit_id) === target)
+        || openRows[openRows.length - 1];
+      for (const r of openRows) {
+        if (r.id !== keep.id) toDelete.add(r.id);
+      }
+    }
+
+    rows = rows.filter((r) => !toDelete.has(r.id));
+
+    for (let i = 0; i < rows.length; i++) {
+      for (let j = 0; j < rows.length; j++) {
+        if (i === j || toDelete.has(rows[i].id)) continue;
+        const inner = rows[i];
+        const outer = rows[j];
+        if (
+          inner.id !== outer.id
+          && isAssignmentContainedIn(inner, outer)
+          && inner.sales_unit_id !== target
+        ) {
+          toDelete.add(inner.id);
+        }
+      }
+    }
+
+    for (const id of toDelete) {
+      deleteRow.run(id);
+      deleted += 1;
+    }
+  }
+
+  if (deleted > 0) {
+    console.info(`[db] deleteStaleWrongUnitAssignments: deleted ${deleted} row(s)`);
+  }
+  return deleted;
 }
 
 function detectRemainingUnitAssignmentIssues(): string[] {
@@ -1054,37 +1154,33 @@ function reconcileSalesCollaboratorsFromPersonText(): number {
 
 export type UnitDataReconcileReport = {
   overlapFixed: number;
+  assignmentsDeleted: number;
   assignmentFixed: number;
-  salesUnitIdFixed: number;
-  collaboratorsFixed: number;
-  misplacedSalesFixed: number;
   totalFixed: number;
   remainingIssues: string[];
 };
 
-/** 纠正单位时间轴与销售记录上的单位 id，供启动与云同步后调用 */
+/** 清洗调岗/归属时间轴（仅 personnel_unit_assignments，不动销售记录） */
 export function runUnitDataReconcile(): UnitDataReconcileReport {
   const overlapFixed = reconcileOverlappingUnitAssignments();
+  const assignmentsDeleted = deleteStaleWrongUnitAssignments();
   const assignmentFixed = reconcilePersonnelUnitAssignmentsWithSalesUnit();
-  const salesUnitIdFixed = reconcileSalesRecordUnitIds();
-  const collaboratorsFixed = reconcileSalesCollaboratorsFromPersonText();
-  const misplacedSalesFixed = reconcileMisplacedPersonnelSalesRecords();
-  const totalFixed =
-    overlapFixed
-    + assignmentFixed
-    + salesUnitIdFixed
-    + collaboratorsFixed
-    + misplacedSalesFixed;
+  const totalFixed = overlapFixed + assignmentsDeleted + assignmentFixed;
   const remainingIssues = detectRemainingUnitAssignmentIssues();
   return {
     overlapFixed,
+    assignmentsDeleted,
     assignmentFixed,
-    salesUnitIdFixed,
-    collaboratorsFixed,
-    misplacedSalesFixed,
     totalFixed,
     remainingIssues,
   };
+}
+
+/** 销售记录侧补全（启动/同步时后台执行，与调岗清洗分离） */
+export function runSalesDataReconcile(): number {
+  const salesUnitIdFixed = reconcileSalesRecordUnitIds();
+  const collaboratorsFixed = reconcileSalesCollaboratorsFromPersonText();
+  return salesUnitIdFixed + collaboratorsFixed;
 }
 
 export type PersonUnitDiagnosisItem = {

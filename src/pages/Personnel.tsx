@@ -552,8 +552,11 @@ export default function PersonnelPage() {
   async function handleReconcileUnitData() {
     if (
       !window.confirm(
-        "将按人员管理当前单位校正归属时间轴，并修正错挂单位的销售记录。\n"
-          + "用于清理成本管理中仍出现在错误单位（如海南）的人员。\n\n是否继续？",
+        "将清洗调岗/归属时间轴：\n"
+          + "· 删除与人事单位不一致的「至今」段\n"
+          + "· 截断重叠时间段\n"
+          + "· 补全与人事一致的当前归属段\n\n"
+          + "不会修改销售记录。是否继续？",
       )
     ) {
       return;
@@ -564,19 +567,44 @@ export default function PersonnelPage() {
       await refreshAll();
       alert(
         `${report.message}\n\n`
-          + `重叠时间段截断：${report.overlapFixed} 条\n`
-          + `归属时间轴：${report.assignmentFixed} 条\n`
-          + `销售记录单位名匹配：${report.salesUnitIdFixed} 条\n`
-          + `分业绩补全：${report.collaboratorsFixed} 条\n`
-          + `人员单位错挂成交：${report.misplacedSalesFixed} 条`
+          + `重叠截断：${report.overlapFixed} 条\n`
+          + `删除错误调岗段：${report.assignmentsDeleted} 条\n`
+          + `补全/重建归属段：${report.assignmentFixed} 条`
           + (report.remainingIssues.length > 0
             ? `\n\n仍须人工检查：\n${report.remainingIssues.join('\n')}`
             : ''),
       );
     } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : "校正失败");
+      alert(e instanceof Error ? e.message : "清洗失败");
     } finally {
       setReconcilingUnits(false);
+    }
+  }
+
+  async function handleDeleteAssignment(assignmentId: string) {
+    if (!transferPerson) return;
+    const row = transferPerson.unitAssignments?.find((a) => a.id === assignmentId);
+    if (
+      !window.confirm(
+        `确认删除这条归属记录？\n${getUnitName(row?.salesUnitId || "")} · `
+          + `${formatDate(row?.startDate || "")} → `
+          + `${row?.endDate ? formatDate(row.endDate) : "至今"}`,
+      )
+    ) {
+      return;
+    }
+    setTransferring(true);
+    try {
+      const updated = await personnelApi.deleteAssignment(
+        transferPerson.id,
+        assignmentId,
+      );
+      setTransferPerson(updated);
+      await refreshAll();
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "删除失败");
+    } finally {
+      setTransferring(false);
     }
   }
 
@@ -719,7 +747,7 @@ export default function PersonnelPage() {
                     onClick={() => void handleReconcileUnitData()}
                   >
                     <RefreshCw className={`mr-2 h-4 w-4 ${reconcilingUnits ? "animate-spin" : ""}`} />
-                    {reconcilingUnits ? "校正中…" : "校正单位归属"}
+                    {reconcilingUnits ? "清洗中…" : "清洗调岗记录"}
                   </Button>
                 </>
               )}
@@ -1661,6 +1689,7 @@ export default function PersonnelPage() {
                           <TableHead>说明</TableHead>
                           <TableHead>操作人</TableHead>
                           <TableHead>记录时间</TableHead>
+                          {isSuperadmin && <TableHead className="w-[72px]">操作</TableHead>}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1678,6 +1707,22 @@ export default function PersonnelPage() {
                             <TableCell className="text-muted-foreground text-xs">
                               {row.createdAt ? formatDateTime(row.createdAt) : "—"}
                             </TableCell>
+                            {isSuperadmin && (
+                              <TableCell>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 text-destructive hover:text-destructive"
+                                  disabled={
+                                    transferring
+                                    || transferAssignmentRows.length <= 1
+                                  }
+                                  onClick={() => void handleDeleteAssignment(row.id)}
+                                >
+                                  删除
+                                </Button>
+                              </TableCell>
+                            )}
                           </TableRow>
                         ))}
                       </TableBody>
@@ -1685,6 +1730,7 @@ export default function PersonnelPage() {
                   </div>
                   <p className="text-xs text-muted-foreground">
                     结束日为空表示当前仍在该单位；有结束日时，当天起归属下一段。
+                    {isSuperadmin && " 超级管理员可删除错误或重复的调岗记录。"}
                   </p>
                 </div>
               )}
