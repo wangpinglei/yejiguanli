@@ -1,5 +1,10 @@
 import { getDb, generateId } from "../db";
 
+import {
+  getFinanceNoticeWebhookTargets,
+  type FinanceNoticeWebhookTarget,
+} from "../config/financeNoticeWebhookTargets";
+
 export interface FinanceDutyRow {
   date: string;
   name: string;
@@ -270,15 +275,21 @@ export function cancelFinanceNoticeSchedule(operator: string): FinanceNoticeConf
   return getFinanceNoticeConfig();
 }
 
-function getWebhookUrls(): string[] {
+function getWebhookTargets(): FinanceNoticeWebhookTarget[] {
+  const targets = getFinanceNoticeWebhookTargets();
+  if (targets.length > 0) return targets;
+
   const multi = (process.env.FINANCE_NOTICE_WEBHOOK_URLS || "").trim();
   const single = (process.env.FINANCE_NOTICE_WEBHOOK_URL || "").trim();
-  const list = multi
+  const urls = multi
     ? multi.split(",").map((s) => s.trim()).filter(Boolean)
     : single
       ? [single]
       : [];
-  return list;
+  return urls.map((webhook, index) => ({
+    unitName: `群${index + 1}`,
+    webhook,
+  }));
 }
 
 export function buildNoticeMarkdown(content: FinanceNoticeContent): string {
@@ -393,9 +404,9 @@ export async function pushFinanceNoticeToDingTalk(
   if (!pushOpts.pushIncludeNotice && !pushOpts.pushIncludeDuty) {
     throw new Error("请至少选择一项推送内容");
   }
-  const webhooks = getWebhookUrls();
-  if (webhooks.length === 0) {
-    throw new Error("未配置 FINANCE_NOTICE_WEBHOOK_URL，请联系管理员在服务器设置钉钉机器人地址");
+  const targets = getWebhookTargets();
+  if (targets.length === 0) {
+    throw new Error("未配置财务通知钉钉机器人，请联系管理员检查 financeNoticeWebhookTargets 或环境变量");
   }
 
   const plans = getFinanceNoticePushMessagePlans(content, pushOpts);
@@ -404,19 +415,19 @@ export async function pushFinanceNoticeToDingTalk(
 
   for (const plan of plans) {
     const planErrors: string[] = [];
-    for (const webhook of webhooks) {
+    for (const target of targets) {
       try {
-        await sendMarkdownToWebhook(webhook, plan.title, plan.text);
+        await sendMarkdownToWebhook(target.webhook, plan.title, plan.text);
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
-        planErrors.push(msg);
+        planErrors.push(`${target.unitName}: ${msg}`);
       }
     }
-    if (planErrors.length === webhooks.length) {
+    if (planErrors.length === targets.length) {
       errors.push(`${plan.title}: ${planErrors.join("; ")}`);
     }
     const id = generateId("fnp");
-    const status = planErrors.length === webhooks.length ? "failed" : "sent";
+    const status = planErrors.length === targets.length ? "failed" : "sent";
     db.prepare(`
       INSERT INTO finance_notice_push_logs (
         id, snapshot_json, scheduled_at, operator, status, error,
@@ -657,6 +668,34 @@ export function startFinanceNoticeScheduler() {
   }, intervalMs);
   processScheduledFinanceNoticePushTasks().catch(() => {});
   processScheduledFinanceNoticePushes().catch(() => {});
+}
+
+export function getFinanceNoticeWebhookMatchReport() {
+  const db = getDb();
+  const units = db
+    .prepare("SELECT id, name FROM sales_units ORDER BY name COLLATE NOCASE")
+    .all() as Array<{ id: string; name: string }>;
+  const targets = getFinanceNoticeWebhookTargets();
+  const targetNameSet = new Set(targets.map((t) => t.unitName));
+  const unitNameSet = new Set(units.map((u) => u.name));
+
+  return {
+    targetCount: targets.length,
+    salesUnitCount: units.length,
+    matched: units
+      .filter((u) => targetNameSet.has(u.name))
+      .map((u) => ({ id: u.id, name: u.name })),
+    salesUnitsWithoutWebhook: units
+      .filter((u) => !targetNameSet.has(u.name))
+      .map((u) => ({ id: u.id, name: u.name })),
+    targetsWithoutSalesUnit: targets
+      .filter((t) => !unitNameSet.has(t.unitName))
+      .map((t) => t.unitName),
+    targets: targets.map((t) => ({
+      unitName: t.unitName,
+      hasSalesUnit: unitNameSet.has(t.unitName),
+    })),
+  };
 }
 
 export function migrateFinanceNoticeTextColumn() {

@@ -18,6 +18,8 @@ import {
 
   getFinanceNoticePushTasks,
 
+  getFinanceNoticeWebhookMatchReport,
+
   pushFinanceNoticeNow,
 
   scheduleFinanceNoticePush,
@@ -61,6 +63,22 @@ router.get(
       tasks: getFinanceNoticePushTasks(50),
 
     });
+
+  },
+
+);
+
+
+
+router.get(
+
+  "/finance-notice/webhook-targets",
+
+  requireModuleView("finance_notice"),
+
+  (_req, res) => {
+
+    res.json(getFinanceNoticeWebhookMatchReport());
 
   },
 

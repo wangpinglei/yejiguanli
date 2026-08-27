@@ -120,6 +120,16 @@ export default function MFinanceNoticePushTaskPanel({
     }
   }
 
+  function getPushSelectionSummary() {
+    const notice = pushOptions.pushIncludeNotice ? '已勾选' : '未勾选'
+    const duty = pushOptions.pushIncludeDuty ? '已勾选' : '未勾选'
+    return `推送通知：${notice}；推送值班表：${duty}`
+  }
+
+  function buildConfirmTip(action: string, messageCount: number, labels: string[]) {
+    return `${getPushSelectionSummary()}\n\n${action} ${labels.join('、')}，共 ${messageCount} 条钉钉消息。\n\n若只需推送通知，请先取消勾选「推送值班表」。确定继续？`
+  }
+
   async function handleCreateTask() {
     const scheduledAt = localInputToIso(scheduleInput);
     if (!scheduledAt) {
@@ -132,7 +142,11 @@ export default function MFinanceNoticePushTaskPanel({
     }
     const messageCount = countPushMessages(pushOptions);
     const labels = getPushMessageLabels(pushOptions);
-    const tip = `将创建定时任务：${formatDateTime(scheduledAt)} 推送 ${labels.join('、')}，共 ${messageCount} 条钉钉消息。确定？`;
+    const tip = buildConfirmTip(
+      `将创建定时任务：${formatDateTime(scheduledAt)} 推送`,
+      messageCount,
+      labels,
+    );
     if (!window.confirm(tip)) return;
 
     setCreating(true);
@@ -156,7 +170,7 @@ export default function MFinanceNoticePushTaskPanel({
     }
     const messageCount = countPushMessages(pushOptions);
     const labels = getPushMessageLabels(pushOptions);
-    const tip = `将立即推送 ${labels.join('、')}，共 ${messageCount} 条钉钉消息。确定？`;
+    const tip = buildConfirmTip('将立即推送', messageCount, labels);
     if (!window.confirm(tip)) return;
 
     setPushing(true);
@@ -191,6 +205,8 @@ export default function MFinanceNoticePushTaskPanel({
 
   const pendingTasks = tasks.filter((t) => t.status === 'pending');
   const pendingMessageCount = getTotalPendingMessageCount(pendingTasks);
+  const selectedPushLabels = getPushMessageLabels(pushOptions);
+  const selectedPushCount = countPushMessages(pushOptions);
 
   return (
     <div className="space-y-6">
@@ -226,6 +242,14 @@ export default function MFinanceNoticePushTaskPanel({
               </Label>
             </div>
           </div>
+
+          <p className="text-sm text-muted-foreground">
+            当前勾选：
+            {selectedPushCount > 0
+              ? `${selectedPushLabels.join('、')}（${selectedPushCount} 条消息）`
+              : '未选择任何内容'}
+            。仅填写通知内容不会自动排除值班表，请确认上方「推送值班表」为未勾选。
+          </p>
 
           {pushOptions.pushIncludeNotice && (
             <div className="space-y-2">
