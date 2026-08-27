@@ -802,10 +802,10 @@ function reconcilePersonnelUnitAssignmentsWithSalesUnit(): number {
     const openRows = rows.filter((r) => !String(r.end_date || "").trim());
 
     if (openRows.length > 1) {
+      const latestStart =
+        String(openRows[openRows.length - 1].start_date || "").slice(0, 10) || today;
       for (let i = 0; i < openRows.length - 1; i++) {
-        const r = openRows[i];
-        const endDate = String(r.start_date || "").slice(0, 10) || today;
-        updateEnd.run(endDate, r.id);
+        updateEnd.run(latestStart, openRows[i].id);
         fixed += 1;
       }
     }
@@ -831,6 +831,108 @@ function reconcilePersonnelUnitAssignmentsWithSalesUnit(): number {
     console.info(`[db] reconcilePersonnelUnitAssignments: fixed ${fixed} row(s)`);
   }
   return fixed;
+}
+
+/**
+ * 前一段 end_date 为空或晚于后一段 start 时，将前一段截断到后一段 start。
+ * 典型：海南段 end=年底 + 云拆单段从 8 月起，导致整月仍算海南。
+ */
+function reconcileOverlappingUnitAssignments(): number {
+  const people = db.prepare("SELECT id FROM personnel").all() as Array<{ id: string }>;
+  const selectAll = db.prepare(`
+    SELECT id, start_date, end_date
+    FROM personnel_unit_assignments
+    WHERE personnel_id = ?
+    ORDER BY start_date ASC, created_at ASC
+  `);
+  const updateEnd = db.prepare(
+    "UPDATE personnel_unit_assignments SET end_date = ? WHERE id = ?",
+  );
+
+  let fixed = 0;
+  for (const p of people) {
+    const rows = selectAll.all(p.id) as Array<{
+      id: string;
+      start_date: string;
+      end_date: string | null;
+    }>;
+    for (let i = 0; i < rows.length - 1; i++) {
+      const cur = rows[i];
+      const next = rows[i + 1];
+      const nextStart = String(next.start_date || "").slice(0, 10);
+      if (!nextStart) continue;
+      const curEnd = String(cur.end_date || "").trim();
+      if (!curEnd || curEnd > nextStart) {
+        updateEnd.run(nextStart, cur.id);
+        cur.end_date = nextStart;
+        fixed += 1;
+      }
+    }
+  }
+  if (fixed > 0) {
+    console.info(`[db] reconcileOverlappingUnitAssignments: fixed ${fixed} row(s)`);
+  }
+  return fixed;
+}
+
+function detectRemainingUnitAssignmentIssues(): string[] {
+  const issues: string[] = [];
+  const people = db
+    .prepare(
+      "SELECT id, name, sales_unit_id FROM personnel WHERE TRIM(sales_unit_id) != ''",
+    )
+    .all() as Array<{ id: string; name: string; sales_unit_id: string }>;
+  const selectAll = db.prepare(`
+    SELECT id, sales_unit_id, start_date, end_date
+    FROM personnel_unit_assignments
+    WHERE personnel_id = ?
+    ORDER BY start_date ASC, created_at ASC
+  `);
+  const unitNames = new Map(
+    (
+      db.prepare("SELECT id, name FROM sales_units").all() as Array<{
+        id: string;
+        name: string;
+      }>
+    ).map((u) => [u.id, u.name]),
+  );
+
+  for (const p of people) {
+    const rows = selectAll.all(p.id) as Array<{
+      sales_unit_id: string;
+      start_date: string;
+      end_date: string | null;
+    }>;
+    if (rows.length === 0) continue;
+
+    const openCount = rows.filter((r) => !String(r.end_date || "").trim()).length;
+    if (openCount > 1) {
+      issues.push(`「${p.name}」仍有 ${openCount} 段未结束的归属，请检查转岗记录`);
+    }
+
+    for (let i = 0; i < rows.length - 1; i++) {
+      const cur = rows[i];
+      const next = rows[i + 1];
+      const nextStart = String(next.start_date || "").slice(0, 10);
+      const curEnd = String(cur.end_date || "").trim();
+      if (nextStart && (!curEnd || curEnd > nextStart)) {
+        const a = unitNames.get(cur.sales_unit_id) || cur.sales_unit_id;
+        const b = unitNames.get(next.sales_unit_id) || next.sales_unit_id;
+        issues.push(`「${p.name}」${a} 与 ${b} 归属时间段重叠`);
+        break;
+      }
+    }
+
+    const open = rows.filter((r) => !String(r.end_date || "").trim()).pop();
+    if (open && String(open.sales_unit_id) !== String(p.sales_unit_id)) {
+      const curName = unitNames.get(open.sales_unit_id) || open.sales_unit_id;
+      const targetName = unitNames.get(p.sales_unit_id) || p.sales_unit_id;
+      issues.push(
+        `「${p.name}」当前段在「${curName}」，人员管理为「${targetName}」`,
+      );
+    }
+  }
+  return issues.slice(0, 30);
 }
 
 /**
@@ -891,22 +993,9 @@ function reconcileMisplacedPersonnelSalesRecords(): number {
     person_unit_id: string;
   }>;
 
-  const unitNames = db.prepare("SELECT id, name FROM sales_units").all() as Array<{
-    id: string;
-    name: string;
-  }>;
-  const unitNameMap = new Map(unitNames.map((u) => [u.id, u.name]));
-
   const update = db.prepare("UPDATE sales_records SET sales_unit_id = ? WHERE id = ?");
   let fixed = 0;
   for (const r of rows) {
-    const personUnitName = (unitNameMap.get(r.person_unit_id) || "").trim().toLowerCase();
-    const recordUnitName = (r.sales_unit_name || "").trim().toLowerCase();
-    const recordUnitEmpty = !String(r.sales_unit_id || "").trim();
-    const nameMatchesPerson =
-      !recordUnitName || recordUnitName === personUnitName;
-    if (!recordUnitEmpty && !nameMatchesPerson) continue;
-
     update.run(r.person_unit_id, r.id);
     fixed += 1;
   }
@@ -964,27 +1053,37 @@ function reconcileSalesCollaboratorsFromPersonText(): number {
 }
 
 export type UnitDataReconcileReport = {
+  overlapFixed: number;
   assignmentFixed: number;
   salesUnitIdFixed: number;
   collaboratorsFixed: number;
   misplacedSalesFixed: number;
   totalFixed: number;
+  remainingIssues: string[];
 };
 
 /** 纠正单位时间轴与销售记录上的单位 id，供启动与云同步后调用 */
 export function runUnitDataReconcile(): UnitDataReconcileReport {
+  const overlapFixed = reconcileOverlappingUnitAssignments();
   const assignmentFixed = reconcilePersonnelUnitAssignmentsWithSalesUnit();
   const salesUnitIdFixed = reconcileSalesRecordUnitIds();
   const collaboratorsFixed = reconcileSalesCollaboratorsFromPersonText();
   const misplacedSalesFixed = reconcileMisplacedPersonnelSalesRecords();
   const totalFixed =
-    assignmentFixed + salesUnitIdFixed + collaboratorsFixed + misplacedSalesFixed;
+    overlapFixed
+    + assignmentFixed
+    + salesUnitIdFixed
+    + collaboratorsFixed
+    + misplacedSalesFixed;
+  const remainingIssues = detectRemainingUnitAssignmentIssues();
   return {
+    overlapFixed,
     assignmentFixed,
     salesUnitIdFixed,
     collaboratorsFixed,
     misplacedSalesFixed,
     totalFixed,
+    remainingIssues,
   };
 }
 

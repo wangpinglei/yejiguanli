@@ -555,10 +555,14 @@ export default function PersonnelPage() {
       await refreshAll();
       alert(
         `${report.message}\n\n`
+          + `重叠时间段截断：${report.overlapFixed} 条\n`
           + `归属时间轴：${report.assignmentFixed} 条\n`
           + `销售记录单位名匹配：${report.salesUnitIdFixed} 条\n`
           + `分业绩补全：${report.collaboratorsFixed} 条\n`
-          + `人员单位错挂成交：${report.misplacedSalesFixed} 条`,
+          + `人员单位错挂成交：${report.misplacedSalesFixed} 条`
+          + (report.remainingIssues.length > 0
+            ? `\n\n仍须人工检查：\n${report.remainingIssues.join('\n')}`
+            : ''),
       );
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : "校正失败");

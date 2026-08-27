@@ -132,8 +132,12 @@ function resolveUnitIdAt(person: BattlePerson, asOfDate: string): string {
   const d = toDateOnly(asOfDate) || asOfDate
   const list = person.unitAssignments || []
   if (list.length > 0) {
-    const hit = list.find((a) => isAssignmentActiveOn(a, d))
-    if (hit?.salesUnitId) return hit.salesUnitId
+    const active = list.filter((a) => isAssignmentActiveOn(a, d))
+    if (active.length > 0) {
+      active.sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''))
+      const hit = active[active.length - 1]
+      if (hit?.salesUnitId) return hit.salesUnitId
+    }
   }
   return person.salesUnitId || ''
 }

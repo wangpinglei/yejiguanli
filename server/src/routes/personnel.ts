@@ -121,7 +121,9 @@ router.post(
     res.json({
       message: report.totalFixed > 0
         ? `已校正 ${report.totalFixed} 条数据`
-        : "未发现需要校正的数据",
+        : report.remainingIssues.length > 0
+          ? "未发现可自动校正项，但仍有归属异常，请查看 remainingIssues"
+          : "未发现需要校正的数据",
       ...report,
     });
   },

@@ -160,11 +160,13 @@ export const personnelApi = {
   reconcileUnitData: () =>
     api.post<{
       message: string;
+      overlapFixed: number;
       assignmentFixed: number;
       salesUnitIdFixed: number;
       collaboratorsFixed: number;
       misplacedSalesFixed: number;
       totalFixed: number;
+      remainingIssues: string[];
     }>("/personnel/reconcile-unit-data", {}),
 };
 
