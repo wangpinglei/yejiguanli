@@ -1,6 +1,7 @@
 // 与左侧导航对应的功能模块（权限分配用）
 export type ModuleKey =
   | "dashboard"
+  | "business_analysis"
   | "sales_units"
   | "personnel"
   | "hr_management"
@@ -32,6 +33,7 @@ export interface ModuleDef {
 
 export const MODULE_DEFS: ModuleDef[] = [
   { key: "dashboard", label: "数据看板", path: "/", canEdit: false },
+  { key: "business_analysis", label: "经营分析", path: "/business-analysis", canEdit: false },
   { key: "sales_units", label: "销售单位", path: "/sales-units", canEdit: true },
   { key: "personnel", label: "人员管理", path: "/personnel", canEdit: true },
   { key: "hr_management", label: "人事管理", path: "/hr-management", canEdit: true },

@@ -11,6 +11,7 @@ import Products from "@/pages/Products";
 import SalesRecords from "@/pages/SalesRecords";
 import CostManagement from "@/pages/CostManagement";
 import ProfitAnalysis from "@/pages/ProfitAnalysis";
+import BusinessAnalysis from "@/pages/BusinessAnalysis";
 import SalesBattleReport from "@/pages/SalesBattleReport";
 import UserManagement from "@/pages/UserManagement";
 import ProductSettlement from "@/pages/ProductSettlement";
@@ -53,6 +54,7 @@ export default function App() {
               }
             >
               <Route index element={<Dashboard />} />
+              <Route path="business-analysis" element={<BusinessAnalysis />} />
               <Route path="sales-units" element={<SalesUnits />} />
               <Route path="personnel" element={<Personnel />} />
               <Route

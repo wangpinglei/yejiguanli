@@ -11,6 +11,7 @@ import {
   Menu,
   ChevronDown,
   BarChart3,
+  LineChart,
   ShieldCheck,
   Bell,
   CheckCheck,
@@ -47,6 +48,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { path: "/", label: "数据看板", icon: LayoutDashboard, moduleKey: "dashboard" },
+  { path: "/business-analysis", label: "经营分析", icon: LineChart, moduleKey: "business_analysis" },
   { path: "/sales-units", label: "销售单位", icon: Building2, moduleKey: "sales_units" },
   { path: "/personnel", label: "人员管理", icon: Users, moduleKey: "personnel" },
   { path: "/hr-management", label: "人事管理", icon: IdCard, moduleKey: "hr_management" },
