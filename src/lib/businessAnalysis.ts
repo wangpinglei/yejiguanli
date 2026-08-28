@@ -136,6 +136,23 @@ function getPrevYearMonth(yearMonth: string): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
+/** 强制转为数字，避免 quantity 为字符串时相加变成拼接（如 11111...） */
+function toSafeNumber(value: unknown, fallback = 0): number {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : fallback
+  }
+  if (typeof value === 'string') {
+    const n = Number(value.replace(/,/g, '').trim())
+    return Number.isFinite(n) ? n : fallback
+  }
+  const n = Number(value)
+  return Number.isFinite(n) ? n : fallback
+}
+
+function getSaleQuantity(sale: { quantity?: unknown }): number {
+  return toSafeNumber(sale.quantity, 0)
+}
+
 function calcSettlementIncome(
   sales: SalesRecord[],
   upsList: UnitProductSettlement[],
@@ -263,8 +280,8 @@ function buildProductShares(
   sales.forEach((s) => {
     const { name } = resolveProductMeta(s, products)
     const existing = map.get(name) || { amount: 0, quantity: 0 }
-    existing.amount += s.totalAmount
-    existing.quantity += s.quantity || 0
+    existing.amount += toSafeNumber(s.totalAmount)
+    existing.quantity += getSaleQuantity(s)
     map.set(name, existing)
   })
   const totalAmount = Array.from(map.values()).reduce((a, b) => a + b.amount, 0)
@@ -310,9 +327,9 @@ function buildProductAnalysisList(
         salesAmount: 0,
         settlementIncome: 0,
       }
-      existing.quantity += s.quantity || 0
+      existing.quantity += getSaleQuantity(s)
       existing.orderCount += 1
-      existing.salesAmount += s.totalAmount
+      existing.salesAmount += toSafeNumber(s.totalAmount)
       existing.settlementIncome += calcSaleSettlementIncome(s, upsList)
       target.set(key, existing)
     })
@@ -353,8 +370,8 @@ function buildDimensionShares(
   sales.forEach((s) => {
     const key = getKey(s, products)
     const existing = map.get(key) || { quantity: 0, amount: 0 }
-    existing.quantity += s.quantity || 0
-    existing.amount += s.totalAmount
+    existing.quantity += getSaleQuantity(s)
+    existing.amount += toSafeNumber(s.totalAmount)
     map.set(key, existing)
   })
   const totalQty = Array.from(map.values()).reduce((s, i) => s + i.quantity, 0)
@@ -376,7 +393,7 @@ function buildPersonnelSalesList(
   salesUnits: SalesUnit[],
 ): PersonnelSalesItem[] {
   const map = new Map<string, PersonnelSalesItem>()
-  const totalAmount = sales.reduce((s, r) => s + r.totalAmount, 0)
+  const totalAmount = sales.reduce((s, r) => s + toSafeNumber(r.totalAmount), 0)
 
   sales.forEach((s) => {
     const person = personnel.find((p) => p.id === s.personnelId)
@@ -392,8 +409,8 @@ function buildPersonnelSalesList(
       orderCount: 0,
       amountShare: 0,
     }
-    existing.quantity += s.quantity || 0
-    existing.salesAmount += s.totalAmount
+    existing.quantity += getSaleQuantity(s)
+    existing.salesAmount += toSafeNumber(s.totalAmount)
     existing.orderCount += 1
     map.set(key, existing)
   })
@@ -444,8 +461,8 @@ function buildProductTrendSeries(
           monthSales.forEach((s) => {
             const meta = resolveProductMeta(s, products)
             if (meta.name !== productName) return
-            quantity += s.quantity || 0
-            amount += s.totalAmount
+            quantity += getSaleQuantity(s)
+            amount += toSafeNumber(s.totalAmount)
           })
           return {
             month: month.split('-')[1] + '月',
@@ -678,7 +695,7 @@ export function analyzeBusiness(input: BusinessAnalysisInput): BusinessAnalysisR
     input.unitIds,
     input.yearMonth,
   )
-  const totalQuantity = monthSales.reduce((s, r) => s + (r.quantity || 0), 0)
+  const totalQuantity = monthSales.reduce((s, r) => s + getSaleQuantity(r), 0)
 
   const units: UnitBusinessMetrics[] = input.salesUnits
     .filter((u) => input.unitIds.includes(u.id))
