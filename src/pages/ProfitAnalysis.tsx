@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, Fragment } from "react";
 import { Link } from "react-router-dom";
 import { useData } from "@/context/DataContext";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -17,7 +17,7 @@ import {
   listRecurringYearMonths,
   matchesRecurringYearMonth,
 } from "@/utils/recurringRecord";
-import type { CostSettlement, RevenueSettlement } from "@/types";
+import type { CostRecord, CostSettlement, RevenueSettlement } from "@/types";
 import {
   TrendingUp, DollarSign, Award, AlertTriangle,
   ChevronDown, ChevronRight, Pencil, Receipt, CheckCircle2, Clock,
@@ -52,11 +52,15 @@ import {
 } from "recharts";
 
 import MPerformanceEstimateSheet from "./ProfitAnalysis/components/m-performance-estimate-sheet";
+import MCostConfirmDialog, {
+  buildCostConfirmLines,
+  type CostConfirmLine,
+} from "./ProfitAnalysis/components/m-cost-confirm-dialog";
 
 const COLORS = ["#3b82f6", "#f97316", "#10b981", "#8b5cf6", "#ef4444", "#06b6d4", "#eab308"];
 
 export default function ProfitAnalysis() {
-  const { products, monthlyAdjustments, upsertRevenueSettlement, upsertCostSettlement, productPersonCommissions, teamMgmtCommissionRules, performanceTargets } = useData();
+  const { products, monthlyAdjustments, upsertRevenueSettlement, upsertCostSettlement, updateCostRecord, productPersonCommissions, teamMgmtCommissionRules, performanceTargets } = useData();
   const { user } = useAuth();
   const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleSalesRecords: salesRecords, visibleCostRecords: costRecords, visibleIncomeRecords: incomeRecords, visibleRevenueSettlements: revenueSettlements, visibleCostSettlements: costSettlements, visibleUnitProductSettlements, canEditCost, isReadOnly } = usePermissions();
   const teamMgmtContext = useMemo(() => ({
@@ -71,6 +75,8 @@ export default function ProfitAnalysis() {
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
   // 收入明细展开状态
   const [expandedIncomeRows, setExpandedIncomeRows] = useState<Set<string>>(new Set());
+  // 成本明细展开状态
+  const [expandedCostRows, setExpandedCostRows] = useState<Set<string>>(new Set());
   // 结算调整弹窗
   const [settlementDialog, setSettlementDialog] = useState<{
     unitId: string
@@ -82,8 +88,8 @@ export default function ProfitAnalysis() {
     unitId: string
     unitName: string
     estimated: number
+    existing?: CostSettlement
   } | null>(null);
-  const [costConfirmForm, setCostConfirmForm] = useState({ actualAmount: 0, remark: "" });
   const [estimateOpen, setEstimateOpen] = useState(false);
 
   const isAllFilterUnits = filterUnitIds.length === 0;
@@ -518,6 +524,15 @@ unitIds,
     });
   };
 
+  function toggleCostRow(unitId: string) {
+    setExpandedCostRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(unitId)) next.delete(unitId);
+      else next.add(unitId);
+      return next;
+    });
+  }
+
   function openSettlement(
     unitId: string,
     unitName: string,
@@ -564,6 +579,12 @@ unitIds,
         selectedMonth,
       );
       const diff = actualAmount - estimatedAmount;
+      const lines = buildCostConfirmLines(
+        costRecords,
+        unit.id,
+        selectedMonth,
+        settlement?.actualAmount,
+      );
       return {
         unit,
         estimatedAmount,
@@ -571,6 +592,7 @@ unitIds,
         isAdjusted,
         settlement,
         diff,
+        lines,
       };
     });
   }, [
@@ -595,23 +617,35 @@ unitIds,
     estimated: number,
     existing?: CostSettlement,
   ) {
-    setCostConfirmDialog({ unitId, unitName, estimated });
-    setCostConfirmForm({
-      actualAmount: existing?.actualAmount ?? estimated,
-      remark: existing?.remark || "",
-    });
+    setCostConfirmDialog({ unitId, unitName, estimated, existing });
   }
 
-  async function handleCostConfirmSubmit() {
+  async function handleCostConfirmSubmit(payload: {
+    actualAmount: number
+    remark: string
+    recordsToUpdate: Array<{
+      recordId: string
+      items: CostRecord['items']
+      totalCost: number
+    }>
+  }) {
     if (!costConfirmDialog) return;
-    const isAdjusted = true;
+    const operator = user ? { name: user.name, id: user.id } : undefined;
+    for (const item of payload.recordsToUpdate) {
+      await updateCostRecord(
+        item.recordId,
+        { items: item.items, totalCost: item.totalCost },
+        '盈亏分析-成本确认调整明细',
+        operator,
+      );
+    }
     await upsertCostSettlement({
       salesUnitId: costConfirmDialog.unitId,
       yearMonth: selectedMonth,
       estimatedAmount: costConfirmDialog.estimated,
-      actualAmount: costConfirmForm.actualAmount,
-      isAdjusted,
-      remark: costConfirmForm.remark || (isAdjusted ? "确认实际成本金额" : ""),
+      actualAmount: payload.actualAmount,
+      isAdjusted: true,
+      remark: payload.remark || '确认实际成本金额',
       adjustedBy: user?.name,
       adjustedAt: new Date().toISOString(),
     });
@@ -1302,6 +1336,7 @@ unitIds,
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10"></TableHead>
                   <TableHead>销售单位</TableHead>
                   <TableHead className="text-right">预估成本（录入）</TableHead>
                   <TableHead className="text-right">实际成本</TableHead>
@@ -1311,63 +1346,170 @@ unitIds,
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {costDetail.map((d) => (
-                  <TableRow key={d.unit.id}>
-                    <TableCell className="font-medium">{d.unit.name}</TableCell>
-                    <TableCell className="text-right text-orange-600">
-                      {formatCurrency(d.estimatedAmount)}
-                    </TableCell>
-                    <TableCell
-                      className={`text-right font-bold ${
-                        d.isAdjusted ? 'text-amber-600' : 'text-orange-600'
-                      }`}
-                    >
-                      {formatCurrency(d.actualAmount)}
-                    </TableCell>
-                    <TableCell
-                      className={`text-right ${
-                        d.diff > 0
-                          ? 'text-red-600'
-                          : d.diff < 0
-                            ? 'text-emerald-600'
-                            : 'text-muted-foreground'
-                      }`}
-                    >
-                      {d.diff > 0 ? '+' : ''}{formatCurrency(d.diff)}
-                    </TableCell>
-                    <TableCell>
-                      {d.isAdjusted ? (
-                        <Badge className="bg-amber-100 text-amber-700 text-xs">
-                          <CheckCircle2 className="mr-1 h-3 w-3" />已确认
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-xs">待确认</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {canEditCost && !isReadOnly ? (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() =>
-                            openCostConfirm(
-                              d.unit.id,
-                              d.unit.name,
-                              d.estimatedAmount,
-                              d.settlement,
-                            )
-                          }
+                {costDetail.map((d) => {
+                  const isExp = expandedCostRows.has(d.unit.id);
+                  return (
+                    <Fragment key={d.unit.id}>
+                      <TableRow
+                        className="cursor-pointer hover:bg-accent/50"
+                        onClick={() => toggleCostRow(d.unit.id)}
+                      >
+                        <TableCell>
+                          <button className="flex h-6 w-6 items-center justify-center rounded">
+                            {isExp ? (
+                              <ChevronDown className="h-4 w-4" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4" />
+                            )}
+                          </button>
+                        </TableCell>
+                        <TableCell className="font-medium">{d.unit.name}</TableCell>
+                        <TableCell className="text-right text-orange-600">
+                          {formatCurrency(d.estimatedAmount)}
+                        </TableCell>
+                        <TableCell
+                          className={`text-right font-bold ${
+                            d.isAdjusted ? 'text-amber-600' : 'text-orange-600'
+                          }`}
                         >
-                          <Pencil className="mr-1 h-3.5 w-3.5" />
-                          {d.isAdjusted ? '重新确认' : '确认成本'}
-                        </Button>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">仅查看</span>
+                          {formatCurrency(d.actualAmount)}
+                        </TableCell>
+                        <TableCell
+                          className={`text-right ${
+                            d.diff > 0
+                              ? 'text-red-600'
+                              : d.diff < 0
+                                ? 'text-emerald-600'
+                                : 'text-muted-foreground'
+                          }`}
+                        >
+                          {d.diff > 0 ? '+' : ''}{formatCurrency(d.diff)}
+                        </TableCell>
+                        <TableCell>
+                          {d.isAdjusted ? (
+                            <Badge className="bg-amber-100 text-amber-700 text-xs">
+                              <CheckCircle2 className="mr-1 h-3 w-3" />已确认
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-xs">待确认</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                          {canEditCost && !isReadOnly ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() =>
+                                openCostConfirm(
+                                  d.unit.id,
+                                  d.unit.name,
+                                  d.estimatedAmount,
+                                  d.settlement,
+                                )
+                              }
+                            >
+                              <Pencil className="mr-1 h-3.5 w-3.5" />
+                              {d.isAdjusted ? '重新确认' : '确认成本'}
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">仅查看</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                      {isExp && (
+                        <TableRow key={`${d.unit.id}-detail`} className="bg-muted/20 hover:bg-muted/20">
+                          <TableCell colSpan={7} className="p-0">
+                            <div className="px-6 py-4">
+                              {d.lines.length === 0 ? (
+                                <p className="text-sm text-muted-foreground">
+                                  本月暂无手工成本明细
+                                </p>
+                              ) : (
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow>
+                                      <TableHead>类别</TableHead>
+                                      <TableHead>说明</TableHead>
+                                      <TableHead className="w-24">类型</TableHead>
+                                      <TableHead className="text-right">预估金额</TableHead>
+                                      <TableHead className="text-right">实际金额</TableHead>
+                                      <TableHead className="text-right">差额</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {d.lines.map((line: CostConfirmLine) => {
+                                      const lineDiff = line.actual - line.estimated;
+                                      return (
+                                        <TableRow key={line.key}>
+                                          <TableCell className="font-medium">{line.category}</TableCell>
+                                          <TableCell className="max-w-[240px] text-muted-foreground">
+                                            <span className="line-clamp-2">
+                                              {line.description || line.recordRemark || '—'}
+                                            </span>
+                                          </TableCell>
+                                          <TableCell>
+                                            {line.isRecurring ? (
+                                              <Badge variant="outline" className="text-xs">
+                                                月度固定
+                                              </Badge>
+                                            ) : (
+                                              <Badge variant="secondary" className="text-xs">
+                                                单次
+                                              </Badge>
+                                            )}
+                                          </TableCell>
+                                          <TableCell className="text-right text-orange-600">
+                                            {formatCurrency(line.estimated)}
+                                          </TableCell>
+                                          <TableCell className="text-right font-medium text-amber-600">
+                                            {formatCurrency(line.actual)}
+                                          </TableCell>
+                                          <TableCell
+                                            className={`text-right ${
+                                              lineDiff > 0
+                                                ? 'text-red-600'
+                                                : lineDiff < 0
+                                                  ? 'text-emerald-600'
+                                                  : 'text-muted-foreground'
+                                            }`}
+                                          >
+                                            {lineDiff > 0 ? '+' : ''}
+                                            {formatCurrency(lineDiff)}
+                                          </TableCell>
+                                        </TableRow>
+                                      );
+                                    })}
+                                  </TableBody>
+                                </Table>
+                              )}
+                              {canEditCost && !isReadOnly && d.lines.length > 0 && (
+                                <div className="mt-3 flex justify-end">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() =>
+                                      openCostConfirm(
+                                        d.unit.id,
+                                        d.unit.name,
+                                        d.estimatedAmount,
+                                        d.settlement,
+                                      )
+                                    }
+                                  >
+                                    <Pencil className="mr-1 h-3.5 w-3.5" />
+                                    逐条修改并确认
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
                       )}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                    </Fragment>
+                  );
+                })}
                 <TableRow className="border-t-2 bg-muted/30 font-bold">
+                  <TableCell></TableCell>
                   <TableCell>合计</TableCell>
                   <TableCell className="text-right text-orange-600">
                     {formatCurrency(costTotals.totalEstimated)}
@@ -1388,7 +1530,7 @@ unitIds,
                 </TableRow>
                 {costDetail.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={6} className="py-12 text-center text-muted-foreground">
+                    <TableCell colSpan={7} className="py-12 text-center text-muted-foreground">
                       暂无数据
                     </TableCell>
                   </TableRow>
@@ -1519,77 +1661,18 @@ unitIds,
         </DialogContent>
       </Dialog>
 
-      <Dialog
+      <MCostConfirmDialog
         open={!!costConfirmDialog}
-        onOpenChange={(open) => { if (!open) setCostConfirmDialog(null) }}
-      >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Calculator className="h-5 w-5 text-orange-600" />
-              确认实际成本金额
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="flex items-center justify-between rounded-lg bg-muted/50 px-4 py-3">
-              <div>
-                <p className="text-sm text-muted-foreground">{costConfirmDialog?.unitName}</p>
-                <p className="text-xs text-muted-foreground">{selectedMonth}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-xs text-muted-foreground">预估成本（手工录入合计）</p>
-                <p className="text-lg font-bold text-orange-600">
-                  {costConfirmDialog && formatCurrency(costConfirmDialog.estimated)}
-                </p>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>实际发生成本（¥）</Label>
-              <Input
-                type="number"
-                value={costConfirmForm.actualAmount}
-                onChange={(e) =>
-                  setCostConfirmForm({
-                    ...costConfirmForm,
-                    actualAmount: Number(e.target.value),
-                  })
-                }
-                placeholder="输入最终实际成本"
-              />
-              <p className="text-xs text-muted-foreground">
-                保存后即锁定实际成本，盈亏口径以该金额为准；可随时重新确认
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label>确认说明</Label>
-              <Textarea
-                value={costConfirmForm.remark}
-                onChange={(e) =>
-                  setCostConfirmForm({ ...costConfirmForm, remark: e.target.value })
-                }
-                placeholder="如：发票差额、补记、冲回等"
-                rows={2}
-              />
-            </div>
-            {costConfirmDialog
-              && costConfirmForm.actualAmount !== costConfirmDialog.estimated && (
-              <div className="flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
-                <AlertTriangle className="h-4 w-4" />
-                差额: {costConfirmForm.actualAmount > costConfirmDialog.estimated ? '+' : ''}
-                {formatCurrency(
-                  costConfirmForm.actualAmount - costConfirmDialog.estimated,
-                )}
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCostConfirmDialog(null)}>取消</Button>
-            <Button onClick={handleCostConfirmSubmit}>
-              <Clock className="mr-1 h-4 w-4" />保存确认
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        unitId={costConfirmDialog?.unitId || ''}
+        unitName={costConfirmDialog?.unitName || ''}
+        yearMonth={selectedMonth}
+        estimated={costConfirmDialog?.estimated || 0}
+        existingActual={costConfirmDialog?.existing?.actualAmount}
+        existingRemark={costConfirmDialog?.existing?.remark}
+        costRecords={costRecords}
+        onClose={() => setCostConfirmDialog(null)}
+        onSubmit={handleCostConfirmSubmit}
+      />
 
       <MPerformanceEstimateSheet
         open={estimateOpen}
