@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState, Fragment } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState, Fragment } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useData } from "@/context/DataContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useAuth } from "@/context/AuthContext";
@@ -69,10 +69,27 @@ export default function ProfitAnalysis() {
     upsList: visibleUnitProductSettlements,
   }), [teamMgmtCommissionRules, performanceTargets, visibleUnitProductSettlements]);
 
+  const [searchParams] = useSearchParams();
   /** 空数组 = 全部单位 */
-  const [filterUnitIds, setFilterUnitIds] = useState<string[]>([]);
+  const [filterUnitIds, setFilterUnitIds] = useState<string[]>(() => {
+    const unit = searchParams.get("unit");
+    return unit ? [unit] : [];
+  });
   const [unitPickerOpen, setUnitPickerOpen] = useState(false);
-  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const month = searchParams.get("month");
+    if (month && /^\d{4}-\d{2}$/.test(month)) return month;
+    return new Date().toISOString().slice(0, 7);
+  });
+
+  useEffect(() => {
+    const month = searchParams.get("month");
+    if (month && /^\d{4}-\d{2}$/.test(month)) setSelectedMonth(month);
+    const unit = searchParams.get("unit");
+    if (!unit || salesUnits.length === 0) return;
+    if (salesUnits.some((u) => u.id === unit)) setFilterUnitIds([unit]);
+  }, [searchParams, salesUnits]);
+
   // 收入明细展开状态
   const [expandedIncomeRows, setExpandedIncomeRows] = useState<Set<string>>(new Set());
   // 成本明细展开状态

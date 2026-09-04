@@ -5,7 +5,7 @@ import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, getYearMonth } from "@/lib/format";
-import { getTotalSalaryCost, filterByMonth } from "@/lib/salary";
+import { getTotalSalaryCost, filterByMonth, isPersonnelOnDutyInMonth } from "@/lib/salary";
 import { getEffectiveConfirmAmount, getEffectiveManualCost } from "@/lib/confirmAmount";
 import { calcSaleSettlementIncome } from "@/lib/settlement";
 import type { SalesUnit } from "@/types";
@@ -196,7 +196,9 @@ export default function SalesUnits() {
     const monthNum = parseInt(selectedMonth.slice(5, 7), 10)
 
     for (const u of salesUnits) {
-      const unitPersonnel = personnel.filter((p) => p.salesUnitId === u.id)
+      const unitPersonnel = personnel.filter(
+        (p) => p.salesUnitId === u.id && isPersonnelOnDutyInMonth(p),
+      )
       const estimatedSettlement = filterByMonth(salesRecords, selectedMonth)
         .filter((s) => s.salesUnitId === u.id)
         .reduce(
@@ -426,7 +428,8 @@ export default function SalesUnits() {
         <Badge variant="secondary">共 {filteredUnits.length} 个单位</Badge>
       </div>
       <p className="mb-4 text-xs text-muted-foreground">
-        利润与「盈亏分析」同口径：结算收入 + 其他收入 −（录入成本 + 薪酬成本 + 社保公积金成本），按所选月份计算。
+        人员数仅统计当前在职。利润与「盈亏分析」同口径：结算收入 + 其他收入 −（录入成本 + 薪酬成本 + 社保公积金成本），按所选月份计算。
+        点击人员数可查看该单位全部人员（含离职）；点击本月利润可跳转到对应单位、月份的盈亏分析。
       </p>
 
       {/* Table */}
@@ -488,18 +491,31 @@ export default function SalesUnits() {
                       <TableCell className="text-sm">{getManagerDisplay(unit.orgDeptName, unit.orgDeptId)}</TableCell>
                       <TableCell className="text-sm">{getManagerDisplay(unit.unitLeaderName, unit.unitLeaderId)}</TableCell>
                       <TableCell className="text-right">
-                        <span className="inline-flex items-center gap-1">
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-primary hover:underline"
+                          title={`查看「${unit.name}」全部人员（含离职）`}
+                          onClick={() => navigate(`/personnel?unit=${unit.id}`)}
+                        >
                           <Users className="h-3 w-3 text-muted-foreground" />
                           {stats.personnelCount}
-                        </span>
+                        </button>
                       </TableCell>
                       <TableCell
                         className={`text-right font-semibold ${
                           stats.profit >= 0 ? 'text-emerald-600' : 'text-red-600'
                         }`}
-                        title={`结算 ${formatCurrency(stats.settlementIncome)} + 其他 ${formatCurrency(stats.otherIncome)} - 录入 ${formatCurrency(stats.manualCost)} - 薪酬 ${formatCurrency(stats.salaryPayCost)} - 社保公积金 ${formatCurrency(stats.socialHousingFundCost)}`}
                       >
-                        {formatCurrency(stats.profit)}
+                        <button
+                          type="button"
+                          className="rounded px-1 py-0.5 hover:underline"
+                          title={`查看「${unit.name}」${selectedMonth} 盈亏分析。结算 ${formatCurrency(stats.settlementIncome)} + 其他 ${formatCurrency(stats.otherIncome)} - 录入 ${formatCurrency(stats.manualCost)} - 薪酬 ${formatCurrency(stats.salaryPayCost)} - 社保公积金 ${formatCurrency(stats.socialHousingFundCost)}`}
+                          onClick={() => navigate(
+                            `/profit-analysis?unit=${unit.id}&month=${selectedMonth}`,
+                          )}
+                        >
+                          {formatCurrency(stats.profit)}
+                        </button>
                       </TableCell>
                       <TableCell className="text-right">
                         {canEditUnit ? (

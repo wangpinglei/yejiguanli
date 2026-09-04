@@ -1,4 +1,5 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useData } from "@/context/DataContext";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -73,15 +74,20 @@ export default function SalesBattleReport() {
   } = usePermissions();
   const canEditTargets = canEditBattleReport;
 
+  const [searchParams] = useSearchParams();
   const [yearMonth, setYearMonth] = useState(getCurrentYearMonth());
-  const [unitId, setUnitId] = useState<string>("");
+  const [unitId, setUnitId] = useState(() => searchParams.get("unit") || "");
 
-  // 默认选中第一个单位
-  useMemo(() => {
+  useEffect(() => {
+    const queryUnit = searchParams.get("unit");
+    if (queryUnit && salesUnits.some((u) => u.id === queryUnit)) {
+      setUnitId(queryUnit);
+      return;
+    }
     if (!unitId && salesUnits.length > 0) {
       setUnitId(salesUnits[0].id);
     }
-  }, [salesUnits, unitId]);
+  }, [searchParams, salesUnits, unitId]);
 
   const selectedUnit = useMemo(
     () => salesUnits.find((u) => u.id === unitId),

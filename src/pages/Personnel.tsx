@@ -1,4 +1,5 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useData } from "@/context/DataContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/PageHeader";
@@ -131,8 +132,9 @@ export default function PersonnelPage() {
     upsList: unitProductSettlements,
   }), [teamMgmtCommissionRules, performanceTargets, unitProductSettlements]);
   const { visiblePersonnel: personnel, visibleSalesUnits: salesUnits, visibleSalesRecords: salesRecords, canEditPersonnel, isReadOnly, role, canEditCost } = usePermissions();
+  const [searchParams] = useSearchParams();
   const [search, setSearch] = useState("");
-  const [filterUnit, setFilterUnit] = useState("all");
+  const [filterUnit, setFilterUnit] = useState(() => searchParams.get("unit") || "all");
   /** all | active | inactive — 在职/离职（与列表「在岗/离职」一致） */
   const [filterStatus, setFilterStatus] = useState<"all" | "active" | "inactive">("all");
   /** all | missing — 缺产品提成配置筛选 */
@@ -156,6 +158,15 @@ export default function PersonnelPage() {
   );
   const [transferRemark, setTransferRemark] = useState("");
   const [transferring, setTransferring] = useState(false);
+
+  useEffect(() => {
+    const unit = searchParams.get("unit");
+    if (!unit || salesUnits.length === 0) return;
+    if (salesUnits.some((u) => u.id === unit)) {
+      setFilterUnit(unit);
+      setFilterStatus("all");
+    }
+  }, [searchParams, salesUnits]);
   const [editingAssignment, setEditingAssignment] = useState<PersonnelUnitAssignment | null>(null);
   const [editAssignmentUnitId, setEditAssignmentUnitId] = useState("");
   const [editAssignmentStart, setEditAssignmentStart] = useState("");
@@ -373,13 +384,26 @@ export default function PersonnelPage() {
 
   const displayedPersonnel = useMemo(() => {
     const list = [...filteredPersonnel]
-    if (salesSortOrder === 'none') return list
-    const dir = salesSortOrder === 'desc' ? -1 : 1
+    if (salesSortOrder !== 'none') {
+      const dir = salesSortOrder === 'desc' ? -1 : 1
+      list.sort((a, b) => {
+        const ta = getPersonnelSales(a.id).total
+        const tb = getPersonnelSales(b.id).total
+        if (ta === tb) return a.name.localeCompare(b.name, 'zh')
+        return (ta - tb) * dir
+      })
+      return list
+    }
     list.sort((a, b) => {
-      const ta = getPersonnelSales(a.id).total
-      const tb = getPersonnelSales(b.id).total
-      if (ta === tb) return a.name.localeCompare(b.name, 'zh')
-      return (ta - tb) * dir
+      const aOn = isOnDutyPerson(a)
+      const bOn = isOnDutyPerson(b)
+      if (aOn !== bOn) return aOn ? -1 : 1
+      if (!aOn && !bOn) {
+        const da = (a.resignDate || '').slice(0, 10)
+        const db = (b.resignDate || '').slice(0, 10)
+        if (da !== db) return db.localeCompare(da)
+      }
+      return a.name.localeCompare(b.name, 'zh')
     })
     return list
   }, [filteredPersonnel, salesSortOrder, salesTotalByPersonId])
