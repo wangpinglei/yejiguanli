@@ -63,6 +63,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import MPersonProductCommission from "./Personnel/components/m-person-product-commission";
+import MPayPlanDialog from "./Personnel/components/m-pay-plan-dialog";
 
 // 默认表单
 const DEFAULT_FORM = {
@@ -152,6 +153,7 @@ export default function PersonnelPage() {
   const [mergeRemoveId, setMergeRemoveId] = useState("");
   const [merging, setMerging] = useState(false);
   const [transferPerson, setTransferPerson] = useState<Personnel | null>(null);
+  const [payPerson, setPayPerson] = useState<Personnel | null>(null);
   const [transferUnitId, setTransferUnitId] = useState("");
   const [transferDate, setTransferDate] = useState(
     () => new Date().toISOString().slice(0, 10),
@@ -1239,6 +1241,17 @@ export default function PersonnelPage() {
                                   调岗
                                 </Button>
                               )}
+                              {canEditPersonnel && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 px-2 text-xs"
+                                  title="试用转正或调薪，按生效日分段"
+                                  onClick={() => setPayPerson(person)}
+                                >
+                                  调整薪酬
+                                </Button>
+                              )}
                               <Button variant="ghost" size="icon" onClick={() => openEdit(person)}>
                                 <Pencil className="h-4 w-4" />
                               </Button>
@@ -1267,6 +1280,15 @@ export default function PersonnelPage() {
         </CardContent>
       </Card>
       )}
+
+      <MPayPlanDialog
+        person={payPerson}
+        open={!!payPerson}
+        onOpenChange={(open) => {
+          if (!open) setPayPerson(null);
+        }}
+        canEdit={showActions && !isReadOnly && canEditPersonnel}
+      />
 
       <MPersonProductCommission
         person={commissionPerson}
@@ -1419,7 +1441,8 @@ export default function PersonnelPage() {
                     </Badge>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    月薪 = 底薪 + 绩效 + 岗位补贴 + 管理提成 + 个人提成（提成根据销售业绩动态计算）
+                    月薪 = 底薪 + 绩效 + 岗位补贴 + 管理提成 + 个人提成（提成根据销售业绩动态计算）。
+                    试用转正、调薪请用列表「调整薪酬」并填写生效日，否则会改掉历史月份成本。
                   </p>
 
                   {/* 底薪 */}

@@ -1,6 +1,7 @@
 import { toDateOnly } from '@/lib/settlement'
 import type {
   Personnel,
+  PersonnelPayPlan,
   PersonnelRegularCompensation,
   ProductPersonCommission,
   SalaryStructure,
@@ -84,10 +85,36 @@ export function isDistributionDay(person: Personnel, day: string): boolean {
   return d >= highFrom
 }
 
+/** start 含当天；end 为空=当前段；有 end 则 end 不含当天（调薪日归新段） */
+export function isPayPlanActiveOn(plan: PersonnelPayPlan, day: string): boolean {
+  const d = toDateOnly(day)
+  if (!d) return false
+  const start = toDateOnly(plan.startDate)
+  if (!start || d < start) return false
+  const end = toDateOnly(plan.endDate)
+  if (end && d >= end) return false
+  return true
+}
+
+/** 解析某人在 asOfDate 的薪酬段；多段重叠时取 start 最晚的一段 */
+export function resolvePayPlanAt(
+  person: Personnel,
+  asOfDate: string,
+): PersonnelPayPlan | null {
+  const d = toDateOnly(asOfDate) || asOfDate
+  const list = person.payPlans || []
+  if (list.length === 0) return null
+  const active = list.filter((p) => isPayPlanActiveOn(p, d))
+  if (active.length === 0) return null
+  active.sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''))
+  return active[active.length - 1] || null
+}
+
 /**
  * 按「业务日」解析应用哪套固定薪酬
  * - 分销段：用人员当前 salary/社保（一般为 0）
- * - 分销前：优先用 regularCompensation 快照，否则用当前值
+ * - 有薪酬时间轴：用当天生效段（含底薪/绩效/补贴/社保公积金）
+ * - 分销前无时间轴：优先用 regularCompensation 快照，否则用当前值
  */
 export function resolvePayForDate(person: Personnel, day: string): ResolvedPay {
   const d = toDateOnly(day) || day
@@ -97,6 +124,15 @@ export function resolvePayForDate(person: Personnel, day: string): ResolvedPay {
       socialInsurance: person.socialInsurance || 0,
       housingFund: person.housingFund || 0,
       isDistribution: true,
+    }
+  }
+  const plan = resolvePayPlanAt(person, d)
+  if (plan) {
+    return {
+      salary: plan.salary || EMPTY_SALARY,
+      socialInsurance: plan.socialInsurance || 0,
+      housingFund: plan.housingFund || 0,
+      isDistribution: false,
     }
   }
   const snap = person.regularCompensation
@@ -113,6 +149,60 @@ export function resolvePayForDate(person: Personnel, day: string): ResolvedPay {
     socialInsurance: person.socialInsurance || 0,
     housingFund: person.housingFund || 0,
     isDistribution: false,
+  }
+}
+
+export type FixedPayMonthTotals = {
+  baseSalary: number
+  performance: number
+  positionAllowance: number
+  socialInsurance: number
+  housingFund: number
+  fixedRatio: number
+  /** 计薪日加权后的月薪底薪，用于请假扣款 */
+  leaveBaseSalary: number
+}
+
+/**
+ * 按日历日累加固定人力成本（底薪/绩效/补贴/社保公积金）
+ * 月中转正、调薪会按天数拆成两套标准，不会用新薪覆盖整月
+ */
+export function accumulateFixedPayInMonth(
+  person: Personnel,
+  yearMonth: string,
+  includeDay?: (day: string) => boolean,
+): FixedPayMonthTotals {
+  const days = eachDateInMonth(yearMonth)
+  const calendar = days.length || 1
+  let baseSalary = 0
+  let performance = 0
+  let positionAllowance = 0
+  let socialInsurance = 0
+  let housingFund = 0
+  let fixedDays = 0
+  for (const day of days) {
+    if (!isFixedPayDay(person, day)) continue
+    if (includeDay && !includeDay(day)) continue
+    const pay = resolvePayForDate(person, day)
+    const s = pay.salary || EMPTY_SALARY
+    baseSalary += (Number(s.baseSalary) || 0) / calendar
+    performance += (Number(s.performance) || 0) / calendar
+    positionAllowance += (Number(s.positionAllowance) || 0) / calendar
+    socialInsurance += (Number(pay.socialInsurance) || 0) / calendar
+    housingFund += (Number(pay.housingFund) || 0) / calendar
+    fixedDays += 1
+  }
+  const leaveBaseSalary = fixedDays > 0
+    ? (baseSalary * calendar) / fixedDays
+    : 0
+  return {
+    baseSalary,
+    performance,
+    positionAllowance,
+    socialInsurance,
+    housingFund,
+    fixedRatio: fixedDays / calendar,
+    leaveBaseSalary,
   }
 }
 

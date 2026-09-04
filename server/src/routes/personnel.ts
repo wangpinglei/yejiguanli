@@ -8,6 +8,7 @@ import {
   runUnitDataReconcile,
   getPersonnelUnitDiagnosis,
   afterManualAssignmentChange,
+  loadPayPlansByPersonnelIds,
 } from "../db";
 import { authMiddleware } from "../auth";
 import { getVisibleUnitIds, requireEditPermission, isOrgDept, isReadOnly, requireRole } from "../middleware";
@@ -101,6 +102,80 @@ function closeAllOpenAssignments(
   return closed;
 }
 
+function listOpenPayPlans(
+  db: ReturnType<typeof getDb>,
+  personnelId: string,
+): Array<{ id: string; start_date: string }> {
+  return db
+    .prepare(`
+      SELECT id, start_date
+      FROM personnel_pay_plans
+      WHERE personnel_id = ?
+        AND (end_date IS NULL OR TRIM(end_date) = '')
+      ORDER BY start_date ASC, created_at ASC
+    `)
+    .all(personnelId) as Array<{ id: string; start_date: string }>;
+}
+
+function closeAllOpenPayPlans(
+  db: ReturnType<typeof getDb>,
+  personnelId: string,
+  endDate: string,
+): number {
+  const openRows = listOpenPayPlans(db, personnelId);
+  const updateEnd = db.prepare(
+    "UPDATE personnel_pay_plans SET end_date = ? WHERE id = ?",
+  );
+  let closed = 0;
+  for (const row of openRows) {
+    const openStart = String(row.start_date || "").slice(0, 10);
+    const end = openStart && endDate < openStart ? openStart : endDate;
+    updateEnd.run(end, row.id);
+    closed += 1;
+  }
+  return closed;
+}
+
+function insertOpenPayPlan(
+  db: ReturnType<typeof getDb>,
+  personnelId: string,
+  startDate: string,
+  salaryJson: string,
+  socialInsurance: number,
+  housingFund: number,
+  remark = "",
+  operator?: { name: string; id: string },
+) {
+  db.prepare(`
+    INSERT INTO personnel_pay_plans (
+      id, personnel_id, start_date, end_date, salary,
+      social_insurance, housing_fund, remark, created_at,
+      operator, operator_id
+    ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, datetime('now'), ?, ?)
+  `).run(
+    generateId("ppp"),
+    personnelId,
+    startDate,
+    salaryJson,
+    socialInsurance || 0,
+    housingFund || 0,
+    remark,
+    operator?.name || "",
+    operator?.id || "",
+  );
+}
+
+function loadPayPlanRows(
+  db: ReturnType<typeof getDb>,
+  personnelId: string,
+) {
+  return db
+    .prepare(
+      "SELECT * FROM personnel_pay_plans WHERE personnel_id = ? ORDER BY start_date ASC, created_at ASC",
+    )
+    .all(personnelId);
+}
+
 /**
  * 入参可显式清空：null / "" → 写 null；undefined → 保留原值
  */
@@ -143,7 +218,15 @@ router.get("/", (req, res) => {
     db,
     rows.map((r) => r.id),
   );
-  res.json(rows.map((r) => rowToPersonnel(r, assignMap.get(r.id) || [])));
+  const payMap = loadPayPlansByPersonnelIds(
+    db,
+    rows.map((r) => r.id),
+  );
+  res.json(rows.map((r) => rowToPersonnel(
+    r,
+    assignMap.get(r.id) || [],
+    payMap.get(r.id) || [],
+  )));
 });
 
 function loadPersonnelWithAssignments(db: ReturnType<typeof getDb>, personnelId: string) {
@@ -154,7 +237,7 @@ function loadPersonnelWithAssignments(db: ReturnType<typeof getDb>, personnelId:
       "SELECT * FROM personnel_unit_assignments WHERE personnel_id = ? ORDER BY start_date",
     )
     .all(personnelId);
-  return rowToPersonnel(existing, assigns);
+  return rowToPersonnel(existing, assigns, loadPayPlanRows(db, personnelId));
 }
 
 /**
@@ -350,6 +433,16 @@ router.post("/", requireEditPermission, (req, res) => {
       regularJson,
     );
     insertOpenAssignment(db, id, salesUnitId, startDate, "入职建档", getOperator(req));
+    insertOpenPayPlan(
+      db,
+      id,
+      startDate,
+      salaryJson,
+      socialInsurance || 0,
+      housingFund || 0,
+      "入职建档",
+      getOperator(req),
+    );
   });
 
   const row = db.prepare("SELECT * FROM personnel WHERE id = ?").get(id);
@@ -358,7 +451,7 @@ router.post("/", requireEditPermission, (req, res) => {
       "SELECT * FROM personnel_unit_assignments WHERE personnel_id = ? ORDER BY start_date",
     )
     .all(id);
-  res.json(rowToPersonnel(row, assigns));
+  res.json(rowToPersonnel(row, assigns, loadPayPlanRows(db, id)));
 });
 
 /**
@@ -647,6 +740,7 @@ router.post("/merge", requireEditPermission, (req, res) => {
     db.prepare("DELETE FROM performance_targets WHERE personnel_id = ?").run(removeId);
     db.prepare("DELETE FROM hr_profiles WHERE personnel_id = ?").run(removeId);
     db.prepare("DELETE FROM personnel_unit_assignments WHERE personnel_id = ?").run(removeId);
+    db.prepare("DELETE FROM personnel_pay_plans WHERE personnel_id = ?").run(removeId);
     db.prepare("UPDATE sales_records SET personnel_id = '' WHERE personnel_id = ?").run(removeId);
     db.prepare("DELETE FROM personnel WHERE id = ?").run(removeId);
 
@@ -661,6 +755,7 @@ router.post("/merge", requireEditPermission, (req, res) => {
   const personnel = rowToPersonnel(
     db.prepare("SELECT * FROM personnel WHERE id = ?").get(keepId),
     keepAssigns,
+    loadPayPlanRows(db, keepId),
   );
   const productPersonCommissions = (
     db.prepare("SELECT * FROM product_person_commissions WHERE personnel_id = ?").all(keepId) as any[]
@@ -672,6 +767,98 @@ router.post("/merge", requireEditPermission, (req, res) => {
     stats,
     message: `已合并「${remove.name}」到「${keep.name}」`,
   });
+});
+
+/**
+ * POST /api/personnel/:id/adjust-pay
+ * 调薪/转正：关闭当前薪酬段，从生效日起用新底薪/绩效/补贴/社保公积金；此前月份仍用旧标准。
+ */
+router.post("/:id/adjust-pay", requireEditPermission, (req, res) => {
+  if (isOrgDept(req.user!.role) || isReadOnly(req.user!)) {
+    return res.status(403).json({ error: "当前角色无权调整薪酬" });
+  }
+
+  const { id } = req.params;
+  const effectiveDate = String(req.body?.effectiveDate || "").trim().slice(0, 10);
+  const remark = String(req.body?.remark || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)) {
+    return res.status(400).json({ error: "请填写薪酬生效日（年-月-日）" });
+  }
+
+  const db = getDb();
+  const existing: any = db.prepare("SELECT * FROM personnel WHERE id = ?").get(id);
+  if (!existing) return res.status(404).json({ error: "人员不存在" });
+
+  const visibleIds = getVisibleUnitIds(req.user!);
+  if (visibleIds !== null && !visibleIds.includes(existing.sales_unit_id)) {
+    return res.status(403).json({ error: "无权操作所选单位人员" });
+  }
+
+  const nextSalary = req.body?.salary
+    ? { ...parseSalary(existing.salary), ...req.body.salary }
+    : parseSalary(existing.salary);
+  const salaryJson = JSON.stringify(nextSalary);
+  const nextSocial = req.body?.socialInsurance !== undefined
+    ? Number(req.body.socialInsurance) || 0
+    : (existing.social_insurance || 0);
+  const nextHousing = req.body?.housingFund !== undefined
+    ? Number(req.body.housingFund) || 0
+    : (existing.housing_fund || 0);
+
+  const openRows = listOpenPayPlans(db, id);
+  if (openRows.length > 0) {
+    const latestStart = openRows
+      .map((r) => String(r.start_date || "").slice(0, 10))
+      .sort()
+      .pop();
+    if (latestStart && effectiveDate < latestStart) {
+      return res.status(400).json({
+        error: `生效日不能早于当前薪酬段开始日 ${latestStart}`,
+      });
+    }
+  }
+
+  runInTransaction(() => {
+    if (openRows.length > 0) {
+      closeAllOpenPayPlans(db, id, effectiveDate);
+    } else {
+      const hire = String(existing.hire_date || "").slice(0, 10) || "1970-01-01";
+      const oldStart = hire <= effectiveDate ? hire : effectiveDate;
+      db.prepare(`
+        INSERT INTO personnel_pay_plans (
+          id, personnel_id, start_date, end_date, salary,
+          social_insurance, housing_fund, remark, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, '调薪前补录', datetime('now'))
+      `).run(
+        generateId("ppp"),
+        id,
+        oldStart,
+        effectiveDate,
+        existing.salary || "{}",
+        existing.social_insurance || 0,
+        existing.housing_fund || 0,
+      );
+    }
+
+    insertOpenPayPlan(
+      db,
+      id,
+      effectiveDate,
+      salaryJson,
+      nextSocial,
+      nextHousing,
+      remark || "调薪",
+      getOperator(req),
+    );
+    db.prepare(`
+      UPDATE personnel SET salary = ?, social_insurance = ?, housing_fund = ?
+      WHERE id = ?
+    `).run(salaryJson, nextSocial, nextHousing, id);
+  });
+
+  const personnel = loadPersonnelWithAssignments(db, id);
+  if (!personnel) return res.status(404).json({ error: "人员不存在" });
+  res.json(personnel);
 });
 
 /**
@@ -877,6 +1064,39 @@ router.post("/:id/enable-distribution", requireEditPermission, (req, res) => {
     id,
   );
 
+  const distSalaryJson = JSON.stringify(newSalary);
+  const openPayRows = listOpenPayPlans(db, id);
+  if (openPayRows.length > 0) {
+    closeAllOpenPayPlans(db, id, highCommissionFrom);
+  } else {
+    const hire = String(existing.hire_date || "").slice(0, 10) || "1970-01-01";
+    const oldStart = hire <= highCommissionFrom ? hire : highCommissionFrom;
+    db.prepare(`
+      INSERT INTO personnel_pay_plans (
+        id, personnel_id, start_date, end_date, salary,
+        social_insurance, housing_fund, remark, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, '分销前补录', datetime('now'))
+    `).run(
+      generateId("ppp"),
+      id,
+      oldStart,
+      highCommissionFrom,
+      existing.salary || "{}",
+      existing.social_insurance || 0,
+      existing.housing_fund || 0,
+    );
+  }
+  insertOpenPayPlan(
+    db,
+    id,
+    highCommissionFrom,
+    distSalaryJson,
+    0,
+    0,
+    "启用分销",
+    getOperator(req),
+  );
+
   // 可选：把当前产品提成统一改成分销比例（历史已在快照中）
   if (distributionRate != null && Number.isFinite(distributionRate)) {
     const now = new Date().toISOString();
@@ -913,7 +1133,7 @@ router.post("/:id/enable-distribution", requireEditPermission, (req, res) => {
     )
     .all(id);
   res.json({
-    personnel: rowToPersonnel(row, assigns),
+    personnel: rowToPersonnel(row, assigns, loadPayPlanRows(db, id)),
     productPersonCommissions: db
       .prepare("SELECT * FROM product_person_commissions WHERE personnel_id = ?")
       .all(id)
@@ -948,7 +1168,7 @@ router.put("/:id", requireEditPermission, (req, res) => {
         "SELECT * FROM personnel_unit_assignments WHERE personnel_id = ? ORDER BY start_date",
       )
       .all(id);
-    return res.json(rowToPersonnel(row, assigns));
+    return res.json(rowToPersonnel(row, assigns, loadPayPlanRows(db, id)));
   }
 
   if (isReadOnly(req.user!)) {
@@ -1000,6 +1220,23 @@ router.put("/:id", requireEditPermission, (req, res) => {
       id,
     );
 
+    if (salary || socialInsurance !== undefined || housingFund !== undefined) {
+      const openPay = listOpenPayPlans(db, id);
+      const latest = openPay[openPay.length - 1];
+      if (latest) {
+        db.prepare(`
+          UPDATE personnel_pay_plans
+          SET salary = ?, social_insurance = ?, housing_fund = ?
+          WHERE id = ?
+        `).run(
+          salaryJson,
+          socialInsurance ?? existing.social_insurance,
+          housingFund ?? existing.housing_fund,
+          latest.id,
+        );
+      }
+    }
+
     // 编辑里改单位：按今天生效写入时间轴（精确日期请用「转岗」）
     if (unitChanged) {
       const today = new Date().toISOString().slice(0, 10);
@@ -1041,7 +1278,7 @@ router.put("/:id", requireEditPermission, (req, res) => {
       "SELECT * FROM personnel_unit_assignments WHERE personnel_id = ? ORDER BY start_date",
     )
     .all(id);
-  res.json(rowToPersonnel(row, assigns));
+  res.json(rowToPersonnel(row, assigns, loadPayPlanRows(db, id)));
 });
 
 // DELETE /api/personnel/:id - 删除人员（同步删除人事档案；人员管理手动数据由调用方确认）

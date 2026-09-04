@@ -82,6 +82,23 @@ export interface Personnel {
   regularCompensation?: PersonnelRegularCompensation;
   /** 单位归属时间轴（转岗历史）；缺省则仅认当前 salesUnitId */
   unitAssignments?: PersonnelUnitAssignment[];
+  /** 薪酬时间轴（试用/转正/调薪）；缺省则仅认当前 salary/社保公积金 */
+  payPlans?: PersonnelPayPlan[];
+}
+
+/** 人员固定薪酬时间段：start 含当天，end 空=当前；有 end 则当天起用下一段 */
+export interface PersonnelPayPlan {
+  id: string;
+  personnelId: string;
+  startDate: string;
+  endDate?: string;
+  salary: SalaryStructure;
+  socialInsurance: number;
+  housingFund: number;
+  remark?: string;
+  createdAt?: string;
+  operator?: string;
+  operatorId?: string;
 }
 
 /** 人员在销售单位的归属时间段：start 含当天，end 空=当前；有 end 则当天起归下一段 */

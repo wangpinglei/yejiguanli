@@ -2,6 +2,7 @@ import { calcSaleCommissionReward } from "@/lib/commissionReward";
 import {
   isDistributionDay,
   resolvePayForMonth,
+  accumulateFixedPayInMonth,
   resolvePpcListForSaleDate,
 } from "@/lib/compensation";
 import {
@@ -15,6 +16,7 @@ import { getPersonTeamMgmtCommission } from "@/lib/teamMgmtCommission";
 import {
   getUnitFixedPayRatioInMonth,
   personBelongsToUnitInMonth,
+  resolveUnitIdAt,
 } from "@/lib/unitAssignment";
 import type {
   SalaryStructure,
@@ -750,9 +752,19 @@ export function calculateMonthlySalary(
         fixedRatio: 1,
       };
   const s = pay.salary || EMPTY_SALARY;
-  let fixedRatio = Number.isFinite(pay.fixedRatio) ? pay.fixedRatio : 1;
-  // 按单位归属时间轴切分固定人力成本
-  if (forUnitId && yearMonth) {
+  const acc = yearMonth
+    ? accumulateFixedPayInMonth(
+        person,
+        yearMonth,
+        forUnitId
+          ? (day) => resolveUnitIdAt(person, day) === forUnitId
+          : undefined,
+      )
+    : null;
+  let fixedRatio = acc
+    ? acc.fixedRatio
+    : (Number.isFinite(pay.fixedRatio) ? pay.fixedRatio : 1);
+  if (!acc && forUnitId && yearMonth) {
     fixedRatio = getUnitFixedPayRatioInMonth(person, forUnitId, yearMonth);
   }
   const personalSales = getPersonalSales(person.id, monthlyRecords, person.name);
@@ -795,12 +807,17 @@ export function calculateMonthlySalary(
   // 旧产品级提成已废弃
   const productCommission = 0;
 
-  const baseSalary = (s.baseSalary || 0) * fixedRatio;
-  const performance = (s.performance || 0) * fixedRatio;
-  const positionAllowance = (s.positionAllowance || 0) * fixedRatio;
+  const baseSalary = acc ? acc.baseSalary : (s.baseSalary || 0) * fixedRatio;
+  const performance = acc ? acc.performance : (s.performance || 0) * fixedRatio;
+  const positionAllowance = acc
+    ? acc.positionAllowance
+    : (s.positionAllowance || 0) * fixedRatio;
 
   const leaveDeduction = adjustment
-    ? calcLeaveDeduction(s.baseSalary, adjustment.leaveDays || 0)
+    ? calcLeaveDeduction(
+        acc ? acc.leaveBaseSalary : (s.baseSalary || 0),
+        adjustment.leaveDays || 0,
+      )
     : 0;
   const otherBonus = adjustment?.otherBonus || 0;
   const otherDeduction = adjustment?.otherDeduction || 0;
@@ -828,8 +845,12 @@ export function calculateMonthlySalary(
     otherBonus,
     otherDeduction,
     total,
-    socialInsurance: (pay.socialInsurance || 0) * fixedRatio,
-    housingFund: (pay.housingFund || 0) * fixedRatio,
+    socialInsurance: acc
+      ? acc.socialInsurance
+      : (pay.socialInsurance || 0) * fixedRatio,
+    housingFund: acc
+      ? acc.housingFund
+      : (pay.housingFund || 0) * fixedRatio,
     fixedRatio,
   };
 }

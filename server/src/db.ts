@@ -399,6 +399,23 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_pua_personnel ON personnel_unit_assignments(personnel_id);
     CREATE INDEX IF NOT EXISTS idx_pua_unit ON personnel_unit_assignments(sales_unit_id);
 
+    CREATE TABLE IF NOT EXISTS personnel_pay_plans (
+      id TEXT PRIMARY KEY,
+      personnel_id TEXT NOT NULL,
+      start_date TEXT NOT NULL,
+      end_date TEXT,
+      salary TEXT NOT NULL DEFAULT '{}',
+      social_insurance REAL DEFAULT 0,
+      housing_fund REAL DEFAULT 0,
+      remark TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now')),
+      operator TEXT DEFAULT '',
+      operator_id TEXT DEFAULT '',
+      FOREIGN KEY (personnel_id) REFERENCES personnel(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ppp_personnel ON personnel_pay_plans(personnel_id);
+
     CREATE TABLE IF NOT EXISTS finance_notice_config (
       id TEXT PRIMARY KEY DEFAULT 'default',
       notice_text TEXT DEFAULT '',
@@ -1934,7 +1951,45 @@ export function rowToPersonnelUnitAssignment(row: any) {
   };
 }
 
-export function rowToPersonnel(row: any, assignments?: any[]) {
+export function rowToPersonnelPayPlan(row: any) {
+  return {
+    id: row.id,
+    personnelId: row.personnel_id,
+    startDate: row.start_date || "",
+    endDate: row.end_date || undefined,
+    salary: parseJsonField(row.salary, {}),
+    socialInsurance: row.social_insurance || 0,
+    housingFund: row.housing_fund || 0,
+    remark: row.remark || "",
+    createdAt: row.created_at || "",
+    operator: row.operator || undefined,
+    operatorId: row.operator_id || undefined,
+  };
+}
+
+export function loadPayPlansByPersonnelIds(
+  db: ReturnType<typeof getDb>,
+  ids: string[],
+): Map<string, any[]> {
+  const map = new Map<string, any[]>();
+  if (ids.length === 0) return map;
+  const placeholders = ids.map(() => "?").join(",");
+  const rows = db
+    .prepare(`
+      SELECT * FROM personnel_pay_plans
+      WHERE personnel_id IN (${placeholders})
+      ORDER BY start_date ASC, created_at ASC
+    `)
+    .all(...ids) as any[];
+  for (const row of rows) {
+    const list = map.get(row.personnel_id) || [];
+    list.push(row);
+    map.set(row.personnel_id, list);
+  }
+  return map;
+}
+
+export function rowToPersonnel(row: any, assignments?: any[], payPlans?: any[]) {
   let regularCompensation: any = undefined;
   const rawMeta = row.regular_compensation;
   if (rawMeta) {
@@ -1962,6 +2017,9 @@ export function rowToPersonnel(row: any, assignments?: any[]) {
     regularCompensation: regularCompensation || undefined,
     unitAssignments: Array.isArray(assignments)
       ? assignments.map(rowToPersonnelUnitAssignment)
+      : undefined,
+    payPlans: Array.isArray(payPlans)
+      ? payPlans.map(rowToPersonnelPayPlan)
       : undefined,
   };
 }

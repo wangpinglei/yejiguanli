@@ -140,6 +140,16 @@ interface DataContextType {
     id: string,
     data: { salesUnitId: string; effectiveDate: string; remark?: string },
   ) => Promise<Personnel>;
+  adjustPersonnelPay: (
+    id: string,
+    data: {
+      effectiveDate: string
+      salary?: Partial<import("@/types").SalaryStructure>
+      socialInsurance?: number
+      housingFund?: number
+      remark?: string
+    },
+  ) => Promise<Personnel>;
   ensurePersonnelByName: (
     name: string,
     salesUnitId: string,
@@ -414,6 +424,23 @@ export function DataProvider({ children }: { children: ReactNode }) {
       data: { salesUnitId: string; effectiveDate: string; remark?: string },
     ) => {
       const updated = await personnelApi.transfer(id, data);
+      setPersonnel((prev) => prev.map((x) => (x.id === id ? updated : x)));
+      return updated;
+    },
+    [],
+  );
+  const adjustPersonnelPay = useCallback(
+    async (
+      id: string,
+      data: {
+        effectiveDate: string
+        salary?: Partial<import("@/types").SalaryStructure>
+        socialInsurance?: number
+        housingFund?: number
+        remark?: string
+      },
+    ) => {
+      const updated = await personnelApi.adjustPay(id, data);
       setPersonnel((prev) => prev.map((x) => (x.id === id ? updated : x)));
       return updated;
     },
@@ -854,7 +881,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     teamMgmtCommissionRules,
     costChangeLogs, notifications, monthlyAdjustments, loading,
     addSalesUnit, updateSalesUnit, deleteSalesUnit,
-    addPersonnel, updatePersonnel, deletePersonnel, mergePersonnel, enablePersonnelDistribution, transferPersonnel, ensurePersonnelByName,
+    addPersonnel, updatePersonnel, deletePersonnel, mergePersonnel, enablePersonnelDistribution, transferPersonnel, adjustPersonnelPay, ensurePersonnelByName,
     addProduct, updateProduct, deleteProduct, ensureProductByName,
     addSalesRecord, updateSalesRecord, deleteSalesRecord,
     addCostRecord, updateCostRecord, deleteCostRecord,

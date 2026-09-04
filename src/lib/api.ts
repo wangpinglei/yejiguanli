@@ -157,6 +157,17 @@ export const personnelApi = {
     data: { salesUnitId: string; effectiveDate: string; remark?: string },
   ) =>
     api.post<import("@/types").Personnel>(`/personnel/${id}/transfer`, data),
+  adjustPay: (
+    id: string,
+    data: {
+      effectiveDate: string
+      salary?: Partial<import("@/types").SalaryStructure>
+      socialInsurance?: number
+      housingFund?: number
+      remark?: string
+    },
+  ) =>
+    api.post<import("@/types").Personnel>(`/personnel/${id}/adjust-pay`, data),
   deleteAssignment: (personnelId: string, assignmentId: string) =>
     api.delete<import("@/types").Personnel>(
       `/personnel/${personnelId}/assignments/${assignmentId}`,

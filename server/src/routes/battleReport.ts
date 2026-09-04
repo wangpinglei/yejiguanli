@@ -7,6 +7,7 @@ import {
   rowToPositionGroupLabel,
   rowToSalesUnit,
   rowToUnitProductSettlement,
+  loadPayPlansByPersonnelIds,
 } from '../db'
 import { buildUnitBattleReport } from '../lib/battleReport'
 
@@ -64,6 +65,7 @@ router.get('/battle-report', (req, res) => {
   const personnelRows = db.prepare('SELECT * FROM personnel').all() as Array<{
     id: string
   }>
+  const ids = personnelRows.map((r) => r.id)
   const assignRows = db
     .prepare(
       `SELECT * FROM personnel_unit_assignments
@@ -76,8 +78,9 @@ router.get('/battle-report', (req, res) => {
     list.push(row)
     assignMap.set(row.personnel_id, list)
   }
+  const payMap = loadPayPlansByPersonnelIds(db, ids)
   const personnel = personnelRows.map((r) =>
-    rowToPersonnel(r, assignMap.get(r.id) || []),
+    rowToPersonnel(r, assignMap.get(r.id) || [], payMap.get(r.id) || []),
   )
   const salesRecords = db
     .prepare('SELECT * FROM sales_records')
