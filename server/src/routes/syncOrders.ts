@@ -186,11 +186,21 @@ function findOrCreateProductId(
 }
 
 function upsertSyncedOrder(order: SyncOrderInput): {
-  action: 'added' | 'updated'
+  action: 'added' | 'updated' | 'skipped'
   id: string
 } {
   const db = getDb()
   const externalOrderId = buildExternalOrderId(order)
+
+  const deleted = db
+    .prepare(
+      'SELECT external_order_id FROM deleted_synced_orders WHERE external_order_id = ? LIMIT 1',
+    )
+    .get(externalOrderId) as { external_order_id?: string } | undefined
+  if (deleted?.external_order_id) {
+    return { action: 'skipped', id: '' }
+  }
+
   const unitId = findUnitId(db, order.salesUnitName)
   const splitJson = parsePerformanceSplitText(
     order.salesPersonName,
@@ -224,8 +234,15 @@ function upsertSyncedOrder(order: SyncOrderInput): {
   const syncedAt = new Date().toISOString()
 
   const existing = db
-    .prepare('SELECT id FROM sales_records WHERE external_order_id = ? LIMIT 1')
-    .get(externalOrderId) as { id: string } | undefined
+    .prepare(
+      'SELECT id, collaborators FROM sales_records WHERE external_order_id = ? LIMIT 1',
+    )
+    .get(externalOrderId) as { id: string; collaborators?: string } | undefined
+
+  // 同步未带分业绩时，保留库里已有的手工分业绩，避免整单被算回主责单位
+  const collaboratorsToSave =
+    collaboratorsJson
+    || (existing?.collaborators ? String(existing.collaborators) : '')
 
   if (existing?.id) {
     db.prepare(`
@@ -253,7 +270,7 @@ function upsertSyncedOrder(order: SyncOrderInput): {
       order.orderAmount,
       order.orderType,
       order.activityName,
-      collaboratorsJson,
+      collaboratorsToSave,
       existing.id,
     )
     return { action: 'updated', id: existing.id }
@@ -286,7 +303,7 @@ function upsertSyncedOrder(order: SyncOrderInput): {
     order.orderAmount,
     order.orderType,
     order.activityName,
-    collaboratorsJson,
+    collaboratorsToSave,
   )
   return { action: 'added', id }
 }
@@ -339,7 +356,8 @@ router.post('/sync-orders', (req, res) => {
       }
       const result = upsertSyncedOrder(order)
       if (result.action === 'added') added++
-      else updated++
+      else if (result.action === 'updated') updated++
+      else skipped++
     } catch (err) {
       skipped++
       errors.push(err instanceof Error ? err.message : String(err))

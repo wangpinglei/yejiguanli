@@ -166,11 +166,41 @@ router.put("/:id", requireModuleEdit("sales_records"), (req, res) => {
 
 router.delete("/:id", requireModuleEdit("sales_records"), (req, res) => {
   const db = getDb();
-  const existing = db.prepare("SELECT * FROM sales_records WHERE id = ?").get(req.params.id);
+  const existing = db.prepare("SELECT * FROM sales_records WHERE id = ?").get(req.params.id) as
+    | {
+      id: string;
+      synced?: number;
+      external_order_id?: string;
+      customer_name?: string;
+      sale_date?: string;
+      total_amount?: number;
+    }
+    | undefined;
   if (!existing) return res.status(404).json({ error: "销售记录不存在" });
   const visibleIds = getVisibleUnitIds(req.user!);
   if (!isSalesRowVisible(visibleIds, existing as object)) {
     return res.status(403).json({ error: "只能操作自己可见单位的销售记录" });
+  }
+  const externalId = String(existing.external_order_id || "").trim();
+  if (existing.synced && externalId) {
+    db.prepare(`
+      INSERT INTO deleted_synced_orders (
+        external_order_id, deleted_at, deleted_by, customer_name, sale_date, total_amount
+      ) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(external_order_id) DO UPDATE SET
+        deleted_at=excluded.deleted_at,
+        deleted_by=excluded.deleted_by,
+        customer_name=excluded.customer_name,
+        sale_date=excluded.sale_date,
+        total_amount=excluded.total_amount
+    `).run(
+      externalId,
+      new Date().toISOString(),
+      req.user?.username || req.user?.id || "",
+      existing.customer_name || "",
+      existing.sale_date || "",
+      Number(existing.total_amount) || 0,
+    );
   }
   db.prepare("DELETE FROM sales_records WHERE id = ?").run(req.params.id);
   res.json({ message: "删除成功" });

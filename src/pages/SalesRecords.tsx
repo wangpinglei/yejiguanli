@@ -15,6 +15,7 @@ import {
   getPersonShareQuantity,
   getSaleShareMode,
   getSaleShares,
+  resolveCollaboratorUnitId,
   validatePerformanceSplit,
   type SaleCollaborator,
   type SaleShareMode,
@@ -608,15 +609,7 @@ export default function SalesRecords() {
           (s.customerName || "").toLowerCase().includes(search.toLowerCase()) ||
           (s.externalOrderId || "").toLowerCase().includes(search.toLowerCase());
         const matchUnit =
-          filterUnit === "all"
-          || s.salesUnitId === filterUnit
-          || (s.collaborators || []).some((c) => {
-            if (c.salesUnitId === filterUnit) return true;
-            const p = personnel.find((x) => x.id === c.personnelId);
-            if (!p) return false;
-            return resolveUnitIdAt(p, s.saleDate) === filterUnit
-              || p.salesUnitId === filterUnit;
-          });
+          filterUnit === "all" || saleMatchesUnitFilter(s, filterUnit);
         const matchPerson =
           filterPerson === "all"
           || s.personnelId === filterPerson
@@ -1065,14 +1058,17 @@ export default function SalesRecords() {
     await refreshSyncedOrders();
   };
 
-  function collaboratorMatchesUnit(c: SaleCollaborator, unitId: string, sale: SalesRecord) {
-    if (c.salesUnitId === unitId) return true;
-    const p = personnel.find((x) => x.id === c.personnelId);
-    if (!p) return false;
-    return resolveUnitIdAt(p, sale.saleDate) === unitId || p.salesUnitId === unitId;
+  function saleMatchesUnitFilter(s: SalesRecord, unitId: string): boolean {
+    const shares = getSaleShares(s);
+    if (shares.length >= 2) {
+      return shares.some(
+        (c) => resolveCollaboratorUnitId(c, s.saleDate || "", personnel) === unitId,
+      );
+    }
+    return s.salesUnitId === unitId;
   }
 
-  /** 当前筛选下该单计入的业绩（按人/单位份额，非整单） */
+  /** 当前筛选下该单计入的业绩（按分业绩归属单位份额，非整单） */
   function getFilteredShareAmount(s: SalesRecord): number {
     if (filterPerson !== "all") {
       return getPersonShareAmount(s, filterPerson);
@@ -1081,7 +1077,9 @@ export default function SalesRecords() {
       const shares = getSaleShares(s);
       if (shares.length >= 2) {
         return shares
-          .filter((c) => collaboratorMatchesUnit(c, filterUnit, s))
+          .filter(
+            (c) => resolveCollaboratorUnitId(c, s.saleDate || "", personnel) === filterUnit,
+          )
           .reduce((sum, c) => sum + getPersonShareAmount(s, c.personnelId), 0);
       }
       return s.salesUnitId === filterUnit ? (Number(s.totalAmount) || 0) : 0;
@@ -1124,11 +1122,14 @@ export default function SalesRecords() {
       const shares = getSaleShares(s);
       if (shares.length >= 2) {
         return shares
-          .filter((c) => collaboratorMatchesUnit(c, filterUnit, s))
+          .filter(
+            (c) => resolveCollaboratorUnitId(c, s.saleDate || "", personnel) === filterUnit,
+          )
           .reduce((sum, c) => {
             const amount = getPersonShareAmount(s, c.personnelId);
             if (!(amount > 0)) return sum;
-            const unitId = c.salesUnitId || filterUnit;
+            const unitId = resolveCollaboratorUnitId(c, s.saleDate || "", personnel)
+              || filterUnit;
             let part = calcSalePersonCommissionPreview(
               {
                 productId: s.productId,
@@ -1612,8 +1613,22 @@ export default function SalesRecords() {
             {filterDuplicate === "duplicate" ? " · 已筛选" : " · 点击筛选"}
           </Button>
         )}
-        <Badge className="h-8 px-3 text-sm bg-blue-50 text-blue-700">
-          合计 {formatCurrency(totalRevenue)}
+        <Badge
+          className="h-8 px-3 text-sm bg-blue-50 text-blue-700"
+          title={
+            filterPerson !== "all"
+              ? "按当前人员份额合计（分业绩只计本人）"
+              : filterUnit !== "all"
+                ? "按当前单位份额合计（分业绩只计本单位，不含其他单位分摊）"
+                : "当前列表实收合计"
+          }
+        >
+          {filterPerson !== "all"
+            ? "本人份额 "
+            : filterUnit !== "all"
+              ? "本单位份额 "
+              : "合计 "}
+          {formatCurrency(totalRevenue)}
         </Badge>
         <Badge
           className="h-8 px-3 text-sm bg-violet-50 text-violet-700"

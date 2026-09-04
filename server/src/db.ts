@@ -455,6 +455,15 @@ function initSchema() {
       status TEXT DEFAULT 'sent',
       error TEXT DEFAULT ''
     );
+
+    CREATE TABLE IF NOT EXISTS deleted_synced_orders (
+      external_order_id TEXT PRIMARY KEY,
+      deleted_at TEXT NOT NULL,
+      deleted_by TEXT DEFAULT '',
+      customer_name TEXT DEFAULT '',
+      sale_date TEXT DEFAULT '',
+      total_amount REAL DEFAULT 0
+    );
   `);
 
   ensureColumns("sales_units", [
