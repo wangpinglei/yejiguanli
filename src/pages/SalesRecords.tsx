@@ -20,8 +20,17 @@ import {
   type SaleShareMode,
 } from "@/lib/saleCollaborators";
 import { resolveUnitIdAt } from "@/lib/unitAssignment";
+import {
+  buildSaleNameMaps,
+  buildSalesDuplicateFingerprint,
+  getSalesRecordFingerprint,
+  type SaleNameMaps,
+} from "@/lib/salesDuplicate";
 import type { SalesRecord } from "@/types";
-import { Plus, Search, Pencil, Trash2, RefreshCw, CloudDownload, Upload, FileSpreadsheet, CheckCircle2, AlertCircle, ChevronLeft, ChevronRight, Users } from "lucide-react";
+import {
+  Plus, Search, Pencil, Trash2, RefreshCw, CloudDownload, Upload, FileSpreadsheet,
+  CheckCircle2, AlertCircle, ChevronLeft, ChevronRight, Users, ZoomIn,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -53,13 +62,34 @@ import {
   getProductDomainKey,
 } from "./ProductSettlement/components/m-business-domain-section";
 
+const SALE_STICKY_OPS =
+  "sticky right-0 z-20 border-l shadow-[-8px_0_12px_-8px_rgba(0,0,0,0.16)]";
+
+const UI_SCALE_KEY = "yeji.salesRecordsUiScale";
+const UI_SCALE_OPTIONS = [
+  { value: "1", label: "标准" },
+  { value: "1.2", label: "放大" },
+  { value: "1.35", label: "更大" },
+] as const;
+type UiScale = (typeof UI_SCALE_OPTIONS)[number]["value"];
+
+function readUiScale(): UiScale {
+  try {
+    const v = localStorage.getItem(UI_SCALE_KEY);
+    if (v === "1" || v === "1.2" || v === "1.35") return v;
+  } catch {
+    /* ignore */
+  }
+  return "1.2";
+}
+
 /** 长文本截断，点击展开查看全文 */
 function ExpandableCellText({
   text,
   emptyText = "-",
   label = "完整内容",
   maxLen = 10,
-  className = "max-w-[9rem]",
+  className = "max-w-[11rem]",
 }: {
   text?: string;
   emptyText?: string;
@@ -69,10 +99,10 @@ function ExpandableCellText({
 }) {
   const value = (text || "").trim();
   if (!value) {
-    return <span className="text-sm text-muted-foreground">{emptyText}</span>;
+    return <span className="text-base text-muted-foreground">{emptyText}</span>;
   }
   if (value.length <= maxLen) {
-    return <span className="text-sm">{value}</span>;
+    return <span className="text-base">{value}</span>;
   }
   return (
     <Popover>
@@ -80,7 +110,7 @@ function ExpandableCellText({
         <button
           type="button"
           className={
-            `block w-full truncate text-left text-sm text-primary hover:underline cursor-pointer ${className}`
+            `block w-full truncate text-left text-base text-primary hover:underline cursor-pointer ${className}`
           }
           title="点击查看完整内容"
         >
@@ -88,8 +118,8 @@ function ExpandableCellText({
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-80 max-w-[min(20rem,90vw)] p-3">
-        <p className="mb-1 text-xs text-muted-foreground">{label}</p>
-        <p className="text-sm break-all whitespace-pre-wrap">{value}</p>
+        <p className="mb-1 text-sm text-muted-foreground">{label}</p>
+        <p className="text-base break-all whitespace-pre-wrap">{value}</p>
       </PopoverContent>
     </Popover>
   );
@@ -121,62 +151,14 @@ interface ImportRow {
   duplicateExistingId?: string; // 可覆盖的已有记录 id
 }
 
-/** 用于判断「全部一模一样」的指纹 */
-function buildSalesImportFingerprint(r: {
-  customerName?: string;
-  productName?: string;
-  productId?: string;
-  orderAmount?: number;
-  totalAmount?: number;
-  orderType?: string;
-  salesUnitId?: string;
-  salesUnitName?: string;
-  personnelId?: string;
-  salesPersonName?: string;
-  saleDate?: string;
-  activityName?: string;
-}): string {
-  return [
-    (r.customerName || "").trim().toLowerCase(),
-    (r.productName || "").trim().toLowerCase() || (r.productId || ""),
-    Number(r.orderAmount || 0).toFixed(2),
-    Number(r.totalAmount || 0).toFixed(2),
-    (r.orderType || "").trim().toLowerCase(),
-    (r.salesUnitId || "").trim() || (r.salesUnitName || "").trim().toLowerCase(),
-    (r.personnelId || "").trim() || (r.salesPersonName || "").trim().toLowerCase(),
-    (r.saleDate || "").slice(0, 10),
-    (r.activityName || "").trim().toLowerCase(),
-  ].join("|");
-}
-
-function getSalesRecordFingerprint(
-  s: SalesRecord,
-  idToProductName: Map<string, string>,
-): string {
-  return buildSalesImportFingerprint({
-    customerName: s.customerName,
-    productName: s.productName || idToProductName.get(s.productId || "") || "",
-    productId: s.productId,
-    orderAmount: s.orderAmount,
-    totalAmount: s.totalAmount,
-    orderType: s.orderType,
-    salesUnitId: s.salesUnitId,
-    salesUnitName: s.salesUnitName,
-    personnelId: s.personnelId,
-    salesPersonName: s.salesPersonName,
-    saleDate: s.saleDate,
-    activityName: s.activityName,
-  });
-}
-
 /** 每组完全相同的记录保留 1 笔（优先留同步单），返回可删的多余 id */
 function pickDeletableDuplicateIds(
   records: SalesRecord[],
-  idToProductName: Map<string, string>,
+  maps: SaleNameMaps,
 ): string[] {
   const groups = new Map<string, SalesRecord[]>();
   for (const s of records) {
-    const key = getSalesRecordFingerprint(s, idToProductName);
+    const key = getSalesRecordFingerprint(s, maps);
     const list = groups.get(key);
     if (list) list.push(s);
     else groups.set(key, [s]);
@@ -210,41 +192,27 @@ function pickDeletableDuplicateIds(
 function markDuplicateImportRows(
   rows: ImportRow[],
   existing: SalesRecord[],
-  productList: { id: string; name: string }[]
+  productList: { id: string; name: string }[],
+  personList: { id: string; name: string }[],
+  unitList: { id: string; name: string }[],
 ): ImportRow[] {
-  const idToProductName = new Map(productList.map((p) => [p.id, p.name || ""]));
+  const maps = buildSaleNameMaps(productList, personList, unitList);
   const existingByKey = new Map<string, string>();
   for (const s of existing) {
-    const key = buildSalesImportFingerprint({
-      customerName: s.customerName,
-      productName: s.productName || idToProductName.get(s.productId || "") || "",
-      productId: s.productId,
-      orderAmount: s.orderAmount,
-      totalAmount: s.totalAmount,
-      orderType: s.orderType,
-      salesUnitId: s.salesUnitId,
-      salesUnitName: s.salesUnitName,
-      personnelId: s.personnelId,
-      salesPersonName: s.salesPersonName,
-      saleDate: s.saleDate,
-      activityName: s.activityName,
-    });
+    const key = getSalesRecordFingerprint(s, maps);
     if (!existingByKey.has(key)) existingByKey.set(key, s.id);
   }
 
   const seenInFile = new Set<string>();
   return rows.map((row) => {
-    const key = buildSalesImportFingerprint({
+    const key = buildSalesDuplicateFingerprint({
       customerName: row.customerName,
-      productName: row.productName,
-      productId: row.matchedProductId,
+      productName: maps.productNameById.get(row.matchedProductId) || row.productName,
       orderAmount: row.orderAmount,
       totalAmount: row.totalAmount,
       orderType: row.orderType,
-      salesUnitId: row.matchedUnitId,
-      salesUnitName: row.salesUnitName,
-      personnelId: row.matchedPersonId,
-      salesPersonName: row.salesPersonName,
+      unitName: maps.unitNameById.get(row.matchedUnitId) || row.salesUnitName,
+      personName: maps.personNameById.get(row.matchedPersonId) || row.salesPersonName,
       saleDate: row.saleDate,
       activityName: row.activityName,
     });
@@ -558,6 +526,16 @@ export default function SalesRecords() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const tableCardRef = useRef<HTMLDivElement>(null);
   const [highlightSynced, setHighlightSynced] = useState(false);
+  const [uiScale, setUiScale] = useState<UiScale>(readUiScale);
+
+  function handleChangeUiScale(next: UiScale) {
+    setUiScale(next);
+    try {
+      localStorage.setItem(UI_SCALE_KEY, next);
+    } catch {
+      /* ignore */
+    }
+  }
 
   const [form, setForm] = useState({
     salesUnitId: "",
@@ -578,17 +556,17 @@ export default function SalesRecords() {
   const [collaborators, setCollaborators] = useState<SaleCollaborator[]>([]);
   const isEditingSynced = Boolean(editingRecord?.synced);
 
-  const idToProductName = useMemo(
-    () => new Map(products.map((p) => [p.id, p.name || ""])),
-    [products],
+  const saleNameMaps = useMemo(
+    () => buildSaleNameMaps(products, personnel, salesUnits),
+    [products, personnel, salesUnits],
   );
 
-  /** 系统中「内容完全相同」的销售记录 id（出现次数 > 1） */
+  /** 系统中业务内容相同的销售记录 id（出现次数 > 1，忽略手动/生态圈来源） */
   const duplicateRecordIdSet = useMemo(() => {
     const keyCounts = new Map<string, number>();
     const idToKey = new Map<string, string>();
     for (const s of salesRecords) {
-      const key = getSalesRecordFingerprint(s, idToProductName);
+      const key = getSalesRecordFingerprint(s, saleNameMaps);
       idToKey.set(s.id, key);
       keyCounts.set(key, (keyCounts.get(key) || 0) + 1);
     }
@@ -597,7 +575,7 @@ export default function SalesRecords() {
       if ((keyCounts.get(key) || 0) > 1) set.add(id);
     });
     return set;
-  }, [salesRecords, idToProductName]);
+  }, [salesRecords, saleNameMaps]);
 
   const domainOptions = useMemo(() => {
     const set = new Set<string>();
@@ -692,8 +670,8 @@ export default function SalesRecords() {
   const selectableRecords = useMemo(() => pagedRecords, [pagedRecords]);
   /** 重复筛选下：每组保留 1 笔后，其余可删 id */
   const duplicateExtraDeletableIdSet = useMemo(
-    () => new Set(pickDeletableDuplicateIds(filteredRecords, idToProductName)),
-    [filteredRecords, idToProductName],
+    () => new Set(pickDeletableDuplicateIds(filteredRecords, saleNameMaps)),
+    [filteredRecords, saleNameMaps],
   );
   const pageSelectTargets = useMemo(
     () => (filterDuplicate === "duplicate"
@@ -1050,7 +1028,7 @@ export default function SalesRecords() {
 
   /** 自动勾选每组重复中的多余记录（每组留 1 笔，跨页；有同步单时优先保留 1 笔同步） */
   function handleSelectAllFilteredDeletable() {
-    const ids = pickDeletableDuplicateIds(filteredRecords, idToProductName);
+    const ids = pickDeletableDuplicateIds(filteredRecords, saleNameMaps);
     if (ids.length === 0) {
       alert("没有可删除的多余重复（每组需至少保留 1 笔）");
       return;
@@ -1061,7 +1039,7 @@ export default function SalesRecords() {
   // 批量删除（含同步订单；重复筛选下每组仍保留 1 笔）
   const handleBatchDelete = async () => {
     try {
-      const extraSet = new Set(pickDeletableDuplicateIds(salesRecords, idToProductName));
+      const extraSet = new Set(pickDeletableDuplicateIds(salesRecords, saleNameMaps));
       const ids = Array.from(selectedIds).filter((id) => {
         const r = salesRecords.find((s) => s.id === id);
         if (!r) return false;
@@ -1198,7 +1176,9 @@ export default function SalesRecords() {
     } else if (emptyCustomer > 0) {
       console.warn(`导入预览：${emptyCustomer} 行客户姓名为空`);
     }
-    const marked = markDuplicateImportRows(rows, salesRecords, products);
+    const marked = markDuplicateImportRows(
+      rows, salesRecords, products, personnel, salesUnits,
+    );
     const dupCount = marked.filter((r) => r.isDuplicate).length;
     setImportRows(marked);
     setImportDupFilter("all");
@@ -1449,7 +1429,22 @@ export default function SalesRecords() {
         title="销售记录管理"
         description="记录每笔销售：销售人员、销售产品、销售时间与金额（支持生态圈订单同步）"
         action={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1 rounded-lg border bg-background p-1">
+              <ZoomIn className="mx-1 h-4 w-4 text-muted-foreground" />
+              {UI_SCALE_OPTIONS.map((opt) => (
+                <Button
+                  key={opt.value}
+                  type="button"
+                  size="sm"
+                  variant={uiScale === opt.value ? "default" : "ghost"}
+                  className="h-8 px-3"
+                  onClick={() => handleChangeUiScale(opt.value)}
+                >
+                  {opt.label}
+                </Button>
+              ))}
+            </div>
             {canEditSales && !isReadOnly && selectedIds.size > 0 && (
               <Button variant="destructive" onClick={() => setBatchDeleteOpen(true)}>
                 <Trash2 className="mr-2 h-4 w-4" />批量删除 ({selectedIds.size})
@@ -1473,6 +1468,10 @@ export default function SalesRecords() {
         }
       />
 
+      <div
+        className="origin-top-left"
+        style={{ zoom: Number(uiScale) }}
+      >
       {/* 同步状态卡片 */}
       {(syncedCount > 0 || syncedLoading) && (
         <div className="mb-4 flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50/50 px-4 py-2.5">
@@ -1504,26 +1503,37 @@ export default function SalesRecords() {
 
       {/* Filters */}
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 max-w-xs">
+        <div className="relative flex-1 min-w-[16rem] max-w-sm">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input placeholder="搜索人员/产品/客户/订单号..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
+          <Input
+            placeholder="搜索人员/产品/客户/订单号..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-10 pl-10 text-base"
+          />
         </div>
         <Select value={filterUnit} onValueChange={(v) => { setFilterUnit(v); setFilterPerson("all"); }}>
-          <SelectTrigger className="w-40"><SelectValue placeholder="筛选单位" /></SelectTrigger>
+          <SelectTrigger className="h-10 w-44 text-base">
+            <SelectValue placeholder="筛选单位" />
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部单位</SelectItem>
             {salesUnits.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={filterPerson} onValueChange={setFilterPerson}>
-          <SelectTrigger className="w-36"><SelectValue placeholder="筛选人员" /></SelectTrigger>
+          <SelectTrigger className="h-10 w-40 text-base">
+            <SelectValue placeholder="筛选人员" />
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部人员</SelectItem>
             {availablePersonnel.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={filterSync} onValueChange={setFilterSync}>
-          <SelectTrigger className="w-36"><SelectValue placeholder="数据来源" /></SelectTrigger>
+          <SelectTrigger className="h-10 w-40 text-base">
+            <SelectValue placeholder="数据来源" />
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部来源</SelectItem>
             <SelectItem value="synced">仅同步</SelectItem>
@@ -1531,7 +1541,9 @@ export default function SalesRecords() {
           </SelectContent>
         </Select>
         <Select value={filterDomain} onValueChange={setFilterDomain}>
-          <SelectTrigger className="w-40"><SelectValue placeholder="业务域" /></SelectTrigger>
+          <SelectTrigger className="h-10 w-44 text-base">
+            <SelectValue placeholder="业务域" />
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部业务域</SelectItem>
             {domainOptions.map((d) => (
@@ -1542,7 +1554,9 @@ export default function SalesRecords() {
           </SelectContent>
         </Select>
         <Select value={filterDuplicate} onValueChange={(v) => setFilterDuplicate(v as "all" | "duplicate" | "unique")}>
-          <SelectTrigger className="w-36"><SelectValue placeholder="重复信息" /></SelectTrigger>
+          <SelectTrigger className="h-10 w-40 text-base">
+            <SelectValue placeholder="重复信息" />
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部记录</SelectItem>
             <SelectItem value="duplicate">仅重复</SelectItem>
@@ -1550,35 +1564,37 @@ export default function SalesRecords() {
           </SelectContent>
         </Select>
         <div className="flex items-center gap-1.5">
-          <span className="text-xs text-muted-foreground whitespace-nowrap">成交日期</span>
+          <span className="text-sm text-muted-foreground whitespace-nowrap">成交日期</span>
           <Input
             type="date"
             value={dateFrom}
             max={dateTo || undefined}
             onChange={(e) => setDateFrom(e.target.value)}
-            className="w-[140px]"
+            className="h-10 w-[150px] text-base"
           />
-          <span className="text-xs text-muted-foreground">至</span>
+          <span className="text-sm text-muted-foreground">至</span>
           <Input
             type="date"
             value={dateTo}
             min={dateFrom || undefined}
             onChange={(e) => setDateTo(e.target.value)}
-            className="w-[140px]"
+            className="h-10 w-[150px] text-base"
           />
           {(dateFrom || dateTo) && (
             <Button
               type="button"
               variant="ghost"
               size="sm"
-              className="h-9 px-2 text-xs"
+              className="h-10 px-3 text-sm"
               onClick={() => { setDateFrom(""); setDateTo(""); }}
             >
               清除
             </Button>
           )}
         </div>
-        <Badge variant="secondary">{filteredRecords.length} 笔</Badge>
+        <Badge variant="secondary" className="h-8 px-3 text-sm">
+          {filteredRecords.length} 笔
+        </Badge>
         {duplicateCountInFilters > 0 && (
           <Button
             type="button"
@@ -1586,8 +1602,8 @@ export default function SalesRecords() {
             size="sm"
             className={
               filterDuplicate === "duplicate"
-                ? "h-8 rounded-full bg-orange-500 hover:bg-orange-600 text-white border-orange-500"
-                : "h-8 rounded-full border-orange-300 bg-orange-100 text-orange-800 hover:bg-orange-200 cursor-pointer"
+                ? "h-10 rounded-full bg-orange-500 hover:bg-orange-600 text-white border-orange-500 text-sm"
+                : "h-10 rounded-full border-orange-300 bg-orange-100 text-orange-800 hover:bg-orange-200 cursor-pointer text-sm"
             }
             onClick={handleToggleDuplicateFilter}
             title={filterDuplicate === "duplicate" ? "点击取消重复筛选" : "点击筛选重复记录并批量操作"}
@@ -1596,8 +1612,13 @@ export default function SalesRecords() {
             {filterDuplicate === "duplicate" ? " · 已筛选" : " · 点击筛选"}
           </Button>
         )}
-        <Badge className="bg-blue-50 text-blue-700">合计 {formatCurrency(totalRevenue)}</Badge>
-        <Badge className="bg-violet-50 text-violet-700" title="按人员管理「人×产品」个人提成+特殊奖励预估（比例不含月门槛）">
+        <Badge className="h-8 px-3 text-sm bg-blue-50 text-blue-700">
+          合计 {formatCurrency(totalRevenue)}
+        </Badge>
+        <Badge
+          className="h-8 px-3 text-sm bg-violet-50 text-violet-700"
+          title="按人员管理「人×产品」个人提成+特殊奖励预估（比例不含月门槛）"
+        >
           提成预估 {formatCurrency(totalCommission)}
         </Badge>
       </div>
@@ -1660,68 +1681,85 @@ export default function SalesRecords() {
 
       <Card ref={tableCardRef}>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <Table>
+          <p className="border-b bg-muted/30 px-4 py-2 text-sm text-muted-foreground">
+            表格可左右滑动查看全部列；右侧「操作」已固定。字太小可点右上角「放大 / 更大」。
+          </p>
+          <Table className="min-w-[1780px] text-base [&_th]:text-base [&_td]:text-base">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-10 text-center">
+                  <TableHead className="h-14 w-14 px-3 text-center text-base">
                     <input
                       type="checkbox"
                       checked={allSelected}
                       ref={(el) => { if (el) el.indeterminate = someSelected && !allSelected; }}
                       onChange={(e) => toggleSelectAll(e.target.checked)}
-                      className="h-4 w-4 cursor-pointer"
+                      className="h-5 w-5 cursor-pointer"
                       aria-label={
                         filterDuplicate === "duplicate" ? "全选本页多余重复" : "全选本页"
                       }
                     />
                   </TableHead>
-                  <TableHead className="w-[9.5rem]">客户姓名</TableHead>
-                  <TableHead>购买产品</TableHead>
-                  <TableHead className="text-right">订单金额</TableHead>
-                  <TableHead className="text-right">实收金额</TableHead>
-                  <TableHead>订单类型</TableHead>
-                  <TableHead>销售单位</TableHead>
-                  <TableHead>销售人员</TableHead>
-                  <TableHead>成交日期</TableHead>
-                  <TableHead>参加活动</TableHead>
-                  <TableHead className="text-right">提成预估</TableHead>
-                  <TableHead>来源</TableHead>
-                  <TableHead className="text-right">操作</TableHead>
+                  <TableHead className="h-14 min-w-[10rem] px-3 text-base">客户姓名</TableHead>
+                  <TableHead className="h-14 min-w-[12rem] px-3 text-base">购买产品</TableHead>
+                  <TableHead className="h-14 min-w-[7rem] px-3 text-right text-base">订单金额</TableHead>
+                  <TableHead className="h-14 min-w-[7rem] px-3 text-right text-base">实收金额</TableHead>
+                  <TableHead className="h-14 min-w-[7rem] px-3 text-base">订单类型</TableHead>
+                  <TableHead className="h-14 min-w-[8rem] px-3 text-base">销售单位</TableHead>
+                  <TableHead className="h-14 min-w-[10rem] px-3 text-base">销售人员</TableHead>
+                  <TableHead className="h-14 min-w-[8rem] px-3 text-base">成交日期</TableHead>
+                  <TableHead className="h-14 min-w-[10rem] px-3 text-base">参加活动</TableHead>
+                  <TableHead className="h-14 min-w-[7rem] px-3 text-right text-base">提成预估</TableHead>
+                  <TableHead className="h-14 min-w-[6rem] px-3 text-base">来源</TableHead>
+                  <TableHead
+                    className={`h-14 min-w-[220px] px-3 text-right text-base bg-background ${SALE_STICKY_OPS}`}
+                  >
+                    操作
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {pagedRecords.map((record) => (
+                {pagedRecords.map((record) => {
+                  const isDup = duplicateRecordIdSet.has(record.id);
+                  const rowTone = isDup
+                    ? "bg-orange-50"
+                    : record.synced
+                      ? (highlightSynced ? "bg-blue-100" : "bg-blue-50")
+                      : "bg-background";
+                  return (
                   <TableRow
                     key={record.id}
                     className={
-                      duplicateRecordIdSet.has(record.id)
-                        ? "bg-orange-50/40"
+                      isDup
+                        ? "bg-orange-50"
                         : record.synced
                           ? (highlightSynced
-                            ? "bg-blue-100/80 ring-1 ring-inset ring-blue-300"
-                            : "bg-blue-50/30")
+                            ? "bg-blue-100 ring-1 ring-inset ring-blue-300"
+                            : "bg-blue-50")
                           : ""
                     }
                   >
-                    <TableCell className="text-center">
+                    <TableCell className="px-3 py-3 text-center">
                       <input
                         type="checkbox"
                         checked={selectedIds.has(record.id)}
                         onChange={() => toggleSelect(record.id)}
-                        className="h-4 w-4 cursor-pointer"
+                        className="h-5 w-5 cursor-pointer"
                         aria-label="选择该行"
                       />
                     </TableCell>
-                    <TableCell className="max-w-[9.5rem]">
+                    <TableCell className="max-w-[11rem] px-3 py-3">
                       <ExpandableCellText
                         text={record.customerName}
                         label="客户姓名"
                       />
                     </TableCell>
-                    <TableCell className="whitespace-nowrap">{getProductName(record)}</TableCell>
-                    <TableCell className="text-right text-muted-foreground whitespace-nowrap">{record.orderAmount ? formatCurrency(record.orderAmount) : "-"}</TableCell>
-                    <TableCell className="text-right font-bold text-blue-600 whitespace-nowrap">
+                    <TableCell className="whitespace-nowrap px-3 py-3">
+                      {getProductName(record)}
+                    </TableCell>
+                    <TableCell className="px-3 py-3 text-right text-muted-foreground whitespace-nowrap">
+                      {record.orderAmount ? formatCurrency(record.orderAmount) : "-"}
+                    </TableCell>
+                    <TableCell className="px-3 py-3 text-right font-bold text-blue-600 whitespace-nowrap">
                       {formatCurrency(
                         filterPerson !== "all" || filterUnit !== "all"
                           ? getFilteredShareAmount(record)
@@ -1731,52 +1769,56 @@ export default function SalesRecords() {
                         && getSaleShares(record).length >= 2
                         && getFilteredShareAmount(record) !== record.totalAmount
                         && (
-                          <div className="text-[10px] font-normal text-muted-foreground">
+                          <div className="text-xs font-normal text-muted-foreground">
                             整单 {formatCurrency(record.totalAmount)}
                           </div>
                         )}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="px-3 py-3">
                       {record.orderType ? (
-                        <Badge variant="outline" className="text-xs">{record.orderType}</Badge>
+                        <Badge variant="outline" className="text-sm">{record.orderType}</Badge>
                       ) : "-"}
                     </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{getUnitName(record)}</Badge>
+                    <TableCell className="px-3 py-3">
+                      <Badge variant="outline" className="text-sm">{getUnitName(record)}</Badge>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="px-3 py-3">
                       <div className="flex items-center gap-2">
-                        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-sm font-medium text-primary">
                           {getPersonnelName(record)[0]}
                         </div>
                         {getPersonnelName(record)}
                       </div>
                     </TableCell>
-                    <TableCell className="font-medium whitespace-nowrap">{formatDate(record.saleDate)}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                    <TableCell className="px-3 py-3 font-medium whitespace-nowrap">
+                      {formatDate(record.saleDate)}
+                    </TableCell>
+                    <TableCell className="px-3 py-3 text-muted-foreground whitespace-nowrap">
                       {record.activityName && record.activityName !== "无活动" ? (
-                        <Badge className="bg-amber-100 text-amber-700 text-xs">{record.activityName}</Badge>
+                        <Badge className="bg-amber-100 text-amber-700 text-sm">
+                          {record.activityName}
+                        </Badge>
                       ) : (
-                        <span className="text-xs">-</span>
+                        <span className="text-sm">-</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-right text-violet-600 font-medium whitespace-nowrap">
+                    <TableCell className="px-3 py-3 text-right text-violet-600 font-medium whitespace-nowrap">
                       {(() => {
                         const commission = getFilteredCommission(record);
                         return commission > 0 ? formatCurrency(commission) : "-";
                       })()}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="px-3 py-3">
                       <div className="flex flex-col gap-1 items-start">
                         {record.synced ? (
-                          <Badge className="bg-blue-100 text-blue-700 text-xs">生态圈</Badge>
+                          <Badge className="bg-blue-100 text-blue-700 text-sm">生态圈</Badge>
                         ) : (
-                          <Badge variant="outline" className="text-xs">手动</Badge>
+                          <Badge variant="outline" className="text-sm">手动</Badge>
                         )}
                         {record.collaborators && record.collaborators.length > 1 && (
-                          <Badge className="bg-violet-100 text-violet-700 text-xs">分业绩</Badge>
+                          <Badge className="bg-violet-100 text-violet-700 text-sm">分业绩</Badge>
                         )}
-                        {duplicateRecordIdSet.has(record.id) && (
+                        {isDup && (
                           <button
                             type="button"
                             className="inline-flex"
@@ -1789,50 +1831,56 @@ export default function SalesRecords() {
                               }
                             }}
                           >
-                            <Badge className="bg-orange-100 text-orange-700 text-xs cursor-pointer hover:bg-orange-200">
+                            <Badge className="bg-orange-100 text-orange-700 text-sm cursor-pointer hover:bg-orange-200">
                               重复
                             </Badge>
                           </button>
                         )}
                       </div>
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className={`px-3 py-4 text-right ${SALE_STICKY_OPS} ${rowTone}`}>
                       {canEditSales && !isReadOnly ? (
-                        <div className="flex justify-end gap-1">
+                        <div className="flex justify-end gap-2">
                           <Button
-                            variant="ghost"
-                            size="icon"
+                            variant="outline"
+                            size="sm"
+                            className="h-10 min-w-[4.75rem] px-3 text-base"
                             title={record.synced ? "编辑订单分业绩" : "编辑"}
                             onClick={() => openEdit(record)}
                           >
-                            <Pencil className="h-4 w-4" />
+                            <Pencil className="mr-1 h-4 w-4" />
+                            编辑
                           </Button>
                           <Button
-                            variant="ghost"
-                            size="icon"
+                            variant="outline"
+                            size="sm"
+                            className="h-10 min-w-[4.75rem] px-3 text-base text-destructive hover:text-destructive"
                             title={record.synced ? "删除同步订单" : "删除"}
                             onClick={() => setDeleteId(record.id)}
                           >
-                            <Trash2 className="h-4 w-4 text-destructive" />
+                            <Trash2 className="mr-1 h-4 w-4" />
+                            删除
                           </Button>
                         </div>
                       ) : (
-                        <span className="text-xs text-muted-foreground">仅查看</span>
+                        <span className="text-base text-muted-foreground">仅查看</span>
                       )}
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
                 {filteredRecords.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={13} className="text-center py-12 text-muted-foreground">暂无数据</TableCell>
+                    <TableCell colSpan={13} className="text-center py-12 text-muted-foreground">
+                      暂无数据
+                    </TableCell>
                   </TableRow>
                 )}
               </TableBody>
             </Table>
-          </div>
           {filteredRecords.length > 0 && (
             <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
-              <p className="text-xs text-muted-foreground">
+              <p className="text-sm text-muted-foreground">
                 第 {(safePage - 1) * pageSize + 1}
                 –
                 {Math.min(safePage * pageSize, filteredRecords.length)}
@@ -1843,7 +1891,7 @@ export default function SalesRecords() {
                   value={String(pageSize)}
                   onValueChange={(v) => setPageSize(Number(v))}
                 >
-                  <SelectTrigger className="h-8 w-[100px]">
+                  <SelectTrigger className="h-10 w-[110px] text-sm">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1855,22 +1903,20 @@ export default function SalesRecords() {
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
-                  className="h-8"
+                  className="h-10 px-4"
                   disabled={safePage <= 1}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                 >
                   <ChevronLeft className="h-4 w-4" />
                   上一页
                 </Button>
-                <span className="text-sm tabular-nums min-w-[4.5rem] text-center">
+                <span className="text-base tabular-nums min-w-[4.5rem] text-center">
                   {safePage} / {totalPages}
                 </span>
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
-                  className="h-8"
+                  className="h-10 px-4"
                   disabled={safePage >= totalPages}
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                 >
@@ -1882,10 +1928,11 @@ export default function SalesRecords() {
           )}
         </CardContent>
       </Card>
+      </div>
 
       {/* Add/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {editingRecord

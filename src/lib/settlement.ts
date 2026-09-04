@@ -93,3 +93,85 @@ export function formatSettlementPeriod(ups?: UnitProductSettlement): string {
   if (from === '不限' && to === '不限') return '长期有效'
   return `${from} ~ ${to}`
 }
+
+function getCommonValue<T>(values: T[]): T | undefined {
+  if (values.length === 0) return undefined
+  const first = values[0]
+  return values.every((v) => v === first) ? first : undefined
+}
+
+export type BatchSettleForm = {
+  settlementType: 'percentage' | 'fixed'
+  settlementRate: number | ''
+  settlementAmount: number | ''
+  effectiveFrom: string
+  effectiveTo: string
+  rewardAmount: number | ''
+  rewardFrom: string
+  rewardTo: string
+  excludeFromTeamMgmt: boolean
+  excludeFromPerformance: boolean
+  note: string
+}
+
+/** 批量弹窗：各单位已设且相同则带出；都没设或互相不一致则留空 */
+export function buildBatchSettleForm(
+  existing: UnitProductSettlement[],
+): BatchSettleForm {
+  const blank: BatchSettleForm = {
+    settlementType: 'percentage',
+    settlementRate: '',
+    settlementAmount: '',
+    effectiveFrom: '',
+    effectiveTo: '',
+    rewardAmount: '',
+    rewardFrom: '',
+    rewardTo: '',
+    excludeFromTeamMgmt: false,
+    excludeFromPerformance: false,
+    note: '',
+  }
+  if (existing.length === 0) return blank
+
+  const settlementType = getCommonValue(existing.map((x) => x.settlementType))
+  const settlementRate = getCommonValue(
+    existing.map((x) => (x.settlementRate == null ? null : x.settlementRate)),
+  )
+  const settlementAmount = getCommonValue(
+    existing.map((x) => (x.settlementAmount == null ? null : x.settlementAmount)),
+  )
+  const effectiveFrom = getCommonValue(existing.map((x) => x.effectiveFrom || ''))
+  const effectiveTo = getCommonValue(existing.map((x) => x.effectiveTo || ''))
+  const rewardAmount = getCommonValue(
+    existing.map((x) => (x.rewardAmount == null ? null : x.rewardAmount)),
+  )
+  const rewardFrom = getCommonValue(existing.map((x) => x.rewardFrom || ''))
+  const rewardTo = getCommonValue(existing.map((x) => x.rewardTo || ''))
+  const excludeFromTeamMgmt = getCommonValue(
+    existing.map((x) => !!x.excludeFromTeamMgmt),
+  )
+  const excludeFromPerformance = getCommonValue(
+    existing.map((x) => !!x.excludeFromPerformance),
+  )
+  const note = getCommonValue(existing.map((x) => x.note || ''))
+
+  return {
+    settlementType: settlementType || 'percentage',
+    settlementRate: settlementRate == null ? '' : settlementRate,
+    settlementAmount: settlementAmount == null ? '' : settlementAmount,
+    effectiveFrom: effectiveFrom || '',
+    effectiveTo: effectiveTo || '',
+    rewardAmount: !rewardAmount ? '' : rewardAmount,
+    rewardFrom: rewardFrom || '',
+    rewardTo: rewardTo || '',
+    excludeFromTeamMgmt: excludeFromTeamMgmt ?? false,
+    excludeFromPerformance: excludeFromPerformance ?? false,
+    note: note || '',
+  }
+}
+
+export function parseNumberInput(raw: string): number | '' {
+  if (raw === '') return ''
+  const n = Number(raw)
+  return Number.isNaN(n) ? '' : n
+}

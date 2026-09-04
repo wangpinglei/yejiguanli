@@ -34,7 +34,69 @@ export type SimilarProductGroup = {
   products: Product[]
 }
 
-export function groupSimilarProducts(products: Product[]): SimilarProductGroup[] {
+function getCategoryKey(product: Product): string {
+  return (product.category || '').trim()
+}
+
+/** 两边都有业务域且不同 → 不是同一产品 */
+function areCategoriesCompatible(a: Product, b: Product): boolean {
+  const ca = getCategoryKey(a)
+  const cb = getCategoryKey(b)
+  if (ca && cb && ca !== cb) return false
+  return true
+}
+
+function splitCompatibleComponents(list: Product[]): Product[][] {
+  const parent = list.map((_, i) => i)
+  function find(i: number): number {
+    if (parent[i] !== i) parent[i] = find(parent[i])
+    return parent[i]
+  }
+  function union(i: number, j: number) {
+    const ri = find(i)
+    const rj = find(j)
+    if (ri !== rj) parent[ri] = rj
+  }
+  for (let i = 0; i < list.length; i++) {
+    for (let j = i + 1; j < list.length; j++) {
+      if (areCategoriesCompatible(list[i], list[j])) union(i, j)
+    }
+  }
+  const map = new Map<number, Product[]>()
+  for (let i = 0; i < list.length; i++) {
+    const root = find(i)
+    const row = map.get(root) || []
+    row.push(list[i])
+    map.set(root, row)
+  }
+  return Array.from(map.values())
+}
+
+export function getSimilarGroupIgnoreKey(products: Product[]): string {
+  return [...products.map((p) => p.id)].sort().join('|')
+}
+
+const IGNORE_STORAGE_KEY = 'yeji.ignoredSimilarProductGroups'
+
+export function loadIgnoredSimilarGroupKeys(): string[] {
+  try {
+    const raw = localStorage.getItem(IGNORE_STORAGE_KEY)
+    const arr = raw ? JSON.parse(raw) : []
+    return Array.isArray(arr) ? arr.filter((x) => typeof x === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+export function saveIgnoredSimilarGroupKeys(keys: string[]) {
+  localStorage.setItem(IGNORE_STORAGE_KEY, JSON.stringify(keys))
+}
+
+export function groupSimilarProducts(
+  products: Product[],
+  ignoredKeys: Iterable<string> = [],
+): SimilarProductGroup[] {
+  const ignored = new Set(ignoredKeys)
   const buckets = new Map<string, Product[]>()
   for (const product of products) {
     const key = normalizeProductName(product.name)
@@ -43,15 +105,22 @@ export function groupSimilarProducts(products: Product[]): SimilarProductGroup[]
     list.push(product)
     buckets.set(key, list)
   }
-  return Array.from(buckets.entries())
-    .filter(([, list]) => list.length > 1)
-    .map(([key, list]) => ({
-      key,
-      products: [...list].sort((a, b) =>
-        (a.name || '').localeCompare(b.name || '', 'zh-CN'),
-      ),
-    }))
-    .sort((a, b) => b.products.length - a.products.length)
+  const groups: SimilarProductGroup[] = []
+  for (const [normKey, list] of buckets.entries()) {
+    if (list.length < 2) continue
+    for (const component of splitCompatibleComponents(list)) {
+      if (component.length < 2) continue
+      const ignoreKey = getSimilarGroupIgnoreKey(component)
+      if (ignored.has(ignoreKey)) continue
+      groups.push({
+        key: `${normKey}::${ignoreKey}`,
+        products: [...component].sort((a, b) =>
+          (a.name || '').localeCompare(b.name || '', 'zh-CN'),
+        ),
+      })
+    }
+  }
+  return groups.sort((a, b) => b.products.length - a.products.length)
 }
 
 export function scoreProductAsKeep(

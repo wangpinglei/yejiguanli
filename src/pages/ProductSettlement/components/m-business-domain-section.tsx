@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import type { Product, SalesRecord, UnitProductSettlement } from '@/types'
 import { formatCurrency } from '@/lib/format'
 import { calcSaleSettlementIncome } from '@/lib/settlement'
-import { Tags, Plus, CheckSquare, X, Eraser, Pencil, Filter } from 'lucide-react'
+import { Tags, Plus, CheckSquare, X, Eraser, Pencil, Filter, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -47,6 +47,7 @@ type Props = {
   onSelectedDomainKeysChange?: (keys: string[]) => void
   onAddDomain?: (name: string) => void
   onRemoveDomain?: (name: string) => Promise<void> | void
+  onRenameDomain?: (oldName: string, newName: string) => Promise<void> | void
   onClearAllDomains?: () => Promise<void> | void
   onUpdateCategory: (productId: string, category: string) => Promise<void>
 }
@@ -85,11 +86,14 @@ export default function MBusinessDomainSection({
   onSelectedDomainKeysChange,
   onAddDomain,
   onRemoveDomain,
+  onRenameDomain,
   onClearAllDomains,
   onUpdateCategory,
 }: Props) {
   const [newDomain, setNewDomain] = useState('')
   const [isDomainEditMode, setIsDomainEditMode] = useState(false)
+  const [editingDomain, setEditingDomain] = useState<string | null>(null)
+  const [editingDomainValue, setEditingDomainValue] = useState('')
   const [batchOpen, setBatchOpen] = useState(false)
   const [batchDomain, setBatchDomain] = useState('')
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([])
@@ -258,6 +262,57 @@ export default function MBusinessDomainSection({
     setNewDomain('')
   }
 
+  function startRenameDomain(name: string) {
+    setEditingDomain(name)
+    setEditingDomainValue(name)
+  }
+
+  function cancelRenameDomain() {
+    setEditingDomain(null)
+    setEditingDomainValue('')
+  }
+
+  async function handleRenameDomain() {
+    if (!onRenameDomain || !editingDomain) return
+    const next = editingDomainValue.trim()
+    if (!next) {
+      alert('业务域名称不能为空')
+      return
+    }
+    if (next === editingDomain) {
+      cancelRenameDomain()
+      return
+    }
+    if (domainOptions.includes(next)) {
+      const ok = confirm(
+        `业务域「${next}」已存在，是否将「${editingDomain}」下的产品并入「${next}」？`,
+      )
+      if (!ok) return
+    }
+    setSaving(true)
+    try {
+      await onRenameDomain(editingDomain, next)
+      setSelectedDomainKeys((prev) => {
+        if (!prev.includes(editingDomain)) return prev
+        const withoutOld = prev.filter((k) => k !== editingDomain)
+        return withoutOld.includes(next) ? withoutOld : [...withoutOld, next]
+      })
+      cancelRenameDomain()
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '未知错误'
+      alert('改名失败: ' + msg)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function handleToggleDomainEditMode() {
+    if (isDomainEditMode) {
+      cancelRenameDomain()
+    }
+    setIsDomainEditMode((v) => !v)
+  }
+
   function openBatchAssign(onlyUncategorized = false) {
     setBatchDomain(domainOptions[0] || '')
     setBatchOnlyUncategorized(onlyUncategorized)
@@ -400,7 +455,7 @@ export default function MBusinessDomainSection({
           <Button
             type="button"
             variant={isDomainEditMode ? 'default' : 'outline'}
-            onClick={() => setIsDomainEditMode((v) => !v)}
+            onClick={handleToggleDomainEditMode}
             disabled={saving}
           >
             <Pencil className="mr-1 h-3.5 w-3.5" />
@@ -421,30 +476,95 @@ export default function MBusinessDomainSection({
           {domainOptions.length > 0 && (
             <div className="w-full flex flex-wrap gap-1.5 pt-1">
               {domainOptions.map((d) => (
-                <Badge
-                  key={d}
-                  variant="secondary"
-                  className={`bg-teal-50 text-teal-800 gap-1 ${isDomainEditMode ? 'pr-1' : ''}`}
-                >
-                  {d}
-                  {isDomainEditMode && onRemoveDomain && (
+                isDomainEditMode && editingDomain === d ? (
+                  <div
+                    key={d}
+                    className="flex items-center gap-1 rounded-md border bg-white px-1 py-0.5"
+                  >
+                    <Input
+                      className="h-7 w-[200px] text-xs"
+                      value={editingDomainValue}
+                      autoFocus
+                      disabled={saving}
+                      onChange={(e) => setEditingDomainValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          void handleRenameDomain()
+                        }
+                        if (e.key === 'Escape') cancelRenameDomain()
+                      }}
+                    />
                     <button
                       type="button"
-                      className="ml-0.5 rounded-sm p-0.5 hover:bg-teal-200/80 disabled:opacity-50"
-                      title={`删除「${d}」`}
+                      className="rounded-sm p-0.5 hover:bg-teal-100 disabled:opacity-50"
+                      title="保存名称"
                       disabled={saving}
-                      onClick={() => handleRemoveDomain(d)}
+                      onClick={() => void handleRenameDomain()}
                     >
-                      <X className="h-3 w-3" />
+                      <Check className="h-3.5 w-3.5 text-teal-700" />
                     </button>
-                  )}
-                </Badge>
+                    <button
+                      type="button"
+                      className="rounded-sm p-0.5 hover:bg-muted disabled:opacity-50"
+                      title="取消"
+                      disabled={saving}
+                      onClick={cancelRenameDomain}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <Badge
+                    key={d}
+                    variant="secondary"
+                    className={`bg-teal-50 text-teal-800 gap-1 ${
+                      isDomainEditMode ? 'pr-1' : ''
+                    }`}
+                  >
+                    {isDomainEditMode && onRenameDomain ? (
+                      <button
+                        type="button"
+                        className="max-w-[220px] truncate text-left hover:underline"
+                        title={`改名「${d}」`}
+                        disabled={saving}
+                        onClick={() => startRenameDomain(d)}
+                      >
+                        {d}
+                      </button>
+                    ) : (
+                      d
+                    )}
+                    {isDomainEditMode && onRenameDomain && (
+                      <button
+                        type="button"
+                        className="rounded-sm p-0.5 hover:bg-teal-200/80 disabled:opacity-50"
+                        title={`改名「${d}」`}
+                        disabled={saving}
+                        onClick={() => startRenameDomain(d)}
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                    )}
+                    {isDomainEditMode && onRemoveDomain && (
+                      <button
+                        type="button"
+                        className="ml-0.5 rounded-sm p-0.5 hover:bg-teal-200/80 disabled:opacity-50"
+                        title={`删除「${d}」`}
+                        disabled={saving}
+                        onClick={() => handleRemoveDomain(d)}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </Badge>
+                )
               ))}
             </div>
           )}
           {isDomainEditMode && (
             <p className="w-full text-xs text-muted-foreground pt-0.5">
-              编辑模式下可删除单个业务域或清空全部；完成后请点「完成编辑」
+              编辑模式下可点击名称改字、删除单个业务域或清空全部；完成后请点「完成编辑」
             </p>
           )}
         </div>

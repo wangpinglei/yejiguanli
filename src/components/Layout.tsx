@@ -159,6 +159,7 @@ export default function Layout() {
     navItems.find((item) => item.path === location.pathname)?.label ||
     MODULE_DEFS.find((m) => m.path === location.pathname)?.label ||
     "数据看板";
+  const isWideTablePage = location.pathname.replace(/\/$/, "") === "/sales-records";
 
   const roleLabel = user
     ? (user.role === "superadmin" ? "超级管理员" : (ROLE_LABELS[user.role] || "自定义权限"))
@@ -298,7 +299,12 @@ export default function Layout() {
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 lg:p-6 scrollbar-thin">
-          <div className="mx-auto max-w-7xl animate-fade-in">
+          <div
+            className={cn(
+              "mx-auto w-full animate-fade-in",
+              isWideTablePage ? "max-w-none" : "max-w-7xl",
+            )}
+          >
             <Outlet />
           </div>
         </main>

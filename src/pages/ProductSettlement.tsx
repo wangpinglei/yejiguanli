@@ -8,6 +8,8 @@ import { filterByMonth, getTotalSalaryCost } from "@/lib/salary";
 import {
   calcSaleSettlementIncome,
   formatSettlementPeriod,
+  buildBatchSettleForm,
+  parseNumberInput,
 } from "@/lib/settlement";
 import type { Product, SalesUnit } from "@/types";
 import {
@@ -36,7 +38,7 @@ import MBusinessDomainSection, {
 } from "./ProductSettlement/components/m-business-domain-section";
 import MUnitSettlementList from "./ProductSettlement/components/m-unit-settlement-list";
 import MProductMergeDialog from "./ProductSettlement/components/m-product-merge-dialog";
-import { groupSimilarProducts } from "@/lib/productMerge";
+import { groupSimilarProducts, loadIgnoredSimilarGroupKeys } from "@/lib/productMerge";
 
 function toggleIdInSet(prev: Set<string>, id: string): Set<string> {
   const next = new Set(prev);
@@ -47,11 +49,11 @@ function toggleIdInSet(prev: Set<string>, id: string): Set<string> {
 
 const EMPTY_SETTLE_FORM = {
   settlementType: "percentage" as "percentage" | "fixed",
-  settlementRate: 100,
-  settlementAmount: 0,
+  settlementRate: 100 as number | "",
+  settlementAmount: 0 as number | "",
   effectiveFrom: "",
   effectiveTo: "",
-  rewardAmount: 0,
+  rewardAmount: 0 as number | "",
   rewardFrom: "",
   rewardTo: "",
   excludeFromTeamMgmt: false,
@@ -108,6 +110,9 @@ export default function ProductSettlement() {
   /** 结算列表视角：按单位（默认）| 按产品 */
   const [settleViewMode, setSettleViewMode] = useState<'unit' | 'product'>('unit');
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [ignoredSimilarKeys, setIgnoredSimilarKeys] = useState(
+    () => loadIgnoredSimilarGroupKeys(),
+  );
 
   // 按月过滤销售记录
   const monthlySales = useMemo(() => filterByMonth(salesRecords, selectedMonth), [salesRecords, selectedMonth]);
@@ -118,7 +123,10 @@ export default function ProductSettlement() {
     return products.filter((p) => idSet.has(p.id));
   }, [products, salesRecords]);
 
-  const similarGroups = useMemo(() => groupSimilarProducts(products), [products]);
+  const similarGroups = useMemo(
+    () => groupSimilarProducts(products, ignoredSimilarKeys),
+    [products, ignoredSimilarKeys],
+  );
 
   // 产品列表（搜索过滤）
   const filteredProducts = useMemo(() => {
@@ -281,7 +289,16 @@ export default function ProductSettlement() {
   };
 
   const openBatchSettle = (target: string | "all") => {
-    setSettleForm({ ...EMPTY_SETTLE_FORM });
+    const productIds =
+      target === "all"
+        ? settleConfigProducts.map((p) => p.id)
+        : [target];
+    const productIdSet = new Set(productIds);
+    const unitIdSet = new Set(units.map((u) => u.id));
+    const existing = upsList.filter(
+      (x) => productIdSet.has(x.productId) && unitIdSet.has(x.salesUnitId),
+    );
+    setSettleForm(buildBatchSettleForm(existing));
     setBatchSettleTarget(target);
   };
 
@@ -293,6 +310,15 @@ export default function ProductSettlement() {
         : [batchSettleTarget];
     if (productIds.length === 0 || units.length === 0) {
       alert("没有可配置的产品或销售单位");
+      return;
+    }
+    if (settleForm.settlementType === "percentage") {
+      if (settleForm.settlementRate === "") {
+        alert("请填写结算比例");
+        return;
+      }
+    } else if (settleForm.settlementAmount === "") {
+      alert("请填写每件结算金额");
       return;
     }
     const items = productIds.flatMap((productId) =>
@@ -361,9 +387,23 @@ export default function ProductSettlement() {
     const c = name.trim();
     if (!c) return;
     setExtraDomains((prev) => prev.filter((d) => d !== c));
-    const targets = productsFromSales.filter((p) => (p.category || '').trim() === c);
+    const targets = products.filter((p) => (p.category || '').trim() === c);
     for (const p of targets) {
       await updateProduct(p.id, { category: '' });
+    }
+  }
+
+  async function handleRenameDomain(oldName: string, newName: string) {
+    const from = oldName.trim();
+    const to = newName.trim();
+    if (!from || !to || from === to) return;
+    setExtraDomains((prev) => {
+      const withoutOld = prev.filter((d) => d !== from);
+      return withoutOld.includes(to) ? withoutOld : [...withoutOld, to];
+    });
+    const targets = products.filter((p) => (p.category || '').trim() === from);
+    for (const p of targets) {
+      await updateProduct(p.id, { category: to });
     }
   }
 
@@ -523,6 +563,7 @@ export default function ProductSettlement() {
         onSelectedDomainKeysChange={setSelectedDomainKeys}
         onAddDomain={handleAddDomain}
         onRemoveDomain={handleRemoveDomain}
+        onRenameDomain={handleRenameDomain}
         onClearAllDomains={handleClearAllDomains}
         onUpdateCategory={handleUpdateProductCategory}
       />
@@ -999,9 +1040,9 @@ export default function ProductSettlement() {
                   value={settleForm.settlementRate}
                   onChange={(e) => setSettleForm({
                     ...settleForm,
-                    settlementRate: Number(e.target.value),
+                    settlementRate: parseNumberInput(e.target.value),
                   })}
-                  placeholder="如：80"
+                  placeholder="未设置则留空"
                 />
               </div>
             ) : (
@@ -1012,9 +1053,9 @@ export default function ProductSettlement() {
                   value={settleForm.settlementAmount}
                   onChange={(e) => setSettleForm({
                     ...settleForm,
-                    settlementAmount: Number(e.target.value),
+                    settlementAmount: parseNumberInput(e.target.value),
                   })}
-                  placeholder="如：500"
+                  placeholder="未设置则留空"
                 />
               </div>
             )}
@@ -1035,7 +1076,11 @@ export default function ProductSettlement() {
               <div className="space-y-2">
                 <Label>每件奖励金额 (¥)</Label>
                 <Input type="number" value={settleForm.rewardAmount}
-                  onChange={(e) => setSettleForm({ ...settleForm, rewardAmount: Number(e.target.value) })} />
+                  onChange={(e) => setSettleForm({
+                    ...settleForm,
+                    rewardAmount: parseNumberInput(e.target.value),
+                  })}
+                  placeholder="未设置则留空" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
@@ -1104,6 +1149,8 @@ export default function ProductSettlement() {
         open={mergeOpen}
         onOpenChange={setMergeOpen}
         canEdit={canEdit}
+        ignoredKeys={ignoredSimilarKeys}
+        onIgnoredKeysChange={setIgnoredSimilarKeys}
       />
 
     </div>
