@@ -35,6 +35,8 @@ import MBusinessDomainSection, {
   getProductDomainKey,
 } from "./ProductSettlement/components/m-business-domain-section";
 import MUnitSettlementList from "./ProductSettlement/components/m-unit-settlement-list";
+import MProductMergeDialog from "./ProductSettlement/components/m-product-merge-dialog";
+import { groupSimilarProducts } from "@/lib/productMerge";
 
 function toggleIdInSet(prev: Set<string>, id: string): Set<string> {
   const next = new Set(prev);
@@ -105,6 +107,7 @@ export default function ProductSettlement() {
   const [configGapFilter, setConfigGapFilter] = useState<'all' | 'noSettle' | 'noCommission'>('all');
   /** 结算列表视角：按单位（默认）| 按产品 */
   const [settleViewMode, setSettleViewMode] = useState<'unit' | 'product'>('unit');
+  const [mergeOpen, setMergeOpen] = useState(false);
 
   // 按月过滤销售记录
   const monthlySales = useMemo(() => filterByMonth(salesRecords, selectedMonth), [salesRecords, selectedMonth]);
@@ -114,6 +117,8 @@ export default function ProductSettlement() {
     const idSet = new Set(salesRecords.map((s) => s.productId).filter(Boolean));
     return products.filter((p) => idSet.has(p.id));
   }, [products, salesRecords]);
+
+  const similarGroups = useMemo(() => groupSimilarProducts(products), [products]);
 
   // 产品列表（搜索过滤）
   const filteredProducts = useMemo(() => {
@@ -459,6 +464,18 @@ export default function ProductSettlement() {
           <Input placeholder="搜索产品名称或分类..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
         </div>
         <Badge variant="secondary">共 {filteredProducts.length} 个产品</Badge>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="border-amber-300 text-amber-800 hover:bg-amber-50"
+          onClick={() => setMergeOpen(true)}
+        >
+          <Layers className="mr-1.5 h-3.5 w-3.5" />
+          {similarGroups.length > 0
+            ? `疑似重复（${similarGroups.length} 组）`
+            : "合并相同产品"}
+        </Button>
         <Button
           type="button"
           size="sm"
@@ -1082,6 +1099,12 @@ export default function ProductSettlement() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <MProductMergeDialog
+        open={mergeOpen}
+        onOpenChange={setMergeOpen}
+        canEdit={canEdit}
+      />
 
     </div>
   );

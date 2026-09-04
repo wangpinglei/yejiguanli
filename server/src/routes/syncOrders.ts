@@ -1,6 +1,6 @@
 import { createHash } from 'crypto'
 import { Router, Request, Response } from 'express'
-import { getDb, generateId, rowToSalesRecord } from '../db'
+import { getDb, generateId, rowToSalesRecord, findProductRowByNameOrAlias } from '../db'
 import { parsePerformanceSplitText } from '../lib/parsePerformanceSplit'
 import { authMiddleware } from '../auth'
 import { getVisibleUnitIds, isSalesRowVisible } from '../middleware'
@@ -169,9 +169,7 @@ function findOrCreateProductId(
   unitId: string,
 ): string {
   if (!name) return ''
-  const existing = db
-    .prepare('SELECT id FROM products WHERE name = ? COLLATE NOCASE LIMIT 1')
-    .get(name) as { id: string } | undefined
+  const existing = findProductRowByNameOrAlias(db, name) as { id: string } | null
   if (existing?.id) return existing.id
 
   const id = generateId('prod')

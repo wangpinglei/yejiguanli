@@ -186,6 +186,16 @@ function initSchema() {
       settlement_note TEXT DEFAULT ''
     );
 
+    CREATE TABLE IF NOT EXISTS product_aliases (
+      id TEXT PRIMARY KEY,
+      product_id TEXT NOT NULL,
+      alias_name TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      operator TEXT DEFAULT '',
+      operator_id TEXT DEFAULT '',
+      FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS sales_records (
       id TEXT PRIMARY KEY,
       sales_unit_id TEXT NOT NULL DEFAULT '',
@@ -398,6 +408,9 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_income_unit ON income_records(sales_unit_id);
     CREATE INDEX IF NOT EXISTS idx_pua_personnel ON personnel_unit_assignments(personnel_id);
     CREATE INDEX IF NOT EXISTS idx_pua_unit ON personnel_unit_assignments(sales_unit_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_product_alias_name
+      ON product_aliases(alias_name COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS idx_product_alias_product ON product_aliases(product_id);
 
     CREATE TABLE IF NOT EXISTS personnel_pay_plans (
       id TEXT PRIMARY KEY,
@@ -2167,7 +2180,7 @@ export function rowToHrProfile(row: any) {
   };
 }
 
-export function rowToProduct(row: any) {
+export function rowToProduct(row: any, aliases?: string[]) {
   return {
     id: row.id,
     name: row.name,
@@ -2186,7 +2199,91 @@ export function rowToProduct(row: any) {
     settlementRate: row.settlement_rate ?? 100,
     settlementAmount: row.settlement_amount || 0,
     settlementNote: row.settlement_note || "",
+    aliases: Array.isArray(aliases) ? aliases : [],
   };
+}
+
+export function loadAliasesByProductIds(
+  db: ReturnType<typeof getDb>,
+  ids: string[],
+): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  if (ids.length === 0) return map;
+  const placeholders = ids.map(() => "?").join(",");
+  const rows = db
+    .prepare(`
+      SELECT product_id, alias_name FROM product_aliases
+      WHERE product_id IN (${placeholders})
+      ORDER BY alias_name ASC
+    `)
+    .all(...ids) as Array<{ product_id: string; alias_name: string }>;
+  for (const row of rows) {
+    const list = map.get(row.product_id) || [];
+    list.push(row.alias_name);
+    map.set(row.product_id, list);
+  }
+  return map;
+}
+
+export function findProductRowByNameOrAlias(
+  db: ReturnType<typeof getDb>,
+  name: string,
+) {
+  const n = String(name || "").trim();
+  if (!n) return null;
+  const byName = db
+    .prepare("SELECT * FROM products WHERE name = ? COLLATE NOCASE LIMIT 1")
+    .get(n);
+  if (byName) return byName;
+  const byAlias = db
+    .prepare(`
+      SELECT p.* FROM products p
+      INNER JOIN product_aliases a ON a.product_id = p.id
+      WHERE a.alias_name = ? COLLATE NOCASE
+      LIMIT 1
+    `)
+    .get(n);
+  return byAlias || null;
+}
+
+export function upsertProductAlias(
+  db: ReturnType<typeof getDb>,
+  productId: string,
+  aliasName: string,
+  operator?: { name: string; id: string },
+) {
+  const name = String(aliasName || "").trim();
+  if (!name || !productId) return;
+  const product = db
+    .prepare("SELECT id, name FROM products WHERE id = ?")
+    .get(productId) as { id: string; name: string } | undefined;
+  if (!product) return;
+  if (String(product.name || "").trim().toLowerCase() === name.toLowerCase()) return;
+
+  const existing = db
+    .prepare(`
+      SELECT id, product_id FROM product_aliases
+      WHERE alias_name = ? COLLATE NOCASE LIMIT 1
+    `)
+    .get(name) as { id: string; product_id: string } | undefined;
+  if (existing) {
+    if (existing.product_id !== productId) {
+      db.prepare("UPDATE product_aliases SET product_id = ? WHERE id = ?")
+        .run(productId, existing.id);
+    }
+    return;
+  }
+  db.prepare(`
+    INSERT INTO product_aliases (
+      id, product_id, alias_name, created_at, operator, operator_id
+    ) VALUES (?, ?, ?, datetime('now'), ?, ?)
+  `).run(
+    generateId("pal"),
+    productId,
+    name,
+    operator?.name || "",
+    operator?.id || "",
+  );
 }
 
 function parseSalesCollaborators(row: any) {

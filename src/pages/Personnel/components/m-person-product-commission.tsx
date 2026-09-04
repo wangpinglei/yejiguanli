@@ -420,8 +420,12 @@ export default function MPersonProductCommission({
           onOpenChange(v)
         }}
       >
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
+        <DialogContent
+          className="flex h-[90vh] max-h-[90vh] w-[min(96vw,80rem)]
+            max-w-[min(96vw,80rem)] flex-col overflow-hidden
+            sm:max-w-[min(96vw,80rem)]"
+        >
+          <DialogHeader className="shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <Percent className="h-5 w-5 text-violet-600" />
               个人提成配置
@@ -429,7 +433,7 @@ export default function MPersonProductCommission({
           </DialogHeader>
 
           {person && (
-            <div className="space-y-4">
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
               <div className="rounded-lg border border-violet-200 bg-violet-50/60 px-3 py-2 text-sm space-y-1">
                 <p>
                   <span className="text-muted-foreground">销售人员：</span>
@@ -527,9 +531,9 @@ export default function MPersonProductCommission({
                               />
                             </TableHead>
                           )}
-                          <TableHead>产品</TableHead>
-                          <TableHead>分销奖金</TableHead>
-                          <TableHead>个人提成</TableHead>
+                          <TableHead className="min-w-[12rem]">产品</TableHead>
+                          <TableHead className="whitespace-normal">分销奖金</TableHead>
+                          <TableHead className="whitespace-normal">个人提成</TableHead>
                           <TableHead className="text-right w-28">操作</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -549,7 +553,7 @@ export default function MPersonProductCommission({
                                   />
                                 </TableCell>
                               )}
-                              <TableCell>
+                              <TableCell className="whitespace-normal">
                                 <div className="flex items-center gap-2 min-w-0">
                                   <Package className="h-4 w-4 shrink-0 text-muted-foreground" />
                                   <div className="min-w-0">
@@ -562,7 +566,7 @@ export default function MPersonProductCommission({
                                   </div>
                                 </div>
                               </TableCell>
-                              <TableCell>
+                              <TableCell className="whitespace-normal">
                                 {ppc && hasInternalSalesPpc(ppc) ? (
                                   <div className="space-y-1">
                                     <Badge className="bg-sky-100 text-sky-800">
@@ -588,7 +592,7 @@ export default function MPersonProductCommission({
                                   <span className="text-xs text-muted-foreground">-</span>
                                 )}
                               </TableCell>
-                              <TableCell>
+                              <TableCell className="whitespace-normal">
                                 {ppc ? (
                                   <div className="space-y-1">
                                     <Badge className="bg-violet-100 text-violet-800">
@@ -676,7 +680,11 @@ export default function MPersonProductCommission({
           }
         }}
       >
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent
+          className="flex max-h-[90vh] w-[min(92vw,48rem)] flex-col
+            overflow-y-auto max-w-[min(92vw,48rem)]
+            sm:max-w-[min(92vw,48rem)]"
+        >
           <DialogHeader>
             <DialogTitle>
               {isBatchEdit

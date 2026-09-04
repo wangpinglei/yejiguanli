@@ -270,6 +270,8 @@ export interface Product {
   settlementRate?: number; // 结算比例（%），当 settlementType 为 percentage 时生效（如 80 表示结算为售价的 80%）
   settlementAmount?: number; // 每件结算金额（¥），当 settlementType 为 fixed 时生效
   settlementNote?: string; // 结算说明
+  /** 曾用名/同步别名，匹配后归到本产品 */
+  aliases?: string[];
 }
 
 /** 订单分业绩方式 */

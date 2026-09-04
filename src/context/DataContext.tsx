@@ -159,6 +159,10 @@ interface DataContextType {
   addProduct: (p: Omit<Product, "id">) => Promise<Product>;
   updateProduct: (id: string, p: Partial<Product>) => Promise<void>;
   deleteProduct: (id: string) => Promise<void>;
+  mergeProducts: (keepId: string, removeIds: string[]) => Promise<{
+    message: string
+    stats: import("@/lib/productMerge").ProductMergeStats
+  }>;
   ensureProductByName: (
     name: string,
     extras?: Partial<Omit<Product, "id" | "name">>
@@ -506,13 +510,20 @@ export function DataProvider({ children }: { children: ReactNode }) {
     await productsApi.delete(id);
     setProducts((prev) => prev.filter((x) => x.id !== id));
   }, []);
+  const mergeProducts = useCallback(async (keepId: string, removeIds: string[]) => {
+    const result = await productsApi.merge({ keepId, removeIds });
+    await refreshAll();
+    return { message: result.message, stats: result.stats };
+  }, [refreshAll]);
   const ensureProductByName = useCallback(
     async (name: string, extras?: Partial<Omit<Product, "id" | "name">>) => {
       const trimmed = (name || "").trim();
       if (!trimmed) return null;
-      const existing = products.find(
-        (p) => (p.name || "").trim().toLowerCase() === trimmed.toLowerCase()
-      );
+      const key = trimmed.toLowerCase();
+      const existing = products.find((p) => {
+        if ((p.name || "").trim().toLowerCase() === key) return true;
+        return (p.aliases || []).some((a) => a.trim().toLowerCase() === key);
+      });
       if (existing) return existing;
       const created = await productsApi.ensure({ name: trimmed, ...extras });
       setProducts((prev) => {
@@ -882,7 +893,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     costChangeLogs, notifications, monthlyAdjustments, loading,
     addSalesUnit, updateSalesUnit, deleteSalesUnit,
     addPersonnel, updatePersonnel, deletePersonnel, mergePersonnel, enablePersonnelDistribution, transferPersonnel, adjustPersonnelPay, ensurePersonnelByName,
-    addProduct, updateProduct, deleteProduct, ensureProductByName,
+    addProduct, updateProduct, deleteProduct, mergeProducts, ensureProductByName,
     addSalesRecord, updateSalesRecord, deleteSalesRecord,
     addCostRecord, updateCostRecord, deleteCostRecord,
     addIncomeRecord, updateIncomeRecord, deleteIncomeRecord,

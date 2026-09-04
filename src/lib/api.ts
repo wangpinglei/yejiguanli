@@ -285,6 +285,12 @@ export const productsApi = {
   ensure: (data: any) => api.post<any>("/products/ensure", data),
   update: (id: string, data: any) => api.put<any>(`/products/${id}`, data),
   delete: (id: string) => api.delete(`/products/${id}`),
+  merge: (data: { keepId: string; removeIds: string[] }) =>
+    api.post<{
+      product: import("@/types").Product
+      message: string
+      stats: import("@/lib/productMerge").ProductMergeStats
+    }>("/products/merge", data),
 };
 
 export const salesRecordsApi = {
