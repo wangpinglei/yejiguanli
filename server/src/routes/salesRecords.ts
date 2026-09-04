@@ -1,7 +1,11 @@
 import { Router } from "express";
 import { getDb, rowToSalesRecord, generateId } from "../db";
 import { authMiddleware } from "../auth";
-import { getVisibleUnitIds, requireEditPermission } from "../middleware";
+import {
+  getVisibleUnitIds,
+  isSalesRowVisible,
+  requireModuleEdit,
+} from "../middleware";
 
 const router = Router();
 router.use(authMiddleware);
@@ -98,18 +102,7 @@ router.get("/", (req, res) => {
   let rows = db.prepare("SELECT * FROM sales_records ORDER BY sale_date DESC").all();
   const visibleIds = getVisibleUnitIds(req.user!);
   if (visibleIds !== null) {
-    const idSet = new Set(visibleIds);
-    rows = rows.filter((r: any) => {
-      if (!r.sales_unit_id || idSet.has(r.sales_unit_id)) return true;
-      // 跨单位分业绩：本单位有人分到份额时也应可见
-      const mapped = rowToSalesRecord(r);
-      return (mapped.collaborators || []).some(
-        (c: { salesUnitId?: string; personnelId?: string }) => {
-          if (c.salesUnitId && idSet.has(c.salesUnitId)) return true;
-          return false;
-        },
-      );
-    });
+    rows = rows.filter((r: any) => isSalesRowVisible(visibleIds, r));
   }
   const { salesUnitId, personnelId } = req.query;
   if (salesUnitId) {
@@ -135,29 +128,51 @@ router.get("/", (req, res) => {
   res.json(rows.map(rowToSalesRecord));
 });
 
-router.post("/", requireEditPermission, (req, res) => {
+router.post("/", requireModuleEdit("sales_records"), (req, res) => {
   const f = pick(req.body);
   if (!f.saleDate) return res.status(400).json({ error: "销售日期不能为空" });
+  const visibleIds = getVisibleUnitIds(req.user!);
+  if (!isSalesRowVisible(visibleIds, {
+    sales_unit_id: f.salesUnitId,
+    collaborators: f.collaborators,
+  })) {
+    return res.status(403).json({ error: "只能操作自己可见单位的销售记录" });
+  }
   const id = generateId("sr");
   const db = getDb();
   db.prepare(INSERT_SQL).run(id, ...bind(f));
   res.json(rowToSalesRecord(db.prepare("SELECT * FROM sales_records WHERE id = ?").get(id)));
 });
 
-router.put("/:id", requireEditPermission, (req, res) => {
+router.put("/:id", requireModuleEdit("sales_records"), (req, res) => {
   const { id } = req.params;
   const db = getDb();
   const existing = db.prepare("SELECT * FROM sales_records WHERE id = ?").get(id);
   if (!existing) return res.status(404).json({ error: "销售记录不存在" });
+  const visibleIds = getVisibleUnitIds(req.user!);
+  if (!isSalesRowVisible(visibleIds, existing as object)) {
+    return res.status(403).json({ error: "只能操作自己可见单位的销售记录" });
+  }
   const f = pick(req.body, existing);
+  if (!isSalesRowVisible(visibleIds, {
+    sales_unit_id: f.salesUnitId,
+    collaborators: f.collaborators,
+  })) {
+    return res.status(403).json({ error: "不能把记录改到无权查看的单位" });
+  }
   db.prepare(UPDATE_SQL).run(...bind(f), id);
   res.json(rowToSalesRecord(db.prepare("SELECT * FROM sales_records WHERE id = ?").get(id)));
 });
 
-router.delete("/:id", requireEditPermission, (req, res) => {
+router.delete("/:id", requireModuleEdit("sales_records"), (req, res) => {
   const db = getDb();
-  const result = db.prepare("DELETE FROM sales_records WHERE id = ?").run(req.params.id);
-  if (result.changes === 0) return res.status(404).json({ error: "销售记录不存在" });
+  const existing = db.prepare("SELECT * FROM sales_records WHERE id = ?").get(req.params.id);
+  if (!existing) return res.status(404).json({ error: "销售记录不存在" });
+  const visibleIds = getVisibleUnitIds(req.user!);
+  if (!isSalesRowVisible(visibleIds, existing as object)) {
+    return res.status(403).json({ error: "只能操作自己可见单位的销售记录" });
+  }
+  db.prepare("DELETE FROM sales_records WHERE id = ?").run(req.params.id);
   res.json({ message: "删除成功" });
 });
 

@@ -2,6 +2,8 @@ import { createHash } from 'crypto'
 import { Router, Request, Response } from 'express'
 import { getDb, generateId, rowToSalesRecord } from '../db'
 import { parsePerformanceSplitText } from '../lib/parsePerformanceSplit'
+import { authMiddleware } from '../auth'
+import { getVisibleUnitIds, isSalesRowVisible } from '../middleware'
 
 const router = Router()
 
@@ -28,12 +30,16 @@ interface SyncOrderInput {
   remark?: string
 }
 
-function validateApiKey(req: Request, res: Response): boolean {
+function hasValidSyncApiKey(req: Request): boolean {
   const key =
     req.header('X-API-Key') ||
     (typeof req.query.apiKey === 'string' ? req.query.apiKey : '') ||
     ''
-  if (key !== API_KEY) {
+  return key === API_KEY
+}
+
+function validateApiKey(req: Request, res: Response): boolean {
+  if (!hasValidSyncApiKey(req)) {
     res.status(401).json({ success: false, message: 'API Key 无效' })
     return false
   }
@@ -356,7 +362,10 @@ router.post('/sync-orders', (req, res) => {
  * @description 查询已同步的销售记录（synced=1）
  * @link GET /api/synced-orders
  */
-router.get('/synced-orders', (req, res) => {
+router.get('/synced-orders', (req, res, next) => {
+  if (hasValidSyncApiKey(req)) return next()
+  return authMiddleware(req, res, next)
+}, (req, res) => {
   const db = getDb()
   let rows = db
     .prepare(
@@ -378,6 +387,14 @@ router.get('/synced-orders', (req, res) => {
     rows = rows.filter(
       (r: { sales_unit_name?: string }) => r.sales_unit_name === salesUnitName,
     )
+  }
+
+  // 登录用户按可见单位过滤；API Key 调用保持全量（供外部系统核对）
+  if (!hasValidSyncApiKey(req) && req.user) {
+    const visibleIds = getVisibleUnitIds(req.user)
+    if (visibleIds !== null) {
+      rows = rows.filter((r: unknown) => isSalesRowVisible(visibleIds, r as object))
+    }
   }
 
   const orders = rows.map((row: unknown) => {

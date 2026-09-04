@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import type { JwtPayload, UserRole } from "./types";
-import { getDb, rowToSalesUnit } from "./db";
+import { getDb, rowToSalesRecord } from "./db";
 import { hasAnyEdit, hasModuleEdit, hasModuleView } from "./permissions";
 
 // ===================== 角色权限中间件 =====================
@@ -56,6 +56,25 @@ export function getVisibleUnitIds(user: JwtPayload): string[] | null {
   );
   // 只认权限分配勾选的单位；忽略销售单位上的管理人员挂靠
   return managedIds.filter((id) => existing.has(id));
+}
+
+/** 销售记录是否落在当前账号可见单位（主责单位或分业绩单位） */
+export function isSalesRowVisible(
+  visibleIds: string[] | null,
+  row: {
+    sales_unit_id?: string;
+    salesUnitId?: string;
+    collaborators?: unknown;
+  },
+): boolean {
+  if (visibleIds === null) return true;
+  const idSet = new Set(visibleIds);
+  const unitId = String(row.sales_unit_id || row.salesUnitId || "").trim();
+  if (unitId && idSet.has(unitId)) return true;
+  const mapped = rowToSalesRecord(row);
+  return (mapped.collaborators || []).some(
+    (c: { salesUnitId?: string }) => Boolean(c.salesUnitId && idSet.has(c.salesUnitId)),
+  );
 }
 
 export function isReadOnly(user: JwtPayload): boolean {

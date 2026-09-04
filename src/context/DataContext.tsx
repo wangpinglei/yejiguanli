@@ -28,7 +28,6 @@ import type {
 } from "@/types";
 import { useAuth } from "@/context/AuthContext";
 import {
-  API_BASE,
   salesUnitsApi,
   personnelApi,
   productsApi,
@@ -250,9 +249,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const refreshSyncedOrders = useCallback(async () => {
     setSyncedLoading(true);
     try {
-      const resp = await fetch(`${API_BASE}/synced-orders`);
-      const data = await resp.json();
-      setSyncedOrders(Array.isArray(data?.orders) ? data.orders : []);
+      const list = await salesRecordsApi.list();
+      setSalesRecords(Array.isArray(list) ? list : []);
+      setSyncedOrders([]);
     } catch {
       setSyncedOrders([]);
     } finally {
@@ -306,13 +305,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setPositionGroupLabels(labels.length ? labels : []);
       setTeamMgmtCommissionRules(value(14, []));
       setCostSettlements(value(15, []));
-      await refreshSyncedOrders();
     } catch (e) {
       console.error("[DataContext] refreshAll failed", e);
     } finally {
       setLoading(false);
     }
-  }, [refreshSyncedOrders]);
+  }, []);
 
   const managedUnitKey = (user?.managedUnitIds || []).join(",");
 
@@ -345,41 +343,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     void refreshAll();
   }, [authLoading, user, managedUnitKey, refreshAll]);
 
-  const allSalesRecords = useMemo(() => {
-    const existingIds = new Set(salesRecords.map((s) => s.id));
-    const existingExt = new Set(
-      salesRecords.map((s) => s.externalOrderId).filter(Boolean) as string[],
-    );
-    // 已在销售列表中的同步单不再二次拼接，避免删除后从 syncedOrders 回填
-    const syncedAsSales: SalesRecord[] = syncedOrders
-      .filter((o) => {
-        if (existingIds.has(o.id)) return false;
-        if (o.externalOrderId && existingExt.has(o.externalOrderId)) return false;
-        return true;
-      })
-      .map((o) => ({
-        id: o.id,
-        salesUnitId: o.salesUnitId,
-        personnelId: o.personnelId,
-        productId: o.productId,
-        quantity: o.quantity,
-        unitPrice: o.unitPrice,
-        totalAmount: o.totalAmount,
-        saleDate: o.saleDate,
-        remark: o.remark,
-        synced: true,
-        externalOrderId: o.externalOrderId,
-        customerName: o.customerName,
-        salesUnitName: o.salesUnitName,
-        salesPersonName: o.salesPersonName,
-        productName: o.productName,
-        syncedAt: o.syncedAt,
-        orderAmount: o.orderAmount,
-        orderType: o.orderType,
-        activityName: o.activityName,
-      }));
-    return [...salesRecords, ...syncedAsSales];
-  }, [salesRecords, syncedOrders]);
+  const allSalesRecords = useMemo(() => salesRecords, [salesRecords]);
 
   // -------- SalesUnit --------
   const addSalesUnit = useCallback(async (unit: Omit<SalesUnit, "id" | "createdAt">) => {

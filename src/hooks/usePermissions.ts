@@ -51,7 +51,18 @@ export function usePermissions() {
 
   const visiblePersonnel = useMemo<Personnel[]>(() => personnel, [personnel]);
 
-  const visibleSalesRecords = useMemo<SalesRecord[]>(() => salesRecords, [salesRecords]);
+  const visibleSalesRecords = useMemo<SalesRecord[]>(() => {
+    if (!user) return [];
+    if (isSuperadmin) return salesRecords;
+    const idSet = new Set(accessibleUnitIds);
+    if (idSet.size === 0) return [];
+    return salesRecords.filter((record) => {
+      if (record.salesUnitId && idSet.has(record.salesUnitId)) return true;
+      return (record.collaborators || []).some(
+        (item) => Boolean(item.salesUnitId && idSet.has(item.salesUnitId)),
+      );
+    });
+  }, [user, isSuperadmin, salesRecords, accessibleUnitIds]);
 
   const visibleCostRecords = useMemo<CostRecord[]>(() => costRecords, [costRecords]);
 
