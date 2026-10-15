@@ -1183,8 +1183,8 @@ unitIds,
                                         <TableRow className="bg-muted/50">
                                           <TableHead>成交日期</TableHead>
                                           <TableHead>销售人员</TableHead>
-                                          <TableHead>产品</TableHead>
                                           <TableHead>客户</TableHead>
+                                          <TableHead>产品</TableHead>
                                           <TableHead className="text-right">订单金额</TableHead>
                                           <TableHead className="text-right">结算比例</TableHead>
                                           <TableHead className="text-right">结算金额</TableHead>
@@ -1209,8 +1209,8 @@ unitIds,
                                             <TableRow key={s.id}>
                                               <TableCell className="text-sm">{formatDate(s.saleDate)}</TableCell>
                                               <TableCell className="text-sm">{personName}</TableCell>
-                                              <TableCell className="text-sm">{prodName}</TableCell>
                                               <TableCell className="text-sm text-muted-foreground">{s.customerName || "-"}</TableCell>
+                                              <TableCell className="text-sm">{prodName}</TableCell>
                                               <TableCell className="text-right text-sm text-muted-foreground">{formatCurrency(s.totalAmount)}</TableCell>
                                               <TableCell className="text-right text-sm text-muted-foreground">{settlementRatio}</TableCell>
                                               <TableCell className="text-right text-sm font-medium text-cyan-600">{formatCurrency(settlementAmt)}</TableCell>
