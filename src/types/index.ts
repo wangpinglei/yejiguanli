@@ -321,6 +321,8 @@ export interface SalesRecord {
   orderAmount?: number; // 订单金额（原价）
   orderType?: string; // 订单类型（新购/续费/升级等）
   activityName?: string; // 参加活动（如：小游戏风月庆）
+  /** 同步单是否已手工改过销售单位（刷新同步时保留） */
+  unitOverride?: boolean;
 }
 
 // 生态圈同步的订单（后端存储格式 / GET synced-orders 返回）

@@ -14,15 +14,15 @@ const INSERT_SQL = `
   INSERT INTO sales_records (
     id, sales_unit_id, personnel_id, product_id, quantity, unit_price, total_amount, sale_date, remark,
     synced, external_order_id, customer_name, sales_unit_name, sales_person_name, product_name, synced_at,
-    order_number, product_module, order_amount, order_type, activity_name, collaborators
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    order_number, product_module, order_amount, order_type, activity_name, collaborators, unit_override
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `;
 
 const UPDATE_SQL = `
   UPDATE sales_records SET
     sales_unit_id=?, personnel_id=?, product_id=?, quantity=?, unit_price=?, total_amount=?, sale_date=?, remark=?,
     synced=?, external_order_id=?, customer_name=?, sales_unit_name=?, sales_person_name=?, product_name=?, synced_at=?,
-    order_number=?, product_module=?, order_amount=?, order_type=?, activity_name=?, collaborators=?
+    order_number=?, product_module=?, order_amount=?, order_type=?, activity_name=?, collaborators=?, unit_override=?
   WHERE id=?
 `;
 
@@ -64,8 +64,21 @@ function pick(body: any, existing?: any) {
     body.collaborators !== undefined
       ? normalizeCollaborators(body.collaborators, body.shareMode)
       : (existing?.collaborators || "");
+  const salesUnitId = body.salesUnitId ?? existing?.sales_unit_id ?? "";
+  const synced = body.synced != null ? (body.synced ? 1 : 0) : (existing?.synced || 0);
+  let unitOverride = existing?.unit_override ? 1 : 0;
+  if (body.unitOverride != null) {
+    unitOverride = body.unitOverride ? 1 : 0;
+  } else if (
+    synced
+    && existing
+    && body.salesUnitId != null
+    && String(body.salesUnitId) !== String(existing.sales_unit_id || "")
+  ) {
+    unitOverride = 1;
+  }
   return {
-    salesUnitId: body.salesUnitId ?? existing?.sales_unit_id ?? "",
+    salesUnitId,
     personnelId: body.personnelId ?? existing?.personnel_id ?? "",
     productId: body.productId ?? existing?.product_id ?? "",
     quantity: qty,
@@ -73,7 +86,7 @@ function pick(body: any, existing?: any) {
     totalAmount,
     saleDate: body.saleDate ?? existing?.sale_date,
     remark: body.remark ?? existing?.remark ?? "",
-    synced: body.synced != null ? (body.synced ? 1 : 0) : (existing?.synced || 0),
+    synced,
     externalOrderId: body.externalOrderId ?? existing?.external_order_id ?? "",
     customerName: body.customerName ?? existing?.customer_name ?? "",
     salesUnitName: body.salesUnitName ?? existing?.sales_unit_name ?? "",
@@ -86,6 +99,7 @@ function pick(body: any, existing?: any) {
     orderType: body.orderType ?? existing?.order_type ?? "",
     activityName: body.activityName ?? existing?.activity_name ?? "",
     collaborators,
+    unitOverride,
   };
 }
 
@@ -93,7 +107,7 @@ function bind(f: ReturnType<typeof pick>) {
   return [
     f.salesUnitId, f.personnelId, f.productId, f.quantity, f.unitPrice, f.totalAmount, f.saleDate, f.remark,
     f.synced, f.externalOrderId, f.customerName, f.salesUnitName, f.salesPersonName, f.productName, f.syncedAt,
-    f.orderNumber, f.productModule, f.orderAmount, f.orderType, f.activityName, f.collaborators,
+    f.orderNumber, f.productModule, f.orderAmount, f.orderType, f.activityName, f.collaborators, f.unitOverride,
   ];
 }
 
@@ -143,6 +157,53 @@ router.post("/", requireModuleEdit("sales_records"), (req, res) => {
   db.prepare(INSERT_SQL).run(id, ...bind(f));
   res.json(rowToSalesRecord(db.prepare("SELECT * FROM sales_records WHERE id = ?").get(id)));
 });
+
+/** 须在 /:id 之前注册，避免被参数路由吞掉 */
+router.get("/similarity-dismissals", (_req, res) => {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      "SELECT fingerprint FROM sales_similarity_dismissals ORDER BY created_at DESC",
+    )
+    .all() as Array<{ fingerprint: string }>;
+  res.json(rows.map((r) => r.fingerprint));
+});
+
+router.post("/similarity-dismissals", requireModuleEdit("sales_records"), (req, res) => {
+  const fingerprint = String(req.body?.fingerprint || "").trim();
+  if (!fingerprint) {
+    return res.status(400).json({ error: "fingerprint 不能为空" });
+  }
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO sales_similarity_dismissals (fingerprint, created_at, created_by)
+    VALUES (?, ?, ?)
+    ON CONFLICT(fingerprint) DO UPDATE SET
+      created_at=excluded.created_at,
+      created_by=excluded.created_by
+  `).run(
+    fingerprint,
+    new Date().toISOString(),
+    req.user?.username || req.user?.id || "",
+  );
+  res.json({ fingerprint });
+});
+
+router.delete(
+  "/similarity-dismissals/:fingerprint",
+  requireModuleEdit("sales_records"),
+  (req, res) => {
+    const fingerprint = decodeURIComponent(String(req.params.fingerprint || "")).trim();
+    if (!fingerprint) {
+      return res.status(400).json({ error: "fingerprint 不能为空" });
+    }
+    const db = getDb();
+    db.prepare("DELETE FROM sales_similarity_dismissals WHERE fingerprint = ?").run(
+      fingerprint,
+    );
+    res.json({ message: "已撤销" });
+  },
+);
 
 router.put("/:id", requireModuleEdit("sales_records"), (req, res) => {
   const { id } = req.params;

@@ -464,6 +464,12 @@ function initSchema() {
       sale_date TEXT DEFAULT '',
       total_amount REAL DEFAULT 0
     );
+
+    CREATE TABLE IF NOT EXISTS sales_similarity_dismissals (
+      fingerprint TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      created_by TEXT DEFAULT ''
+    );
   `);
 
   ensureColumns("sales_units", [
@@ -539,6 +545,7 @@ function initSchema() {
     { name: "order_type", ddl: "order_type TEXT DEFAULT ''" },
     { name: "activity_name", ddl: "activity_name TEXT DEFAULT ''" },
     { name: "collaborators", ddl: "collaborators TEXT DEFAULT ''" },
+    { name: "unit_override", ddl: "unit_override INTEGER DEFAULT 0" },
   ]);
 
   ensureColumns("cost_records", [
@@ -2357,6 +2364,7 @@ export function rowToSalesRecord(row: any) {
     orderAmount: row.order_amount || undefined,
     orderType: row.order_type || undefined,
     activityName: row.activity_name || undefined,
+    unitOverride: Boolean(row.unit_override),
   };
 }
 

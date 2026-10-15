@@ -24,9 +24,12 @@ import { resolveUnitIdAt } from "@/lib/unitAssignment";
 import {
   buildSaleNameMaps,
   buildSalesDuplicateFingerprint,
+  collectSimilarRecordIds,
   getSalesRecordFingerprint,
+  getSalesRecordSimilarityKey,
   type SaleNameMaps,
 } from "@/lib/salesDuplicate";
+import { salesRecordsApi } from "@/lib/api";
 import type { SalesRecord } from "@/types";
 import {
   Plus, Search, Pencil, Trash2, RefreshCw, CloudDownload, Upload, FileSpreadsheet,
@@ -505,7 +508,9 @@ export default function SalesRecords() {
   const [filterPerson, setFilterPerson] = useState("all");
   const [filterSync, setFilterSync] = useState("all"); // all | manual | synced
   const [filterDomain, setFilterDomain] = useState("all");
-  const [filterDuplicate, setFilterDuplicate] = useState<"all" | "duplicate" | "unique">("all");
+  const [filterDuplicate, setFilterDuplicate] = useState<
+    "all" | "duplicate" | "similar" | "unique"
+  >("all");
   const [importDupFilter, setImportDupFilter] = useState<"all" | "duplicate" | "unique">("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -514,6 +519,7 @@ export default function SalesRecords() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<SalesRecord | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [similarityDismissals, setSimilarityDismissals] = useState<string[]>([]);
   // 批量删除
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
@@ -540,6 +546,7 @@ export default function SalesRecords() {
 
   const [form, setForm] = useState({
     salesUnitId: "",
+    salesUnitName: "",
     personnelId: "",
     productId: "",
     quantity: 1,
@@ -562,6 +569,18 @@ export default function SalesRecords() {
     [products, personnel, salesUnits],
   );
 
+  useEffect(() => {
+    let cancelled = false;
+    salesRecordsApi.listSimilarityDismissals()
+      .then((list) => {
+        if (!cancelled) setSimilarityDismissals(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (!cancelled) setSimilarityDismissals([]);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
   /** 系统中业务内容相同的销售记录 id（出现次数 > 1，忽略手动/生态圈来源） */
   const duplicateRecordIdSet = useMemo(() => {
     const keyCounts = new Map<string, number>();
@@ -577,6 +596,20 @@ export default function SalesRecords() {
     });
     return set;
   }, [salesRecords, saleNameMaps]);
+
+  const dismissedSimilaritySet = useMemo(
+    () => new Set(similarityDismissals),
+    [similarityDismissals],
+  );
+
+  /** 疑似相似（单位/订单类型可不同），排除确定重复与已确认不重复 */
+  const similarRecordIdSet = useMemo(
+    () => collectSimilarRecordIds(salesRecords, saleNameMaps, {
+      duplicateIdSet: duplicateRecordIdSet,
+      dismissedFingerprints: dismissedSimilaritySet,
+    }),
+    [salesRecords, saleNameMaps, duplicateRecordIdSet, dismissedSimilaritySet],
+  );
 
   const domainOptions = useMemo(() => {
     const set = new Set<string>();
@@ -633,15 +666,30 @@ export default function SalesRecords() {
     [baseFilteredRecords, duplicateRecordIdSet],
   );
 
+  const similarCountInFilters = useMemo(
+    () => baseFilteredRecords.filter((s) => similarRecordIdSet.has(s.id)).length,
+    [baseFilteredRecords, similarRecordIdSet],
+  );
+
   const filteredRecords = useMemo(() => {
     if (filterDuplicate === "duplicate") {
       return baseFilteredRecords.filter((s) => duplicateRecordIdSet.has(s.id));
     }
+    if (filterDuplicate === "similar") {
+      return baseFilteredRecords.filter((s) => similarRecordIdSet.has(s.id));
+    }
     if (filterDuplicate === "unique") {
-      return baseFilteredRecords.filter((s) => !duplicateRecordIdSet.has(s.id));
+      return baseFilteredRecords.filter(
+        (s) => !duplicateRecordIdSet.has(s.id) && !similarRecordIdSet.has(s.id),
+      );
     }
     return baseFilteredRecords;
-  }, [baseFilteredRecords, filterDuplicate, duplicateRecordIdSet]);
+  }, [
+    baseFilteredRecords,
+    filterDuplicate,
+    duplicateRecordIdSet,
+    similarRecordIdSet,
+  ]);
 
   // 筛选条件变化时回到第 1 页
   useEffect(() => {
@@ -783,6 +831,7 @@ export default function SalesRecords() {
       : (salesUnits[0]?.id || "");
     setForm({
       salesUnitId: defaultUnitId,
+      salesUnitName: salesUnits.find((u) => u.id === defaultUnitId)?.name || "",
       personnelId: me?.id || "",
       productId: "",
       quantity: 1,
@@ -828,6 +877,10 @@ export default function SalesRecords() {
     );
     setForm({
       salesUnitId: record.salesUnitId,
+      salesUnitName:
+        salesUnits.find((u) => u.id === record.salesUnitId)?.name
+        || record.salesUnitName
+        || "",
       personnelId: record.personnelId,
       productId: record.productId,
       quantity: record.quantity,
@@ -903,8 +956,18 @@ export default function SalesRecords() {
   };
 
   const handleUnitChange = (unitId: string) => {
-    setForm({ ...form, salesUnitId: unitId, personnelId: "" });
+    const unitName = salesUnits.find((u) => u.id === unitId)?.name || "";
+    setForm({
+      ...form,
+      salesUnitId: unitId,
+      salesUnitName: unitName,
+      personnelId: isEditingSynced ? form.personnelId : "",
+    });
   };
+
+  function resolveUnitNameForPayload(unitId: string, fallback?: string) {
+    return salesUnits.find((u) => u.id === unitId)?.name || fallback || "";
+  }
 
   const handleSubmit = async () => {
     if (!form.productId) return;
@@ -944,10 +1007,12 @@ export default function SalesRecords() {
       payloadCollaborators = list;
       payloadShareMode = shareMode;
       const primary = list[0];
+      const primaryUnitId = primary.salesUnitId || form.salesUnitId;
       try {
         const payload = {
           ...form,
-          salesUnitId: primary.salesUnitId || form.salesUnitId,
+          salesUnitId: primaryUnitId,
+          salesUnitName: resolveUnitNameForPayload(primaryUnitId, form.salesUnitName),
           personnelId: primary.personnelId,
           collaborators: payloadCollaborators,
           shareMode: payloadShareMode,
@@ -969,6 +1034,7 @@ export default function SalesRecords() {
     try {
       const payload = {
         ...form,
+        salesUnitName: resolveUnitNameForPayload(form.salesUnitId, form.salesUnitName),
         collaborators: payloadCollaborators,
         shareMode: payloadShareMode,
       };
@@ -1017,6 +1083,32 @@ export default function SalesRecords() {
     setFilterDuplicate("duplicate");
     setPage(1);
     clearSelection();
+  }
+
+  function handleToggleSimilarFilter() {
+    if (filterDuplicate === "similar") {
+      setFilterDuplicate("all");
+      return;
+    }
+    setFilterDuplicate("similar");
+    setPage(1);
+    clearSelection();
+  }
+
+  async function handleConfirmNotSimilar(record: SalesRecord) {
+    const fingerprint = getSalesRecordSimilarityKey(record, saleNameMaps);
+    if (!fingerprint) return;
+    try {
+      await salesRecordsApi.confirmNotSimilar(fingerprint);
+      setSimilarityDismissals((prev) => (
+        prev.includes(fingerprint) ? prev : [...prev, fingerprint]
+      ));
+      if (filterDuplicate === "similar") {
+        setFilterDuplicate("all");
+      }
+    } catch (error: any) {
+      alert("确认失败: " + (error.message || "未知错误"));
+    }
   }
 
   /** 自动勾选每组重复中的多余记录（每组留 1 笔，跨页；有同步单时优先保留 1 笔同步） */
@@ -1554,13 +1646,19 @@ export default function SalesRecords() {
             ))}
           </SelectContent>
         </Select>
-        <Select value={filterDuplicate} onValueChange={(v) => setFilterDuplicate(v as "all" | "duplicate" | "unique")}>
-          <SelectTrigger className="h-10 w-40 text-base">
+        <Select
+          value={filterDuplicate}
+          onValueChange={(v) =>
+            setFilterDuplicate(v as "all" | "duplicate" | "similar" | "unique")
+          }
+        >
+          <SelectTrigger className="h-10 w-44 text-base">
             <SelectValue placeholder="重复信息" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部记录</SelectItem>
-            <SelectItem value="duplicate">仅重复</SelectItem>
+            <SelectItem value="duplicate">仅确定重复</SelectItem>
+            <SelectItem value="similar">仅疑似相似</SelectItem>
             <SelectItem value="unique">仅非重复</SelectItem>
           </SelectContent>
         </Select>
@@ -1609,8 +1707,29 @@ export default function SalesRecords() {
             onClick={handleToggleDuplicateFilter}
             title={filterDuplicate === "duplicate" ? "点击取消重复筛选" : "点击筛选重复记录并批量操作"}
           >
-            重复 {duplicateCountInFilters} 笔
+            确定重复 {duplicateCountInFilters} 笔
             {filterDuplicate === "duplicate" ? " · 已筛选" : " · 点击筛选"}
+          </Button>
+        )}
+        {similarCountInFilters > 0 && (
+          <Button
+            type="button"
+            variant={filterDuplicate === "similar" ? "default" : "outline"}
+            size="sm"
+            className={
+              filterDuplicate === "similar"
+                ? "h-10 rounded-full bg-amber-500 hover:bg-amber-600 text-white border-amber-500 text-sm"
+                : "h-10 rounded-full border-amber-300 bg-amber-100 text-amber-800 hover:bg-amber-200 cursor-pointer text-sm"
+            }
+            onClick={handleToggleSimilarFilter}
+            title={
+              filterDuplicate === "similar"
+                ? "点击取消疑似相似筛选"
+                : "客户/产品/实收/销售/成交日相同，单位或订单类型可能不同"
+            }
+          >
+            疑似相似 {similarCountInFilters} 笔
+            {filterDuplicate === "similar" ? " · 已筛选" : " · 点击筛选"}
           </Button>
         )}
         <Badge
@@ -1638,6 +1757,15 @@ export default function SalesRecords() {
         </Badge>
       </div>
 
+      {filterDuplicate === "similar" && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/60 px-4 py-2.5">
+          <Badge className="bg-amber-100 text-amber-800">疑似相似筛选中</Badge>
+          <span className="text-sm text-amber-900">
+            当前 {filteredRecords.length} 笔：客户/产品/实收/销售/成交日相同，单位或订单类型可能不同。
+            若确为不同订单，可点行内「确认不重复」。
+          </span>
+        </div>
+      )}
       {filterDuplicate === "duplicate" && (
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-orange-200 bg-orange-50/60 px-4 py-2.5">
           <Badge className="bg-orange-100 text-orange-800">重复记录筛选中</Badge>
@@ -1735,22 +1863,27 @@ export default function SalesRecords() {
               <TableBody>
                 {pagedRecords.map((record) => {
                   const isDup = duplicateRecordIdSet.has(record.id);
+                  const isSimilar = similarRecordIdSet.has(record.id);
                   const rowTone = isDup
                     ? "bg-orange-50"
-                    : record.synced
-                      ? (highlightSynced ? "bg-blue-100" : "bg-blue-50")
-                      : "bg-background";
+                    : isSimilar
+                      ? "bg-amber-50"
+                      : record.synced
+                        ? (highlightSynced ? "bg-blue-100" : "bg-blue-50")
+                        : "bg-background";
                   return (
                   <TableRow
                     key={record.id}
                     className={
                       isDup
                         ? "bg-orange-50"
-                        : record.synced
-                          ? (highlightSynced
-                            ? "bg-blue-100 ring-1 ring-inset ring-blue-300"
-                            : "bg-blue-50")
-                          : ""
+                        : isSimilar
+                          ? "bg-amber-50"
+                          : record.synced
+                            ? (highlightSynced
+                              ? "bg-blue-100 ring-1 ring-inset ring-blue-300"
+                              : "bg-blue-50")
+                            : ""
                     }
                   >
                     <TableCell className="px-3 py-3 text-center">
@@ -1837,7 +1970,7 @@ export default function SalesRecords() {
                           <button
                             type="button"
                             className="inline-flex"
-                            title="查看全部重复记录"
+                            title="查看全部确定重复记录"
                             onClick={(e) => {
                               e.stopPropagation();
                               if (filterDuplicate !== "duplicate") {
@@ -1847,7 +1980,25 @@ export default function SalesRecords() {
                             }}
                           >
                             <Badge className="bg-orange-100 text-orange-700 text-sm cursor-pointer hover:bg-orange-200">
-                              重复
+                              确定重复
+                            </Badge>
+                          </button>
+                        )}
+                        {isSimilar && (
+                          <button
+                            type="button"
+                            className="inline-flex"
+                            title="查看疑似相似记录"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (filterDuplicate !== "similar") {
+                                setFilterDuplicate("similar");
+                                setPage(1);
+                              }
+                            }}
+                          >
+                            <Badge className="bg-amber-100 text-amber-700 text-sm cursor-pointer hover:bg-amber-200">
+                              疑似相似
                             </Badge>
                           </button>
                         )}
@@ -1855,12 +2006,24 @@ export default function SalesRecords() {
                     </TableCell>
                     <TableCell className={`px-3 py-4 text-right ${SALE_STICKY_OPS} ${rowTone}`}>
                       {canEditSales && !isReadOnly ? (
-                        <div className="flex justify-end gap-2">
+                        <div className="flex justify-end gap-2 flex-wrap">
+                          {isSimilar && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-10 px-3 text-base border-amber-300 text-amber-800 hover:bg-amber-50"
+                              title="确认这组不是重复订单，之后不再提示疑似相似"
+                              onClick={() => handleConfirmNotSimilar(record)}
+                            >
+                              <CheckCircle2 className="mr-1 h-4 w-4" />
+                              确认不重复
+                            </Button>
+                          )}
                           <Button
                             variant="outline"
                             size="sm"
                             className="h-10 min-w-[4.75rem] px-3 text-base"
-                            title={record.synced ? "编辑订单分业绩" : "编辑"}
+                            title={record.synced ? "编辑同步单（可改销售单位）" : "编辑"}
                             onClick={() => openEdit(record)}
                           >
                             <Pencil className="mr-1 h-4 w-4" />
@@ -1951,14 +2114,15 @@ export default function SalesRecords() {
           <DialogHeader>
             <DialogTitle>
               {editingRecord
-                ? (isEditingSynced ? "编辑生态圈订单（分业绩）" : "编辑销售记录")
+                ? (isEditingSynced ? "编辑生态圈订单" : "编辑销售记录")
                 : "新增销售记录"}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             {isEditingSynced && (
               <p className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">
-                生态圈订单：金额/产品/日期等由同步维护；可改主责人与订单分业绩，下次同步不会覆盖分摊。
+                生态圈订单：金额/产品/日期等由同步维护；可改销售单位、主责人与订单分业绩。
+                手工改过的销售单位在刷新同步时不会被冲回。
               </p>
             )}
             <div className="space-y-2">
@@ -1977,7 +2141,6 @@ export default function SalesRecords() {
                   <Select
                     value={form.salesUnitId}
                     onValueChange={handleUnitChange}
-                    disabled={isEditingSynced}
                   >
                     <SelectTrigger><SelectValue placeholder="选择单位" /></SelectTrigger>
                     <SelectContent>

@@ -7,7 +7,10 @@ import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, formatDate, getYearMonth } from "@/lib/format";
 import { getTotalSalaryCost, filterByMonth, getPersonalSales } from "@/lib/salary";
 import { getPersonShareAmount } from "@/lib/saleCollaborators";
-import { calcSaleSettlementIncome } from "@/lib/settlement";
+import {
+  calcSaleSettlementIncome,
+  formatSaleSettlementRatioForSale,
+} from "@/lib/settlement";
 import {
   getEffectiveConfirmAmount,
   getEstimatedManualCost,
@@ -1183,6 +1186,7 @@ unitIds,
                                           <TableHead>产品</TableHead>
                                           <TableHead>客户</TableHead>
                                           <TableHead className="text-right">订单金额</TableHead>
+                                          <TableHead className="text-right">结算比例</TableHead>
                                           <TableHead className="text-right">结算金额</TableHead>
                                           <TableHead>来源</TableHead>
                                         </TableRow>
@@ -1197,6 +1201,10 @@ unitIds,
                                             s,
                                             visibleUnitProductSettlements,
                                           );
+                                          const settlementRatio = formatSaleSettlementRatioForSale(
+                                            s,
+                                            visibleUnitProductSettlements,
+                                          );
                                           return (
                                             <TableRow key={s.id}>
                                               <TableCell className="text-sm">{formatDate(s.saleDate)}</TableCell>
@@ -1204,6 +1212,7 @@ unitIds,
                                               <TableCell className="text-sm">{prodName}</TableCell>
                                               <TableCell className="text-sm text-muted-foreground">{s.customerName || "-"}</TableCell>
                                               <TableCell className="text-right text-sm text-muted-foreground">{formatCurrency(s.totalAmount)}</TableCell>
+                                              <TableCell className="text-right text-sm text-muted-foreground">{settlementRatio}</TableCell>
                                               <TableCell className="text-right text-sm font-medium text-cyan-600">{formatCurrency(settlementAmt)}</TableCell>
                                               <TableCell>
                                                 {s.synced ? (
@@ -1218,11 +1227,12 @@ unitIds,
                                         <TableRow className="bg-muted/30 font-medium">
                                           <TableCell colSpan={4} className="text-right text-sm">合计</TableCell>
                                           <TableCell className="text-right text-sm text-muted-foreground">{formatCurrency(d.unitSales.reduce((sum, s) => sum + s.totalAmount, 0))}</TableCell>
+                                          <TableCell className="text-right text-sm text-muted-foreground">—</TableCell>
                                           <TableCell className="text-right text-sm font-bold text-cyan-600">{formatCurrency(d.estimatedAmount)}</TableCell>
                                           <TableCell></TableCell>
                                         </TableRow>
                                         <TableRow className="bg-violet-50/50">
-                                          <TableCell colSpan={5} className="text-right text-sm text-violet-700">
+                                          <TableCell colSpan={6} className="text-right text-sm text-violet-700">
                                             本单位销售提成（管理+个人，按人配置）
                                           </TableCell>
                                           <TableCell className="text-right text-sm font-bold text-violet-600">

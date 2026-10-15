@@ -69,6 +69,25 @@ export function buildSalesDuplicateFingerprint(r: SaleDuplicateFields): string {
   ].join('|')
 }
 
+/** 疑似相似：客户+产品+实收+销售+成交日；单位/订单类型可不同 */
+export type SaleSimilarityFields = {
+  customerName?: string
+  productName?: string
+  totalAmount?: number
+  personName?: string
+  saleDate?: string
+}
+
+export function buildSalesSimilarityFingerprint(r: SaleSimilarityFields): string {
+  return [
+    normalizeSaleText(r.customerName),
+    normalizeSaleText(r.productName),
+    moneyKey(r.totalAmount),
+    normalizeSaleText(r.personName),
+    normalizeSaleDate(r.saleDate),
+  ].join('|')
+}
+
 export function resolveSaleProductName(
   s: Pick<SalesRecord, 'productId' | 'productName'>,
   productNameById: Map<string, string>,
@@ -114,4 +133,46 @@ export function getSalesRecordFingerprint(
     saleDate: s.saleDate,
     activityName: s.activityName,
   })
+}
+
+export function getSalesRecordSimilarityKey(
+  s: SalesRecord,
+  maps: SaleNameMaps,
+): string {
+  return buildSalesSimilarityFingerprint({
+    customerName: s.customerName,
+    productName: resolveSaleProductName(s, maps.productNameById),
+    totalAmount: s.totalAmount,
+    personName: resolveSalePersonName(s, maps.personNameById),
+    saleDate: s.saleDate,
+  })
+}
+
+/**
+ * 收集疑似相似记录 id：同 similarity key 出现 >1，且排除已是确定重复、已确认不重复的。
+ */
+export function collectSimilarRecordIds(
+  records: SalesRecord[],
+  maps: SaleNameMaps,
+  options?: {
+    duplicateIdSet?: Set<string>
+    dismissedFingerprints?: Set<string>
+  },
+): Set<string> {
+  const duplicateIdSet = options?.duplicateIdSet || new Set<string>()
+  const dismissed = options?.dismissedFingerprints || new Set<string>()
+  const keyCounts = new Map<string, number>()
+  const idToKey = new Map<string, string>()
+  for (const s of records) {
+    if (duplicateIdSet.has(s.id)) continue
+    const key = getSalesRecordSimilarityKey(s, maps)
+    if (!key || key === '||||' || dismissed.has(key)) continue
+    idToKey.set(s.id, key)
+    keyCounts.set(key, (keyCounts.get(key) || 0) + 1)
+  }
+  const set = new Set<string>()
+  idToKey.forEach((key, id) => {
+    if ((keyCounts.get(key) || 0) > 1) set.add(id)
+  })
+  return set
 }

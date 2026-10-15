@@ -304,6 +304,16 @@ export const salesRecordsApi = {
   create: (data: any) => api.post<any>("/sales-records", data),
   update: (id: string, data: any) => api.put<any>(`/sales-records/${id}`, data),
   delete: (id: string) => api.delete(`/sales-records/${id}`),
+  listSimilarityDismissals: () =>
+    api.get<string[]>("/sales-records/similarity-dismissals"),
+  confirmNotSimilar: (fingerprint: string) =>
+    api.post<{ fingerprint: string }>("/sales-records/similarity-dismissals", {
+      fingerprint,
+    }),
+  revokeNotSimilar: (fingerprint: string) =>
+    api.delete(
+      `/sales-records/similarity-dismissals/${encodeURIComponent(fingerprint)}`,
+    ),
 };
 
 export const costRecordsApi = {

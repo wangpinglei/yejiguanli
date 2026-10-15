@@ -235,14 +235,31 @@ function upsertSyncedOrder(order: SyncOrderInput): {
 
   const existing = db
     .prepare(
-      'SELECT id, collaborators FROM sales_records WHERE external_order_id = ? LIMIT 1',
+      `SELECT id, collaborators, sales_unit_id, unit_override
+       FROM sales_records WHERE external_order_id = ? LIMIT 1`,
     )
-    .get(externalOrderId) as { id: string; collaborators?: string } | undefined
+    .get(externalOrderId) as {
+      id: string
+      collaborators?: string
+      sales_unit_id?: string
+      unit_override?: number
+    } | undefined
 
   // 同步未带分业绩时，保留库里已有的手工分业绩，避免整单被算回主责单位
   const collaboratorsToSave =
     collaboratorsJson
     || (existing?.collaborators ? String(existing.collaborators) : '')
+
+  // 手工改过销售单位时保留，避免刷新同步冲回
+  let unitIdToSave = recordUnitId || unitId
+  let unitNameToSave = order.salesUnitName
+  if (existing?.unit_override && existing.sales_unit_id) {
+    unitIdToSave = existing.sales_unit_id
+    const lockedUnit = db
+      .prepare('SELECT name FROM sales_units WHERE id = ? LIMIT 1')
+      .get(existing.sales_unit_id) as { name?: string } | undefined
+    if (lockedUnit?.name) unitNameToSave = lockedUnit.name
+  }
 
   if (existing?.id) {
     db.prepare(`
@@ -254,7 +271,7 @@ function upsertSyncedOrder(order: SyncOrderInput): {
         collaborators=?
       WHERE id=?
     `).run(
-      recordUnitId || unitId,
+      unitIdToSave,
       personnelId,
       productId,
       qty,
@@ -263,7 +280,7 @@ function upsertSyncedOrder(order: SyncOrderInput): {
       order.saleDate,
       order.remark || '外部同步',
       order.customerName,
-      order.salesUnitName,
+      unitNameToSave,
       order.salesPersonName,
       order.productName,
       externalOrderId,

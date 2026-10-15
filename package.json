@@ -14,7 +14,8 @@
     "start": "node --experimental-sqlite server/dist/index.js",
     "deploy": "npm run build:all && npm start",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:similarity": "npx --yes tsx src/lib/salesDuplicate.test.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

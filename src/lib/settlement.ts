@@ -86,6 +86,32 @@ export function calcSaleSettlementIncome(
   return calcSaleSettlementBase(sale, ups) + calcSaleSettlementReward(sale, ups)
 }
 
+/**
+ * 明细展示用的结算比例文案（与 calcSaleSettlementBase 口径一致）。
+ * 未配置 / 生效期外按全额 → 100%；按件则展示按件金额。
+ */
+export function formatSaleSettlementRatio(ups?: UnitProductSettlement): string {
+  if (!ups) return '100%'
+  if (ups.settlementType === 'fixed') {
+    return `按件¥${Number(ups.settlementAmount || 0)}`
+  }
+  return `${Number(ups.settlementRate ?? 100)}%`
+}
+
+/** 按销售记录查找配置后格式化结算比例 */
+export function formatSaleSettlementRatioForSale(
+  sale: { productId: string; salesUnitId: string; saleDate?: string },
+  upsList: UnitProductSettlement[],
+): string {
+  const ups = findUnitProductSettlement(
+    upsList,
+    sale.productId,
+    sale.salesUnitId,
+    sale.saleDate,
+  )
+  return formatSaleSettlementRatio(ups)
+}
+
 export function formatSettlementPeriod(ups?: UnitProductSettlement): string {
   if (!ups) return '未配置'
   const from = toDateOnly(ups.effectiveFrom) || '不限'
