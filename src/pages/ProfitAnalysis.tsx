@@ -1170,7 +1170,7 @@ unitIds,
                         <TableRow key={d.unit.id + "-detail"} className="bg-emerald-50/20">
                           <TableCell colSpan={9} className="py-3">
                             <div className="ml-4 space-y-4">
-                              {/* 业绩收入明细 */}
+                              {/* 业绩收入明细：客户列在产品前，方便对照查阅 */}
                               <div>
                                 <div className="mb-2 flex items-center gap-2 text-sm font-medium text-blue-700">
                                   <TrendingUp className="h-4 w-4" />
