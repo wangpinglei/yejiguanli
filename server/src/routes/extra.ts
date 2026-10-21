@@ -53,6 +53,19 @@ router.put("/income-records/:id", requireEditPermission, (req, res) => {
   if (!existing) return res.status(404).json({ error: "收入记录不存在" });
   const items = req.body.items !== undefined ? req.body.items : JSON.parse(existing.items);
   const totalAmount = items.reduce((s: number, i: any) => s + (i.amount || 0), 0);
+  const nextRecurring = req.body.isRecurring != null
+    ? (req.body.isRecurring ? 1 : 0)
+    : existing.is_recurring;
+  const nextMonths = nextRecurring === 0
+    ? "[]"
+    : JSON.stringify(req.body.recurringMonths ?? JSON.parse(existing.recurring_months || "[]"));
+  const nextStart = nextRecurring === 0
+    ? ""
+    : (req.body.recurringStartDate ?? existing.recurring_start_date);
+  const nextEnd = nextRecurring === 0
+    ? ""
+    : (req.body.recurringEndDate ?? existing.recurring_end_date);
+
   db.prepare(`
     UPDATE income_records SET sales_unit_id=?, date=?, items=?, total_amount=?, remark=?, change_reason=?,
       is_recurring=?, recurring_months=?, recurring_start_date=?, recurring_end_date=?
@@ -63,10 +76,10 @@ router.put("/income-records/:id", requireEditPermission, (req, res) => {
     JSON.stringify(items), totalAmount,
     req.body.remark ?? existing.remark,
     req.body.changeReason ?? existing.change_reason,
-    req.body.isRecurring != null ? (req.body.isRecurring ? 1 : 0) : existing.is_recurring,
-    JSON.stringify(req.body.recurringMonths ?? JSON.parse(existing.recurring_months || "[]")),
-    req.body.recurringStartDate ?? existing.recurring_start_date,
-    req.body.recurringEndDate ?? existing.recurring_end_date,
+    nextRecurring,
+    nextMonths,
+    nextStart,
+    nextEnd,
     req.params.id
   );
   res.json(rowToIncomeRecord(db.prepare("SELECT * FROM income_records WHERE id=?").get(req.params.id)));

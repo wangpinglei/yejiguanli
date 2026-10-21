@@ -89,15 +89,25 @@ router.put("/:id", requireEditPermission, (req, res) => {
   const nextRecurring = isRecurring != null
     ? (isRecurring ? 1 : 0)
     : existing.is_recurring;
-  const nextMonths = recurringMonths != null
-    ? JSON.stringify(recurringMonths)
-    : (existing.recurring_months || JSON.stringify(DEFAULT_MONTHS));
-  const nextStart = recurringStartDate !== undefined
-    ? (recurringStartDate || "")
-    : (existing.recurring_start_date || "");
-  const nextEnd = recurringEndDate !== undefined
-    ? (recurringEndDate || "")
-    : (existing.recurring_end_date || "");
+  // 关闭循环时清空起止与适用月，避免残留导致后续月份仍计入
+  let nextMonths: string;
+  let nextStart: string;
+  let nextEnd: string;
+  if (nextRecurring === 0) {
+    nextMonths = JSON.stringify([]);
+    nextStart = "";
+    nextEnd = "";
+  } else {
+    nextMonths = recurringMonths != null
+      ? JSON.stringify(recurringMonths)
+      : (existing.recurring_months || JSON.stringify(DEFAULT_MONTHS));
+    nextStart = recurringStartDate !== undefined
+      ? (recurringStartDate || "")
+      : (existing.recurring_start_date || "");
+    nextEnd = recurringEndDate !== undefined
+      ? (recurringEndDate || "")
+      : (existing.recurring_end_date || "");
+  }
 
   db.prepare(`
     UPDATE cost_records SET

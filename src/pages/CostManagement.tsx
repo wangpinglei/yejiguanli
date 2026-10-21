@@ -374,18 +374,19 @@ export default function CostManagement() {
       alert("请至少勾选一个适用月份");
       return;
     }
+    // 关闭循环时必须显式传 false/空字段，不能用 undefined（否则后端会保留原循环配置）
     const data = {
       salesUnitId: form.salesUnitId,
       date: form.date,
       remark: form.remark,
       items: validItems,
       createdBy: user?.name,
-      isRecurring: form.isRecurring || undefined,
-      recurringMonths: form.isRecurring ? form.recurringMonths : undefined,
-      recurringStartDate: form.isRecurring ? form.date : undefined,
+      isRecurring: !!form.isRecurring,
+      recurringMonths: form.isRecurring ? form.recurringMonths : [],
+      recurringStartDate: form.isRecurring ? form.date : '',
       recurringEndDate: form.isRecurring && form.recurringEndDate
         ? form.recurringEndDate
-        : undefined,
+        : '',
     };
     try {
       if (editingRecord) {
@@ -480,10 +481,13 @@ export default function CostManagement() {
       ...incomeForm,
       items: validItems,
       createdBy: user?.name,
-      // 月度固定模式保存时清理字段
-      isRecurring: incomeForm.isRecurring || undefined,
-      recurringMonths: incomeForm.isRecurring ? incomeForm.recurringMonths : undefined,
-      recurringEndDate: incomeForm.isRecurring && incomeForm.recurringEndDate ? incomeForm.recurringEndDate : undefined,
+      // 关闭循环时必须显式传 false/空字段，避免后端保留原循环配置
+      isRecurring: !!incomeForm.isRecurring,
+      recurringMonths: incomeForm.isRecurring ? incomeForm.recurringMonths : [],
+      recurringStartDate: incomeForm.isRecurring ? incomeForm.date : '',
+      recurringEndDate: incomeForm.isRecurring && incomeForm.recurringEndDate
+        ? incomeForm.recurringEndDate
+        : '',
     };
     try {
       if (editingIncome) {
