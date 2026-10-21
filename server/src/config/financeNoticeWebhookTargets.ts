@@ -65,7 +65,7 @@ export const FINANCE_NOTICE_WEBHOOK_TARGETS: FinanceNoticeWebhookTarget[] = [
   {
     unitName: "青岛分仓",
     webhook:
-      "https://oapi.dingtalk.com/robot/send?access_token=39c756276ec97700e1ae69c5c1fc77be952cbacba1ca5aa2c688e83dc7e04431",
+      "https://oapi.dingtalk.com/robot/send?access_token=d01773257dfc29d0fc3e8e08299c0a545eb707dca1ceb875153552edb5dcc340",
   },
   {
     unitName: "济南分仓",
