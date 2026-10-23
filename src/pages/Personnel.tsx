@@ -1759,15 +1759,15 @@ export default function PersonnelPage() {
           if (!open) setTransferPerson(null);
         }}
       >
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader className="shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <ArrowRightLeft className="h-5 w-5" />
               人员转岗
             </DialogTitle>
           </DialogHeader>
           {transferPerson && (
-            <div className="space-y-4 py-1">
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-1 pr-1">
               <p className="text-sm text-muted-foreground">
                 「{transferPerson.name}」当前：{getUnitName(transferPerson.salesUnitId)}。
                 调动日前业绩与人力成本留在原部门，从调动日起归新部门。
@@ -1777,7 +1777,7 @@ export default function PersonnelPage() {
               {transferAssignmentRows.length > 0 && (
                 <div className="space-y-2">
                   <Label>归属 / 调岗记录</Label>
-                  <div className="rounded-md border overflow-x-auto">
+                  <div className="rounded-md border overflow-x-auto max-h-[32vh] overflow-y-auto">
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -1890,7 +1890,7 @@ export default function PersonnelPage() {
               </div>
             </div>
           )}
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t pt-4 mt-2">
             <Button variant="outline" onClick={() => setTransferPerson(null)} disabled={transferring}>
               取消
             </Button>
