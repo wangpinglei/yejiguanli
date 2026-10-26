@@ -27,8 +27,25 @@ export function normalizeSaleText(value?: string): string {
     .replace(/）/g, ')')
 }
 
+/** 统一为 YYYY-MM-DD；避免 2026-9-28 这类未补零在字符串排序时排到 2026-10 前面 */
 export function normalizeSaleDate(value?: string): string {
-  return String(value || '').slice(0, 10)
+  const s = String(value || '').trim()
+  if (!s) return ''
+  const ymd = s.match(/^(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})/)
+  if (ymd) {
+    return `${ymd[1]}-${ymd[2].padStart(2, '0')}-${ymd[3].padStart(2, '0')}`
+  }
+  return s.slice(0, 10)
+}
+
+/** 成交日期降序（新在前）；同日再按 id 降序 */
+export function compareSaleDateDesc(
+  a: { saleDate?: string; id?: string },
+  b: { saleDate?: string; id?: string },
+): number {
+  const dateDiff = normalizeSaleDate(b.saleDate).localeCompare(normalizeSaleDate(a.saleDate))
+  if (dateDiff !== 0) return dateDiff
+  return String(b.id || '').localeCompare(String(a.id || ''))
 }
 
 export function normalizeActivityName(value?: string): string {

@@ -25,8 +25,10 @@ import {
   buildSaleNameMaps,
   buildSalesDuplicateFingerprint,
   collectSimilarRecordIds,
+  compareSaleDateDesc,
   getSalesRecordFingerprint,
   getSalesRecordSimilarityKey,
+  normalizeSaleDate,
   type SaleNameMaps,
 } from "@/lib/salesDuplicate";
 import { salesRecordsApi } from "@/lib/api";
@@ -650,12 +652,12 @@ export default function SalesRecords() {
         const matchSync = filterSync === "all" || (filterSync === "synced" ? s.synced : !s.synced);
         const domainKey = product ? getProductDomainKey(product) : UNCATEGORIZED;
         const matchDomain = filterDomain === "all" || domainKey === filterDomain;
-        const saleDate = (s.saleDate || "").slice(0, 10);
+        const saleDate = normalizeSaleDate(s.saleDate);
         const matchFrom = !dateFrom || saleDate >= dateFrom;
         const matchTo = !dateTo || saleDate <= dateTo;
         return matchSearch && matchUnit && matchPerson && matchSync && matchDomain && matchFrom && matchTo;
       })
-      .sort((a, b) => (b.saleDate || "").localeCompare(a.saleDate || ""));
+      .sort(compareSaleDateDesc);
   }, [
     salesRecords, personnel, products, search, filterUnit, filterPerson, filterSync,
     filterDomain, dateFrom, dateTo,
@@ -2740,10 +2742,10 @@ export default function SalesRecords() {
                 <Button variant="outline" size="sm" onClick={() => setImportStep("input")}>返回修改</Button>
               </div>
 
-              {/* 表格占满剩余高度，只在表格内滚动 */}
-              <div className="min-h-0 flex-1 overflow-auto rounded-lg border">
-                <Table>
-                  <TableHeader className="sticky top-0 bg-background z-10">
+              {/* 单一滚动容器：横滑条贴在可视区底部，无需先滚到表格最底 */}
+              <div className="h-0 min-h-0 flex-1 overflow-auto rounded-lg border">
+                <table className="w-full min-w-[72rem] caption-bottom text-sm">
+                  <TableHeader className="sticky top-0 z-10 bg-background">
                     <TableRow>
                       <TableHead className="w-10 text-center">选</TableHead>
                       <TableHead className="w-10 text-center">行</TableHead>
@@ -2852,7 +2854,7 @@ export default function SalesRecords() {
                       );
                     })}
                   </TableBody>
-                </Table>
+                </table>
               </div>
 
               {/* 提示压缩为一行，避免挤占表格高度 */}

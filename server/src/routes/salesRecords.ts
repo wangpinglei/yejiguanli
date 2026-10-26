@@ -54,6 +54,16 @@ function normalizeCollaborators(raw: any, shareMode?: string): string {
   return JSON.stringify({ mode, shares: cleaned });
 }
 
+function normalizeSaleDate(value: unknown): string {
+  const s = String(value || "").trim();
+  if (!s) return "";
+  const ymd = s.match(/^(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})/);
+  if (ymd) {
+    return `${ymd[1]}-${ymd[2].padStart(2, "0")}-${ymd[3].padStart(2, "0")}`;
+  }
+  return s.slice(0, 10);
+}
+
 function pick(body: any, existing?: any) {
   const qty = body.quantity ?? existing?.quantity ?? 1;
   const price = body.unitPrice ?? existing?.unit_price ?? 0;
@@ -84,7 +94,7 @@ function pick(body: any, existing?: any) {
     quantity: qty,
     unitPrice: price,
     totalAmount,
-    saleDate: body.saleDate ?? existing?.sale_date,
+    saleDate: normalizeSaleDate(body.saleDate ?? existing?.sale_date),
     remark: body.remark ?? existing?.remark ?? "",
     synced,
     externalOrderId: body.externalOrderId ?? existing?.external_order_id ?? "",
@@ -113,7 +123,10 @@ function bind(f: ReturnType<typeof pick>) {
 
 router.get("/", (req, res) => {
   const db = getDb();
-  let rows = db.prepare("SELECT * FROM sales_records ORDER BY sale_date DESC").all();
+  // date() 统一比较，避免未补零的 2026-9-28 排到 2026-10 前面
+  let rows = db.prepare(
+    "SELECT * FROM sales_records ORDER BY date(sale_date) DESC, sale_date DESC, id DESC",
+  ).all();
   const visibleIds = getVisibleUnitIds(req.user!);
   if (visibleIds !== null) {
     rows = rows.filter((r: any) => isSalesRowVisible(visibleIds, r));

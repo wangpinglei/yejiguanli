@@ -3,8 +3,10 @@ import {
   buildSalesDuplicateFingerprint,
   buildSalesSimilarityFingerprint,
   collectSimilarRecordIds,
+  compareSaleDateDesc,
   getSalesRecordFingerprint,
   getSalesRecordSimilarityKey,
+  normalizeSaleDate,
 } from './salesDuplicate'
 import type { SalesRecord } from './../types'
 
@@ -115,6 +117,17 @@ const maps = buildSaleNameMaps(
     dismissedFingerprints: new Set([key]),
   })
   assertEqual(similar.size, 0)
+}
+
+{
+  assertEqual(normalizeSaleDate('2026-9-28'), '2026-09-28')
+  assertEqual(normalizeSaleDate('2026/10/26'), '2026-10-26')
+  const rows = [
+    { id: 'sept', saleDate: '2026-9-28' },
+    { id: 'oct', saleDate: '2026-10-26' },
+  ].sort(compareSaleDateDesc)
+  assertEqual(rows[0].id, 'oct', '未补零的9月不应排在10月前面')
+  assertEqual(rows[1].id, 'sept')
 }
 
 console.log('salesDuplicate.test.ts: ok')

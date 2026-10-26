@@ -2348,7 +2348,14 @@ export function rowToSalesRecord(row: any) {
     quantity: row.quantity || 1,
     unitPrice: row.unit_price || 0,
     totalAmount: row.total_amount || 0,
-    saleDate: row.sale_date,
+    saleDate: (() => {
+      const s = String(row.sale_date || "").trim();
+      const ymd = s.match(/^(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})/);
+      if (ymd) {
+        return `${ymd[1]}-${ymd[2].padStart(2, "0")}-${ymd[3].padStart(2, "0")}`;
+      }
+      return s.slice(0, 10);
+    })(),
     remark: row.remark || "",
     collaborators,
     shareMode,
