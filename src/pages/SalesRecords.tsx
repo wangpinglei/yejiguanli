@@ -2624,10 +2624,10 @@ export default function SalesRecords() {
         </DialogContent>
       </Dialog>
 
-      {/* 批量导入 Dialog */}
+      {/* 批量导入 Dialog：中间可滚，底部按钮始终可见 */}
       <Dialog open={importOpen} onOpenChange={setImportOpen}>
-        <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[92vh] w-[min(96vw,72rem)] max-w-[min(96vw,72rem)] flex-col gap-3 overflow-hidden sm:max-w-[min(96vw,72rem)]">
+          <DialogHeader className="shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <FileSpreadsheet className="h-5 w-5 text-emerald-600" />
               批量导入销售记录
@@ -2635,7 +2635,7 @@ export default function SalesRecords() {
           </DialogHeader>
 
           {importStep === "input" && (
-            <div className="flex-1 overflow-y-auto space-y-4 py-2">
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto py-1 pr-1">
               {/* 说明区 */}
               <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-4 space-y-2">
                 <p className="text-sm font-medium text-emerald-800">导入说明</p>
@@ -2702,9 +2702,9 @@ export default function SalesRecords() {
           )}
 
           {importStep === "preview" && (
-            <div className="flex-1 overflow-hidden flex flex-col space-y-3">
+            <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
               {/* 预览统计 */}
-              <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex shrink-0 flex-wrap items-center gap-3">
                 <Badge variant="secondary">共 {importStats.total} 行</Badge>
                 <Badge className="bg-emerald-100 text-emerald-700">已选 {importStats.selected} 行</Badge>
                 {importStats.duplicates > 0 && (
@@ -2737,8 +2737,9 @@ export default function SalesRecords() {
                 <Button variant="outline" size="sm" onClick={() => setImportStep("input")}>返回修改</Button>
               </div>
 
-              {/* 预览表格 */}
-              <div className="flex-1 overflow-auto border rounded-lg">
+              {/* 预览表格 + 提示：整块可滚，避免把底部确认按钮顶出视口 */}
+              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+              <div className="overflow-auto rounded-lg border">
                 <Table>
                   <TableHeader className="sticky top-0 bg-background z-10">
                     <TableRow>
@@ -2873,10 +2874,11 @@ export default function SalesRecords() {
                   </ul>
                 </div>
               )}
+              </div>
             </div>
           )}
 
-          <DialogFooter>
+          <DialogFooter className="mt-1 shrink-0 border-t pt-3">
             {importStep === "input" ? (
               <>
                 <Button variant="outline" onClick={() => setImportOpen(false)}>取消</Button>
