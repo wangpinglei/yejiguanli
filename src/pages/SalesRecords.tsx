@@ -2624,10 +2624,13 @@ export default function SalesRecords() {
         </DialogContent>
       </Dialog>
 
-      {/* 批量导入 Dialog：中间可滚，底部按钮始终可见 */}
+      {/* 批量导入 Dialog：接近全屏，中间表格可滚，底部确认始终可见 */}
       <Dialog open={importOpen} onOpenChange={setImportOpen}>
-        <DialogContent className="flex max-h-[92vh] w-[min(96vw,72rem)] max-w-[min(96vw,72rem)] flex-col gap-3 overflow-hidden sm:max-w-[min(96vw,72rem)]">
-          <DialogHeader className="shrink-0">
+        <DialogContent
+          className="!flex !h-[96vh] !max-h-[96vh] !w-[98vw] !max-w-[98vw] flex-col gap-2 overflow-hidden p-4 sm:!max-w-[98vw]"
+          style={{ width: '98vw', maxWidth: '98vw', height: '96vh', maxHeight: '96vh' }}
+        >
+          <DialogHeader className="shrink-0 pr-8">
             <DialogTitle className="flex items-center gap-2">
               <FileSpreadsheet className="h-5 w-5 text-emerald-600" />
               批量导入销售记录
@@ -2702,9 +2705,9 @@ export default function SalesRecords() {
           )}
 
           {importStep === "preview" && (
-            <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
+            <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
               {/* 预览统计 */}
-              <div className="flex shrink-0 flex-wrap items-center gap-3">
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
                 <Badge variant="secondary">共 {importStats.total} 行</Badge>
                 <Badge className="bg-emerald-100 text-emerald-700">已选 {importStats.selected} 行</Badge>
                 {importStats.duplicates > 0 && (
@@ -2737,9 +2740,8 @@ export default function SalesRecords() {
                 <Button variant="outline" size="sm" onClick={() => setImportStep("input")}>返回修改</Button>
               </div>
 
-              {/* 预览表格 + 提示：整块可滚，避免把底部确认按钮顶出视口 */}
-              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-              <div className="overflow-auto rounded-lg border">
+              {/* 表格占满剩余高度，只在表格内滚动 */}
+              <div className="min-h-0 flex-1 overflow-auto rounded-lg border">
                 <Table>
                   <TableHeader className="sticky top-0 bg-background z-10">
                     <TableRow>
@@ -2853,32 +2855,25 @@ export default function SalesRecords() {
                 </Table>
               </div>
 
-              {/* 提示 */}
-              {importStats.duplicates > 0 && (
-                <div className="rounded-lg border border-orange-200 bg-orange-50/50 p-3 text-xs text-orange-800">
-                  <p className="font-medium">检测到与系统或表内完全相同的数据：</p>
-                  <ul className="list-disc list-inside mt-1 space-y-0.5">
-                    <li>重复行默认仍勾选，确认后会作为新记录正常导入</li>
-                    <li>可用上方「重复筛选」只看重复 / 非重复行</li>
-                    <li>比对字段：客户、产品、订单/实收金额、订单类型、单位、人员、成交日期、活动</li>
-                  </ul>
+              {/* 提示压缩为一行，避免挤占表格高度 */}
+              {(importStats.duplicates > 0 || importStats.noMatch > 0 || importStats.partialMatched > 0) && (
+                <div className="shrink-0 space-y-1 text-xs">
+                  {importStats.duplicates > 0 && (
+                    <p className="rounded border border-orange-200 bg-orange-50/50 px-2 py-1.5 text-orange-800">
+                      重复 {importStats.duplicates} 行默认仍勾选，确认后会作为新记录导入；可用上方筛选只看重复/非重复。
+                    </p>
+                  )}
+                  {(importStats.noMatch > 0 || importStats.partialMatched > 0) && (
+                    <p className="rounded border border-amber-200 bg-amber-50/50 px-2 py-1.5 text-amber-700">
+                      未完全匹配的产品将自动建档；单位匹配后销售人员会自动匹配或创建。导入后请配置结算规则与提成。
+                    </p>
+                  )}
                 </div>
               )}
-              {(importStats.noMatch > 0 || importStats.partialMatched > 0) && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 text-xs text-amber-700">
-                  <p className="font-medium">部分数据未完全匹配，说明：</p>
-                  <ul className="list-disc list-inside mt-1 space-y-0.5">
-                    <li>带「将自动创建」的产品会在导入时自动建档</li>
-                    <li>销售单位建议与系统名称一致；销售人员在单位匹配成功后会自动匹配或创建</li>
-                    <li>导入后请到「产品结算设置」配置各单位结算规则，到「成本管理」配置人员销售提成</li>
-                  </ul>
-                </div>
-              )}
-              </div>
             </div>
           )}
 
-          <DialogFooter className="mt-1 shrink-0 border-t pt-3">
+          <DialogFooter className="mt-0 shrink-0 border-t pt-3">
             {importStep === "input" ? (
               <>
                 <Button variant="outline" onClick={() => setImportOpen(false)}>取消</Button>
