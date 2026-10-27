@@ -22,6 +22,11 @@ import {
 } from "@/lib/saleCollaborators";
 import { resolveUnitIdAt } from "@/lib/unitAssignment";
 import {
+  filterPersonnelForSelect,
+  formatPersonnelOptionLabel,
+  partitionPersonnelByDuty,
+} from "@/lib/personnelDuty";
+import {
   buildSaleNameMaps,
   buildSalesDuplicateFingerprint,
   collectSimilarRecordIds,
@@ -50,8 +55,9 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Tabs, TabsContent, TabsList, TabsTrigger,
 } from "@/components/ui/tabs";
@@ -508,6 +514,8 @@ export default function SalesRecords() {
   const [search, setSearch] = useState("");
   const [filterUnit, setFilterUnit] = useState("all");
   const [filterPerson, setFilterPerson] = useState("all");
+  /** 筛选/录单人员下拉是否显示离职人员（默认隐藏，便于梳理） */
+  const [showResignedPersonnel, setShowResignedPersonnel] = useState(false);
   const [filterSync, setFilterSync] = useState("all"); // all | manual | synced
   const [filterDomain, setFilterDomain] = useState("all");
   const [filterDuplicate, setFilterDuplicate] = useState<
@@ -726,21 +734,32 @@ export default function SalesRecords() {
     && pageSelectTargets.every((s) => selectedIds.has(s.id));
   const someSelected = pageSelectTargets.some((s) => selectedIds.has(s.id));
 
-  // 根据筛选单位过滤人员
+  // 根据筛选单位过滤人员（默认不含离职）
   const availablePersonnel = useMemo(() => {
-    if (filterUnit === "all") return personnel;
-    return personnel.filter((p) => p.salesUnitId === filterUnit);
-  }, [personnel, filterUnit]);
+    const byUnit = filterUnit === "all"
+      ? personnel
+      : personnel.filter((p) => p.salesUnitId === filterUnit);
+    return filterPersonnelForSelect(byUnit, {
+      includeResigned: showResignedPersonnel,
+      keepIds: [filterPerson !== "all" ? filterPerson : undefined],
+    });
+  }, [personnel, filterUnit, showResignedPersonnel, filterPerson]);
 
-  // 表单中根据选择的单位 + 成交日归属过滤人员
+  // 表单：按单位 + 成交日归属；默认只显示成交日仍在岗，已选离职人保留
   const formPersonnel = useMemo(() => {
-    if (!form.salesUnitId) return personnel;
-    return personnel.filter(
-      (p) =>
-        resolveUnitIdAt(p, form.saleDate) === form.salesUnitId
-        || p.salesUnitId === form.salesUnitId,
-    );
-  }, [personnel, form.salesUnitId, form.saleDate]);
+    const byUnit = !form.salesUnitId
+      ? personnel
+      : personnel.filter(
+        (p) =>
+          resolveUnitIdAt(p, form.saleDate) === form.salesUnitId
+          || p.salesUnitId === form.salesUnitId,
+      );
+    return filterPersonnelForSelect(byUnit, {
+      includeResigned: showResignedPersonnel,
+      asOfDate: form.saleDate,
+      keepIds: [form.personnelId],
+    });
+  }, [personnel, form.salesUnitId, form.saleDate, form.personnelId, showResignedPersonnel]);
 
   const getUnitName = (s: SalesRecord) => {
     if (s.salesUnitId) return salesUnits.find((u) => u.id === s.salesUnitId)?.name || s.salesUnitName || "-";
@@ -771,12 +790,55 @@ export default function SalesRecords() {
     return resolveUnitIdAt(person, form.saleDate) || person.salesUnitId || "";
   }
 
-  function getPersonnelForShareUnit(unitId: string) {
+  function getPersonnelForShareUnit(unitId: string, keepPersonnelId?: string) {
     if (!unitId) return [];
-    return personnel.filter(
+    const byUnit = personnel.filter(
       (p) =>
         resolveUnitIdAt(p, form.saleDate) === unitId
         || p.salesUnitId === unitId,
+    );
+    return filterPersonnelForSelect(byUnit, {
+      includeResigned: showResignedPersonnel,
+      asOfDate: form.saleDate,
+      keepIds: [keepPersonnelId],
+    });
+  }
+
+  function renderPersonnelSelectItems(
+    people: typeof personnel,
+    options?: { withPosition?: boolean; asOfDate?: string },
+  ) {
+    const asOfDate = options?.asOfDate;
+    const withPosition = options?.withPosition;
+    const { onDuty, resigned } = partitionPersonnelByDuty(people, asOfDate);
+    if (resigned.length === 0) {
+      return people.map((p) => (
+        <SelectItem key={p.id} value={p.id}>
+          {formatPersonnelOptionLabel(p, { withPosition, asOfDate })}
+        </SelectItem>
+      ));
+    }
+    return (
+      <>
+        {onDuty.length > 0 && (
+          <SelectGroup>
+            <SelectLabel>在职</SelectLabel>
+            {onDuty.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {formatPersonnelOptionLabel(p, { withPosition, asOfDate })}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        )}
+        <SelectGroup>
+          <SelectLabel>离职</SelectLabel>
+          {resigned.map((p) => (
+            <SelectItem key={p.id} value={p.id} className="text-muted-foreground">
+              {formatPersonnelOptionLabel(p, { withPosition, asOfDate })}
+            </SelectItem>
+          ))}
+        </SelectGroup>
+      </>
     );
   }
 
@@ -1617,14 +1679,21 @@ export default function SalesRecords() {
           </SelectContent>
         </Select>
         <Select value={filterPerson} onValueChange={setFilterPerson}>
-          <SelectTrigger className="h-10 w-40 text-base">
+          <SelectTrigger className="h-10 w-44 text-base">
             <SelectValue placeholder="筛选人员" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部人员</SelectItem>
-            {availablePersonnel.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+            {renderPersonnelSelectItems(availablePersonnel)}
           </SelectContent>
         </Select>
+        <label className="flex h-10 cursor-pointer items-center gap-2 whitespace-nowrap text-sm text-muted-foreground">
+          <Checkbox
+            checked={showResignedPersonnel}
+            onCheckedChange={(v) => setShowResignedPersonnel(v === true)}
+          />
+          显示离职
+        </label>
         <Select value={filterSync} onValueChange={setFilterSync}>
           <SelectTrigger className="h-10 w-40 text-base">
             <SelectValue placeholder="数据来源" />
@@ -2164,11 +2233,19 @@ export default function SalesRecords() {
                   >
                     <SelectTrigger><SelectValue placeholder="选择人员" /></SelectTrigger>
                     <SelectContent>
-                      {formPersonnel.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>{p.name} - {p.position}</SelectItem>
-                      ))}
+                      {renderPersonnelSelectItems(formPersonnel, {
+                        withPosition: true,
+                        asOfDate: form.saleDate,
+                      })}
                     </SelectContent>
                   </Select>
+                  <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                    <Checkbox
+                      checked={showResignedPersonnel}
+                      onCheckedChange={(v) => setShowResignedPersonnel(v === true)}
+                    />
+                    显示离职人员（按成交日梳理）
+                  </label>
                 </div>
               </div>
             )}
@@ -2248,7 +2325,7 @@ export default function SalesRecords() {
                   </div>
                   {collaborators.map((c, idx) => {
                     const rowUnitId = getShareUnitId(c);
-                    const peopleInUnit = getPersonnelForShareUnit(rowUnitId);
+                    const peopleInUnit = getPersonnelForShareUnit(rowUnitId, c.personnelId);
                     if (idx === 0) {
                       return (
                         <div
@@ -2320,7 +2397,7 @@ export default function SalesRecords() {
                             setCollaborators((prev) => {
                               const next = [...prev];
                               const prevPersonOk = next[idx].personnelId
-                                && getPersonnelForShareUnit(unitId)
+                                && getPersonnelForShareUnit(unitId, next[idx].personnelId)
                                   .some((p) => p.id === next[idx].personnelId);
                               next[idx] = {
                                 ...next[idx],
@@ -2359,9 +2436,9 @@ export default function SalesRecords() {
                             <SelectValue placeholder="选择人员" />
                           </SelectTrigger>
                           <SelectContent>
-                            {peopleInUnit.map((p) => (
-                              <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                            ))}
+                            {renderPersonnelSelectItems(peopleInUnit, {
+                              asOfDate: form.saleDate,
+                            })}
                           </SelectContent>
                         </Select>
                         <div className="relative">

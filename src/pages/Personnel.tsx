@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { personnelApi } from "@/lib/api";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
 import { EMPTY_SALARY, calculateMonthlySalary, getFixedSalary, filterByMonth, MONTHLY_WORK_DAYS, isSalesBattlePosition, getPersonalSales, getInternalSalesRecipientId } from "@/lib/salary";
+import { isOnDutyPerson } from "@/lib/personnelDuty";
 import type { Personnel, PersonnelUnitAssignment, SalaryStructure } from "@/types";
 import {
   Plus,
@@ -136,8 +137,8 @@ export default function PersonnelPage() {
   const [searchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [filterUnit, setFilterUnit] = useState(() => searchParams.get("unit") || "all");
-  /** all | active | inactive — 在职/离职（与列表「在岗/离职」一致） */
-  const [filterStatus, setFilterStatus] = useState<"all" | "active" | "inactive">("all");
+  /** all | active | inactive — 在职/离职（与列表「在岗/离职」一致）；默认只看在职便于梳理 */
+  const [filterStatus, setFilterStatus] = useState<"all" | "active" | "inactive">("active");
   /** all | missing — 缺产品提成配置筛选 */
   const [filterCommission, setFilterCommission] = useState<"all" | "missing">("all");
   /** none | desc | asc — 销售总额排序 */
@@ -287,15 +288,6 @@ export default function PersonnelPage() {
     () => personnel.filter((p) => duplicateNameSet.has((p.name || "").trim())).length,
     [personnel, duplicateNameSet],
   );
-
-  function isOnDutyPerson(person: { resignDate?: string; status?: string }) {
-    const resign = (person.resignDate || '').slice(0, 10)
-    if (resign) {
-      const today = new Date().toISOString().slice(0, 10)
-      return resign >= today
-    }
-    return person.status !== 'inactive'
-  }
 
   const filteredPersonnel = useMemo(() => {
     return personnel.filter((p) => {
