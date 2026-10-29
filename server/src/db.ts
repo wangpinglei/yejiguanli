@@ -88,6 +88,9 @@ function initSchema() {
       military_cadre_name TEXT DEFAULT '',
       org_dept_name TEXT DEFAULT '',
       unit_leader_name TEXT DEFAULT '',
+      status TEXT DEFAULT 'active',
+      opened_at TEXT DEFAULT '',
+      closed_at TEXT DEFAULT '',
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -477,6 +480,9 @@ function initSchema() {
     { name: "military_cadre_name", ddl: "military_cadre_name TEXT DEFAULT ''" },
     { name: "org_dept_name", ddl: "org_dept_name TEXT DEFAULT ''" },
     { name: "unit_leader_name", ddl: "unit_leader_name TEXT DEFAULT ''" },
+    { name: "status", ddl: "status TEXT DEFAULT 'active'" },
+    { name: "opened_at", ddl: "opened_at TEXT DEFAULT ''" },
+    { name: "closed_at", ddl: "closed_at TEXT DEFAULT ''" },
   ]);
 
   ensureColumns("users", [
@@ -1947,6 +1953,7 @@ export function rowToUser(row: any): SystemUser {
 }
 
 export function rowToSalesUnit(row: any) {
+  const status = row.status === "inactive" ? "inactive" : "active";
   return {
     id: row.id,
     name: row.name,
@@ -1956,6 +1963,9 @@ export function rowToSalesUnit(row: any) {
     contactPhone: row.contact_phone || "",
     description: row.description || "",
     createdAt: row.created_at,
+    status,
+    openedAt: row.opened_at || (row.created_at ? String(row.created_at).slice(0, 10) : ""),
+    closedAt: row.closed_at || "",
     groupAdminId: row.group_admin_id || undefined,
     militaryCadreId: row.military_cadre_id || undefined,
     orgDeptId: row.org_dept_id || undefined,

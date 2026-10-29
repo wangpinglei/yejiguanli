@@ -11,6 +11,7 @@ import {
   normalizePermissions,
   type ModuleKey,
 } from "@/config/modules";
+import { isSalesUnitActive } from "@/lib/salesUnitStatus";
 
 export function usePermissions() {
   const { user } = useAuth();
@@ -53,12 +54,19 @@ export function usePermissions() {
     return accessibleUnitIds.includes(unitId);
   };
 
-  const visibleSalesUnits = useMemo<SalesUnit[]>(() => {
+  /** 权限范围内全部单位（含已停用），供「销售单位」管理页使用 */
+  const managedSalesUnits = useMemo<SalesUnit[]>(() => {
     if (!user) return [];
     if (isSuperadmin) return salesUnits;
     const idSet = new Set(accessibleUnitIds);
     return salesUnits.filter((u) => idSet.has(u.id));
   }, [user, isSuperadmin, salesUnits, accessibleUnitIds]);
+
+  /** 日常操作可选单位：权限范围内且运营中（已停用不纳入录入/选择） */
+  const visibleSalesUnits = useMemo<SalesUnit[]>(
+    () => managedSalesUnits.filter((u) => isSalesUnitActive(u)),
+    [managedSalesUnits],
+  );
 
   const visiblePersonnel = useMemo<Personnel[]>(() => {
     if (!user) return [];
@@ -154,6 +162,7 @@ export function usePermissions() {
     canEdit,
     accessibleUnitIds,
     canAccessUnit,
+    managedSalesUnits,
     visibleSalesUnits,
     visiblePersonnel,
     visibleSalesRecords,

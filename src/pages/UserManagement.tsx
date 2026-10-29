@@ -479,6 +479,14 @@ export default function UserManagement() {
                             onCheckedChange={(v) => handleToggleUnit(unit.id, Boolean(v))}
                           />
                           <span className="text-sm">{unit.name}</span>
+                          {unit.status === "inactive" && (
+                            <Badge
+                              variant="outline"
+                              className="border-slate-300 text-[10px] font-normal text-slate-600"
+                            >
+                              已停用
+                            </Badge>
+                          )}
                         </label>
                       ))
                     )}

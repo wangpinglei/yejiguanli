@@ -10,6 +10,9 @@ export type UserRole =
   | "unit_leader" // 单位负责人
   | "unit_manager"; // 单位管理员
 
+/** 销售单位运营状态：运营中 / 已停用 */
+export type SalesUnitStatus = "active" | "inactive";
+
 // 销售单位（公司/部门/团队）
 export interface SalesUnit {
   id: string;
@@ -20,6 +23,12 @@ export interface SalesUnit {
   contactPhone: string;
   createdAt: string;
   description: string;
+  /** 运营中 active / 已停用 inactive；停用后不参与日常录入与选择 */
+  status: SalesUnitStatus;
+  /** 开始运营日期 YYYY-MM-DD */
+  openedAt: string;
+  /** 停用日期 YYYY-MM-DD；运营中可为空 */
+  closedAt: string;
   // 角色分配（人名在创建单位时录入；登录权限在「权限分配」中开通）
   groupAdminId?: string; // 集团管理用户ID（有登录账号时关联）
   militaryCadreId?: string;

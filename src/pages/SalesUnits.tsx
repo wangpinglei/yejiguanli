@@ -8,7 +8,12 @@ import { formatCurrency, getYearMonth } from "@/lib/format";
 import { getTotalSalaryCost, filterByMonth, isPersonnelOnDutyInMonth } from "@/lib/salary";
 import { getEffectiveConfirmAmount, getEffectiveManualCost } from "@/lib/confirmAmount";
 import { calcSaleSettlementIncome } from "@/lib/settlement";
-import type { SalesUnit } from "@/types";
+import type { SalesUnit, SalesUnitStatus } from "@/types";
+import {
+  getSalesUnitStatusLabel,
+  isSalesUnitActive,
+  todayYmd,
+} from "@/lib/salesUnitStatus";
 import {
   Plus,
   Search,
@@ -100,7 +105,7 @@ export default function SalesUnits() {
   const { users } = useAuth();
   const {
     canEditUnit,
-    visibleSalesUnits: salesUnits,
+    managedSalesUnits: salesUnits,
     visiblePersonnel: personnel,
     visibleSalesRecords: salesRecords,
     visibleCostRecords: costRecords,
@@ -110,6 +115,8 @@ export default function SalesUnits() {
     visibleCostSettlements: costSettlements,
   } = usePermissions();
   const [search, setSearch] = useState("");
+  /** all | active | inactive */
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("active");
   /** none | desc | asc — 利润排序 */
   const [profitSortOrder, setProfitSortOrder] = useState<"none" | "desc" | "asc">("none");
   /** 与盈亏分析同口径：按月看净利润 */
@@ -123,6 +130,9 @@ export default function SalesUnits() {
   const [form, setForm] = useState({
     name: "",
     description: "",
+    status: "active" as SalesUnitStatus,
+    openedAt: todayYmd(),
+    closedAt: "",
     groupAdminName: "",
     militaryCadreName: "",
     orgDeptName: "",
@@ -154,10 +164,14 @@ export default function SalesUnits() {
   }
 
   const filteredUnits = useMemo(() => {
-    return salesUnits.filter((u) =>
-      u.name.toLowerCase().includes(search.toLowerCase())
-    );
-  }, [salesUnits, search]);
+    const q = search.toLowerCase();
+    return salesUnits.filter((u) => {
+      if (q && !u.name.toLowerCase().includes(q)) return false;
+      if (statusFilter === "active") return isSalesUnitActive(u);
+      if (statusFilter === "inactive") return !isSalesUnitActive(u);
+      return true;
+    });
+  }, [salesUnits, search, statusFilter]);
 
   const teamMgmtContext = useMemo(
     () => ({
@@ -316,6 +330,9 @@ export default function SalesUnits() {
     setForm({
       name: "",
       description: "",
+      status: "active",
+      openedAt: todayYmd(),
+      closedAt: "",
       groupAdminName: "",
       militaryCadreName: "",
       orgDeptName: "",
@@ -329,6 +346,9 @@ export default function SalesUnits() {
     setForm({
       name: unit.name,
       description: unit.description,
+      status: unit.status === "inactive" ? "inactive" : "active",
+      openedAt: unit.openedAt || (unit.createdAt || "").slice(0, 10) || todayYmd(),
+      closedAt: unit.closedAt || "",
       groupAdminName: unit.groupAdminName || getUserName(unit.groupAdminId).replace(/^-$/, ""),
       militaryCadreName: unit.militaryCadreName || getUserName(unit.militaryCadreId).replace(/^-$/, ""),
       orgDeptName: unit.orgDeptName || getUserName(unit.orgDeptId).replace(/^-$/, ""),
@@ -339,6 +359,14 @@ export default function SalesUnits() {
 
   const handleSubmit = async () => {
     if (!form.name.trim()) return;
+    if (!form.openedAt) {
+      alert("请填写开始运营日期");
+      return;
+    }
+    if (form.status === "inactive" && !form.closedAt) {
+      alert("停用单位请填写停用日期");
+      return;
+    }
     const groupAdminName = form.groupAdminName.trim();
     const militaryCadreName = form.militaryCadreName.trim();
     const orgDeptName = form.orgDeptName.trim();
@@ -352,6 +380,9 @@ export default function SalesUnits() {
       contact: editingUnit?.contact || "",
       contactPhone: editingUnit?.contactPhone || "",
       description: form.description,
+      status: form.status,
+      openedAt: form.openedAt,
+      closedAt: form.status === "inactive" ? form.closedAt : "",
       groupAdminName,
       militaryCadreName,
       orgDeptName,
@@ -388,7 +419,7 @@ export default function SalesUnits() {
     <div>
       <PageHeader
         title="销售单位管理"
-        description="管理各销售单位，录入管理人员人名；登录权限请在「权限分配」中开通"
+        description="管理各销售单位运营/停用状态与时间；停用后不纳入日常录入与选择。登录权限请在「权限分配」中开通"
         action={
           canEditUnit && (
             <Button onClick={openAdd}>
@@ -399,7 +430,7 @@ export default function SalesUnits() {
         }
       />
 
-      {/* Search + 月份 */}
+      {/* Search + 状态 + 月份 */}
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <div className="relative flex-1 max-w-sm min-w-[200px]">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -410,6 +441,19 @@ export default function SalesUnits() {
             className="pl-10"
           />
         </div>
+        <Select
+          value={statusFilter}
+          onValueChange={(v) => setStatusFilter(v as "all" | "active" | "inactive")}
+        >
+          <SelectTrigger className="w-36">
+            <SelectValue placeholder="运营状态" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="active">仅运营中</SelectItem>
+            <SelectItem value="inactive">仅已停用</SelectItem>
+            <SelectItem value="all">全部状态</SelectItem>
+          </SelectContent>
+        </Select>
         <div className="flex items-center gap-2">
           <CalendarDays className="h-4 w-4 text-muted-foreground" />
           <Select value={selectedMonth} onValueChange={setSelectedMonth}>
@@ -428,8 +472,7 @@ export default function SalesUnits() {
         <Badge variant="secondary">共 {filteredUnits.length} 个单位</Badge>
       </div>
       <p className="mb-4 text-xs text-muted-foreground">
-        人员数仅统计当前在职。利润与「盈亏分析」同口径：结算收入 + 其他收入 −（录入成本 + 薪酬成本 + 社保公积金成本），按所选月份计算。
-        点击人员数可查看该单位全部人员（含离职）；点击本月利润可跳转到对应单位、月份的盈亏分析。
+        人员数仅统计当前在职。利润与「盈亏分析」同口径。已停用单位默认不出现在销售/成本等录入的单位选择中；本页可切换「全部状态」查看。
       </p>
 
       {/* Table */}
@@ -440,6 +483,8 @@ export default function SalesUnits() {
               <TableHeader>
                 <TableRow>
                   <TableHead>单位名称</TableHead>
+                  <TableHead>状态</TableHead>
+                  <TableHead>运营/停用时间</TableHead>
                   <TableHead>集团管理</TableHead>
                   <TableHead>军工干部</TableHead>
                   <TableHead>组织部</TableHead>
@@ -485,6 +530,24 @@ export default function SalesUnits() {
                             <p className="text-xs text-muted-foreground">{unit.description}</p>
                           </div>
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={isSalesUnitActive(unit) ? "secondary" : "outline"}
+                          className={
+                            isSalesUnitActive(unit)
+                              ? "bg-emerald-50 text-emerald-700"
+                              : "border-slate-300 text-slate-600"
+                          }
+                        >
+                          {getSalesUnitStatusLabel(unit.status)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                        <div>开：{unit.openedAt || (unit.createdAt || "").slice(0, 10) || "—"}</div>
+                        {!isSalesUnitActive(unit) && (
+                          <div>停：{unit.closedAt || "—"}</div>
+                        )}
                       </TableCell>
                       <TableCell className="text-sm">{getManagerDisplay(unit.groupAdminName, unit.groupAdminId)}</TableCell>
                       <TableCell className="text-sm">{getManagerDisplay(unit.militaryCadreName, unit.militaryCadreId)}</TableCell>
@@ -553,7 +616,7 @@ export default function SalesUnits() {
                 })}
                 {displayedUnits.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-12 text-muted-foreground">
+                    <TableCell colSpan={10} className="text-center py-12 text-muted-foreground">
                       暂无数据
                     </TableCell>
                   </TableRow>
@@ -578,6 +641,57 @@ export default function SalesUnits() {
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 placeholder="请输入单位名称"
               />
+            </div>
+
+            <div className="rounded-lg border p-4 space-y-4">
+              <p className="text-sm font-semibold">运营状态</p>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <div className="space-y-2">
+                  <Label>状态 *</Label>
+                  <Select
+                    value={form.status}
+                    onValueChange={(v) => {
+                      const status = v as SalesUnitStatus;
+                      setForm((prev) => ({
+                        ...prev,
+                        status,
+                        closedAt:
+                          status === "inactive"
+                            ? prev.closedAt || todayYmd()
+                            : "",
+                      }));
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">运营中</SelectItem>
+                      <SelectItem value="inactive">已停用</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>开始运营日期 *</Label>
+                  <Input
+                    type="date"
+                    value={form.openedAt}
+                    onChange={(e) => setForm({ ...form, openedAt: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>停用日期{form.status === "inactive" ? " *" : ""}</Label>
+                  <Input
+                    type="date"
+                    value={form.closedAt}
+                    disabled={form.status !== "inactive"}
+                    onChange={(e) => setForm({ ...form, closedAt: e.target.value })}
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                设为「已停用」后，该单位不会出现在销售记录、成本录入、战报、工资核算等日常选择中；历史数据仍保留。
+              </p>
             </div>
 
             {/* 角色分配：录入人名 */}

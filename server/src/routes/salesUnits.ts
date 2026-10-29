@@ -1,18 +1,32 @@
 import { Router } from "express";
 import { getDb, rowToSalesUnit, generateId } from "../db";
 import { authMiddleware } from "../auth";
-import { getVisibleUnitIds, isReadOnly, requireEditPermission } from "../middleware";
+import { getVisibleUnitIds, requireEditPermission } from "../middleware";
 
 const router = Router();
 
 router.use(authMiddleware);
 
-// GET /api/sales-units - 获取销售单位列表（按权限过滤）
+function normalizeStatus(value: unknown): "active" | "inactive" {
+  return value === "inactive" ? "inactive" : "active";
+}
+
+function normalizeDate(value: unknown): string {
+  const s = String(value || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  return "";
+}
+
+function todayYmd(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// GET /api/sales-units - 获取销售单位列表（按权限过滤；含停用，前端再筛日常可选）
 router.get("/", (req, res) => {
   const db = getDb();
   let rows = db.prepare("SELECT * FROM sales_units ORDER BY created_at").all();
 
-  // 按权限过滤
   const visibleIds = getVisibleUnitIds(req.user!);
   if (visibleIds !== null) {
     const idSet = new Set(visibleIds);
@@ -28,10 +42,17 @@ router.post("/", requireEditPermission, (req, res) => {
     name, type, address, contact, contactPhone, description,
     groupAdminId, militaryCadreId, orgDeptId, unitLeaderId,
     groupAdminName, militaryCadreName, orgDeptName, unitLeaderName,
+    status, openedAt, closedAt,
   } = req.body;
   if (!name) {
     return res.status(400).json({ error: "单位名称不能为空" });
   }
+
+  const nextStatus = normalizeStatus(status);
+  const nextOpened = normalizeDate(openedAt) || todayYmd();
+  const nextClosed = nextStatus === "inactive"
+    ? (normalizeDate(closedAt) || todayYmd())
+    : "";
 
   const id = generateId("unit");
   const db = getDb();
@@ -39,13 +60,15 @@ router.post("/", requireEditPermission, (req, res) => {
     INSERT INTO sales_units (
       id, name, type, address, contact, contact_phone, description,
       group_admin_id, military_cadre_id, org_dept_id, unit_leader_id,
-      group_admin_name, military_cadre_name, org_dept_name, unit_leader_name
+      group_admin_name, military_cadre_name, org_dept_name, unit_leader_name,
+      status, opened_at, closed_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id, name, type || "company", address || "", contact || "", contactPhone || "", description || "",
     groupAdminId || null, militaryCadreId || null, orgDeptId || null, unitLeaderId || null,
-    groupAdminName || "", militaryCadreName || "", orgDeptName || "", unitLeaderName || ""
+    groupAdminName || "", militaryCadreName || "", orgDeptName || "", unitLeaderName || "",
+    nextStatus, nextOpened, nextClosed,
   );
 
   const row = db.prepare("SELECT * FROM sales_units WHERE id = ?").get(id);
@@ -59,6 +82,7 @@ router.put("/:id", requireEditPermission, (req, res) => {
     name, type, address, contact, contactPhone, description,
     groupAdminId, militaryCadreId, orgDeptId, unitLeaderId,
     groupAdminName, militaryCadreName, orgDeptName, unitLeaderName,
+    status, openedAt, closedAt,
   } = req.body;
 
   const db = getDb();
@@ -67,11 +91,31 @@ router.put("/:id", requireEditPermission, (req, res) => {
     return res.status(404).json({ error: "销售单位不存在" });
   }
 
+  const nextStatus = status !== undefined
+    ? normalizeStatus(status)
+    : normalizeStatus(existing.status);
+  let nextOpened = openedAt !== undefined
+    ? normalizeDate(openedAt)
+    : normalizeDate(existing.opened_at);
+  if (!nextOpened) {
+    nextOpened = normalizeDate(existing.created_at) || todayYmd();
+  }
+  let nextClosed = closedAt !== undefined
+    ? normalizeDate(closedAt)
+    : normalizeDate(existing.closed_at);
+  if (nextStatus === "inactive" && !nextClosed) {
+    nextClosed = todayYmd();
+  }
+  if (nextStatus === "active") {
+    nextClosed = closedAt !== undefined ? normalizeDate(closedAt) : "";
+  }
+
   db.prepare(`
     UPDATE sales_units SET
       name = ?, type = ?, address = ?, contact = ?, contact_phone = ?, description = ?,
       group_admin_id = ?, military_cadre_id = ?, org_dept_id = ?, unit_leader_id = ?,
-      group_admin_name = ?, military_cadre_name = ?, org_dept_name = ?, unit_leader_name = ?
+      group_admin_name = ?, military_cadre_name = ?, org_dept_name = ?, unit_leader_name = ?,
+      status = ?, opened_at = ?, closed_at = ?
     WHERE id = ?
   `).run(
     name ?? existing.name,
@@ -88,7 +132,10 @@ router.put("/:id", requireEditPermission, (req, res) => {
     militaryCadreName ?? existing.military_cadre_name ?? "",
     orgDeptName ?? existing.org_dept_name ?? "",
     unitLeaderName ?? existing.unit_leader_name ?? "",
-    id
+    nextStatus,
+    nextOpened,
+    nextClosed,
+    id,
   );
 
   const row = db.prepare("SELECT * FROM sales_units WHERE id = ?").get(id);
