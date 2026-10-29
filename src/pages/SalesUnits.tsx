@@ -484,8 +484,6 @@ export default function SalesUnits() {
                 <TableRow>
                   <TableHead>单位名称</TableHead>
                   <TableHead>状态</TableHead>
-                  <TableHead>运营/停用时间</TableHead>
-                  <TableHead>集团管理</TableHead>
                   <TableHead>军工干部</TableHead>
                   <TableHead>组织部</TableHead>
                   <TableHead>单位负责人</TableHead>
@@ -543,13 +541,6 @@ export default function SalesUnits() {
                           {getSalesUnitStatusLabel(unit.status)}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                        <div>开：{unit.openedAt || (unit.createdAt || "").slice(0, 10) || "—"}</div>
-                        {!isSalesUnitActive(unit) && (
-                          <div>停：{unit.closedAt || "—"}</div>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-sm">{getManagerDisplay(unit.groupAdminName, unit.groupAdminId)}</TableCell>
                       <TableCell className="text-sm">{getManagerDisplay(unit.militaryCadreName, unit.militaryCadreId)}</TableCell>
                       <TableCell className="text-sm">{getManagerDisplay(unit.orgDeptName, unit.orgDeptId)}</TableCell>
                       <TableCell className="text-sm">{getManagerDisplay(unit.unitLeaderName, unit.unitLeaderId)}</TableCell>
@@ -616,7 +607,7 @@ export default function SalesUnits() {
                 })}
                 {displayedUnits.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-12 text-muted-foreground">
+                    <TableCell colSpan={8} className="text-center py-12 text-muted-foreground">
                       暂无数据
                     </TableCell>
                   </TableRow>
