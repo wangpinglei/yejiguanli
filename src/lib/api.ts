@@ -451,6 +451,10 @@ export const financeNoticeApi = {
       "/finance-notice/push-now",
       data ?? {},
     ),
+  getWebhookTargets: () =>
+    api.get<import("@/types/financeNoticeTypes").FinanceNoticeWebhookMatchReport>(
+      "/finance-notice/webhook-targets",
+    ),
 };
 
 export const migrateApi = {

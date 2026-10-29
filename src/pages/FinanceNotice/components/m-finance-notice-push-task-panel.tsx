@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
-import { CalendarClock, Eye, Loader2, Plus, Send, Trash2 } from 'lucide-react';
+import { CalendarClock, Eye, Loader2, Plus, Send, Trash2, Users } from 'lucide-react';
 
 import { financeNoticeApi } from '@/lib/api';
 
@@ -11,6 +11,7 @@ import type {
   FinanceNoticeContent,
   FinanceNoticePushOptions,
   FinanceNoticePushTask,
+  FinanceNoticeWebhookMatchReport,
 } from '@/types/financeNoticeTypes';
 
 import {
@@ -20,6 +21,8 @@ import {
   localInputToIso,
   taskPreviewContent,
 } from '@/types/financeNoticeTypes';
+
+import { Badge } from '@/components/ui/badge';
 
 import { Button } from '@/components/ui/button';
 
@@ -36,6 +39,12 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 
 import { Label } from '@/components/ui/label';
+
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 
 import { Textarea } from '@/components/ui/textarea';
 
@@ -75,6 +84,29 @@ export default function MFinanceNoticePushTaskPanel({
   const [creating, setCreating] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [webhookReport, setWebhookReport] = useState<FinanceNoticeWebhookMatchReport | null>(
+    null,
+  );
+  const [webhookLoading, setWebhookLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadWebhookTargets() {
+      setWebhookLoading(true);
+      try {
+        const res = await financeNoticeApi.getWebhookTargets();
+        if (!cancelled) setWebhookReport(res);
+      } catch {
+        if (!cancelled) setWebhookReport(null);
+      } finally {
+        if (!cancelled) setWebhookLoading(false);
+      }
+    }
+    loadWebhookTargets();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function updateDuty(index: number, field: keyof FinanceDutyRow, value: string) {
     setTaskContent({
@@ -218,29 +250,87 @@ export default function MFinanceNoticePushTaskPanel({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
-          <div className="flex flex-wrap items-center gap-4 rounded-lg border bg-muted/30 px-4 py-3">
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="taskPushNotice"
-                checked={pushOptions.pushIncludeNotice}
-                onCheckedChange={(checked) =>
-                  setPushOptions({ ...pushOptions, pushIncludeNotice: checked === true })
-                }
-              />
-              <Label htmlFor="taskPushNotice" className="cursor-pointer font-normal">
-                推送通知
-              </Label>
+          <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border bg-muted/30 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="taskPushNotice"
+                  checked={pushOptions.pushIncludeNotice}
+                  onCheckedChange={(checked) =>
+                    setPushOptions({ ...pushOptions, pushIncludeNotice: checked === true })
+                  }
+                />
+                <Label htmlFor="taskPushNotice" className="cursor-pointer font-normal">
+                  推送通知
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="taskPushDuty"
+                  checked={pushOptions.pushIncludeDuty}
+                  onCheckedChange={(checked) => handlePushIncludeDutyChange(checked === true)}
+                />
+                <Label htmlFor="taskPushDuty" className="cursor-pointer font-normal">
+                  推送值班表
+                </Label>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="taskPushDuty"
-                checked={pushOptions.pushIncludeDuty}
-                onCheckedChange={(checked) => handlePushIncludeDutyChange(checked === true)}
-              />
-              <Label htmlFor="taskPushDuty" className="cursor-pointer font-normal">
-                推送值班表
-              </Label>
-            </div>
+
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="ml-auto shrink-0 bg-background"
+                  disabled={webhookLoading && !webhookReport}
+                >
+                  {webhookLoading && !webhookReport ? (
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Users className="mr-1.5 h-3.5 w-3.5" />
+                  )}
+                  已绑定 {webhookReport?.targetCount ?? '—'} 个群
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-[360px] p-0">
+                <div className="border-b px-3 py-2">
+                  <p className="text-sm font-medium">已绑定财务通知钉钉群</p>
+                  <p className="text-xs text-muted-foreground">
+                    立即推送会发给下列全部群；名称与销售单位一致的便于对照业务数据。
+                  </p>
+                </div>
+                <div className="max-h-[320px] overflow-y-auto px-1 py-1">
+                  {(webhookReport?.targets || []).length === 0 ? (
+                    <p className="px-2 py-6 text-center text-sm text-muted-foreground">
+                      暂无已绑定群聊
+                    </p>
+                  ) : (
+                    <ul className="space-y-0.5">
+                      {(webhookReport?.targets || []).map((item) => (
+                        <li
+                          key={item.unitName}
+                          className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/60"
+                        >
+                          <span className="truncate">{item.unitName}</span>
+                          <Badge
+                            variant={item.hasSalesUnit ? 'secondary' : 'outline'}
+                            className="shrink-0 text-[10px] font-normal"
+                          >
+                            {item.hasSalesUnit ? '已匹配单位' : '对接群'}
+                          </Badge>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+                {webhookReport && webhookReport.salesUnitsWithoutWebhook.length > 0 && (
+                  <div className="border-t px-3 py-2 text-xs text-muted-foreground">
+                    另有 {webhookReport.salesUnitsWithoutWebhook.length} 个销售单位尚未绑定机器人
+                  </div>
+                )}
+              </PopoverContent>
+            </Popover>
           </div>
 
           <p className="text-sm text-muted-foreground">

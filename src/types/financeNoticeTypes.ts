@@ -69,6 +69,21 @@ export interface FinanceNoticeResponse {
   tasks: FinanceNoticePushTask[];
 }
 
+/** 已绑定财务通知钉钉群（与销售单位名称匹配情况） */
+export interface FinanceNoticeWebhookTargetItem {
+  unitName: string;
+  hasSalesUnit: boolean;
+}
+
+export interface FinanceNoticeWebhookMatchReport {
+  targetCount: number;
+  salesUnitCount: number;
+  matched: Array<{ id: string; name: string }>;
+  salesUnitsWithoutWebhook: Array<{ id: string; name: string }>;
+  targetsWithoutSalesUnit: string[];
+  targets: FinanceNoticeWebhookTargetItem[];
+}
+
 export function isPushOptionEnabled(value: unknown): boolean {
   return value === true || value === 1 || value === '1';
 }
