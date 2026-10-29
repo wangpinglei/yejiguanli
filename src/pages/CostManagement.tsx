@@ -377,7 +377,6 @@ export default function CostManagement() {
     return filteredIncomeRecords.reduce((sum, r) => sum + r.totalAmount, 0);
   }, [filteredIncomeRecords]);
 
-  const leaveDeductionTotal = salaryCosts.grandLeaveDeduction;
   const otherAdjustmentTotal = salaryCosts.grandOtherAdjustment;
 
   const costUnitIds = filterUnit === "all"
