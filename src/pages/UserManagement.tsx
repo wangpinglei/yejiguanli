@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useAuth, type SystemUser } from "@/context/AuthContext";
 import { loadLegacyLocalStoragePayload, useData } from "@/context/DataContext";
 import { migrateApi } from "@/lib/api";
@@ -6,8 +6,11 @@ import { PageHeader } from "@/components/PageHeader";
 import type { UserRole } from "@/types";
 import {
   MODULE_DEFS,
+  MODULE_PERMISSION_GROUPS,
   createEmptyPermissions,
   createFullPermissions,
+  getModuleDef,
+  isConfidentialModule,
   normalizePermissions,
   type ModuleKey,
   type UserPermissions,
@@ -132,11 +135,17 @@ export default function UserManagement() {
     });
   }
 
-  const allViewChecked = MODULE_DEFS.every((m) => form.permissions[m.key]?.view);
-  const editableModules = MODULE_DEFS.filter((m) => m.canEdit);
+  /** 全选不含机密模块，避免误开人事档案/工资核算 */
+  const selectableViewModules = MODULE_DEFS.filter((m) => !isConfidentialModule(m.key));
+  const selectableEditModules = MODULE_DEFS.filter(
+    (m) => m.canEdit && !isConfidentialModule(m.key),
+  );
+  const allViewChecked =
+    selectableViewModules.length > 0 &&
+    selectableViewModules.every((m) => form.permissions[m.key]?.view);
   const allEditChecked =
-    editableModules.length > 0 &&
-    editableModules.every((m) => form.permissions[m.key]?.edit);
+    selectableEditModules.length > 0 &&
+    selectableEditModules.every((m) => form.permissions[m.key]?.edit);
   const allUnitsChecked =
     salesUnits.length > 0 && salesUnits.every((u) => form.managedUnitIds.includes(u.id));
 
@@ -144,6 +153,7 @@ export default function UserManagement() {
     setForm((prev) => {
       const next = { ...prev.permissions };
       for (const m of MODULE_DEFS) {
+        if (checked && isConfidentialModule(m.key)) continue;
         next[m.key] = {
           view: checked,
           edit: checked ? next[m.key].edit : false,
@@ -158,8 +168,39 @@ export default function UserManagement() {
       const next = { ...prev.permissions };
       for (const m of MODULE_DEFS) {
         if (!m.canEdit) continue;
+        if (checked && isConfidentialModule(m.key)) continue;
         next[m.key] = {
           view: checked ? true : next[m.key].view,
+          edit: checked,
+        };
+      }
+      return { ...prev, permissions: next, isSuperadmin: false };
+    });
+  }
+
+  function handleSelectGroupView(keys: ModuleKey[], checked: boolean) {
+    setForm((prev) => {
+      const next = { ...prev.permissions };
+      for (const key of keys) {
+        if (checked && isConfidentialModule(key)) continue;
+        next[key] = {
+          view: checked,
+          edit: checked ? next[key].edit : false,
+        };
+      }
+      return { ...prev, permissions: next, isSuperadmin: false };
+    });
+  }
+
+  function handleSelectGroupEdit(keys: ModuleKey[], checked: boolean) {
+    setForm((prev) => {
+      const next = { ...prev.permissions };
+      for (const key of keys) {
+        const def = getModuleDef(key);
+        if (!def?.canEdit) continue;
+        if (checked && isConfidentialModule(key)) continue;
+        next[key] = {
+          view: checked ? true : next[key].view,
           edit: checked,
         };
       }
@@ -358,7 +399,7 @@ export default function UserManagement() {
           <DialogHeader>
             <DialogTitle>{editingUser ? "编辑权限" : "开通登录权限"}</DialogTitle>
             <DialogDescription>
-              配置登录账号、模块权限，以及可查看的销售单位范围
+              配置登录账号、模块权限，以及可查看的销售单位范围。普通账号只能看到已勾选单位的数据，看不到其他单位。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -442,13 +483,15 @@ export default function UserManagement() {
                       ))
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    普通账号必须至少勾选 1 个单位；仅能查看/编辑这些单位内的数据。
-                  </p>
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 space-y-1">
+                    <p className="font-medium">单位隔离（请务必核对）</p>
+                    <p>普通账号必须至少勾选 1 个单位；登录后只能看到这些单位的销售、人员、成本、盈亏等数据。</p>
+                    <p>未勾选的其他单位对该账号完全不可见，也无法写入。</p>
+                  </div>
                 </div>
 
                 <div className="space-y-2">
-                  <Label>模块权限（对应左侧导航）</Label>
+                  <Label>模块权限（与左侧导航分组一致）</Label>
                   <div className="rounded-lg border overflow-hidden">
                     <Table>
                       <TableHeader>
@@ -481,35 +524,115 @@ export default function UserManagement() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {MODULE_DEFS.map((m) => {
-                          const perm = form.permissions[m.key];
+                        {MODULE_PERMISSION_GROUPS.map((group) => {
+                          const groupDefs = group.moduleKeys
+                            .map((key) => getModuleDef(key))
+                            .filter((m): m is NonNullable<typeof m> => Boolean(m));
+                          const groupViewKeys = groupDefs
+                            .filter((m) => !isConfidentialModule(m.key))
+                            .map((m) => m.key);
+                          const groupEditKeys = groupDefs
+                            .filter((m) => m.canEdit && !isConfidentialModule(m.key))
+                            .map((m) => m.key);
+                          const groupViewChecked =
+                            groupViewKeys.length > 0 &&
+                            groupViewKeys.every((k) => form.permissions[k]?.view);
+                          const groupEditChecked =
+                            groupEditKeys.length > 0 &&
+                            groupEditKeys.every((k) => form.permissions[k]?.edit);
+
                           return (
-                            <TableRow key={m.key}>
-                              <TableCell className="text-sm">{m.label}</TableCell>
-                              <TableCell className="text-center">
-                                <Checkbox
-                                  checked={perm.view}
-                                  onCheckedChange={(v) => setModulePerm(m.key, "view", Boolean(v))}
-                                />
-                              </TableCell>
-                              <TableCell className="text-center">
-                                {m.canEdit ? (
-                                  <Checkbox
-                                    checked={perm.edit}
-                                    onCheckedChange={(v) => setModulePerm(m.key, "edit", Boolean(v))}
-                                  />
-                                ) : (
-                                  <span className="text-xs text-muted-foreground">—</span>
-                                )}
-                              </TableCell>
-                            </TableRow>
+                            <Fragment key={group.id}>
+                              <TableRow className="bg-muted/50 hover:bg-muted/50">
+                                <TableCell className="py-2">
+                                  <div className="font-medium text-sm">{group.label}</div>
+                                  {group.hint && (
+                                    <div className="text-xs text-muted-foreground mt-0.5">
+                                      {group.hint}
+                                    </div>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-center py-2">
+                                  {groupViewKeys.length > 0 ? (
+                                    <label className="inline-flex items-center gap-1 text-xs text-muted-foreground cursor-pointer">
+                                      <Checkbox
+                                        checked={groupViewChecked}
+                                        onCheckedChange={(v) =>
+                                          handleSelectGroupView(group.moduleKeys, Boolean(v))
+                                        }
+                                      />
+                                      本组
+                                    </label>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground">—</span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-center py-2">
+                                  {groupEditKeys.length > 0 ? (
+                                    <label className="inline-flex items-center gap-1 text-xs text-muted-foreground cursor-pointer">
+                                      <Checkbox
+                                        checked={groupEditChecked}
+                                        onCheckedChange={(v) =>
+                                          handleSelectGroupEdit(group.moduleKeys, Boolean(v))
+                                        }
+                                      />
+                                      本组
+                                    </label>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground">—</span>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                              {groupDefs.map((m) => {
+                                const perm = form.permissions[m.key];
+                                const confidential = isConfidentialModule(m.key);
+                                return (
+                                  <TableRow key={m.key}>
+                                    <TableCell className="text-sm pl-6">
+                                      <div className="flex items-center gap-2">
+                                        <span>{m.label}</span>
+                                        {confidential && (
+                                          <Badge
+                                            variant="outline"
+                                            className="border-amber-300 bg-amber-50 text-amber-800 text-[10px] font-normal"
+                                          >
+                                            机密·须单独勾选
+                                          </Badge>
+                                        )}
+                                      </div>
+                                    </TableCell>
+                                    <TableCell className="text-center">
+                                      <Checkbox
+                                        checked={perm.view}
+                                        onCheckedChange={(v) =>
+                                          setModulePerm(m.key, "view", Boolean(v))
+                                        }
+                                      />
+                                    </TableCell>
+                                    <TableCell className="text-center">
+                                      {m.canEdit ? (
+                                        <Checkbox
+                                          checked={perm.edit}
+                                          onCheckedChange={(v) =>
+                                            setModulePerm(m.key, "edit", Boolean(v))
+                                          }
+                                        />
+                                      ) : (
+                                        <span className="text-xs text-muted-foreground">—</span>
+                                      )}
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </Fragment>
                           );
                         })}
                       </TableBody>
                     </Table>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    勾选编辑时会自动勾选查看。数据看板仅支持查看；单位战报编辑权用于业绩目标与岗位分组配置。「人事管理」为机密模块，默认不开放，需单独勾选。
+                    分组与左侧导航一致：分仓管理 / 人事管理 / 单位盈亏管理。勾选编辑会自动勾选查看。
+                    「全选 / 本组」不会勾选机密模块（人事档案、工资核算），这两项须单独确认后再勾。
                   </p>
                 </div>
               </>

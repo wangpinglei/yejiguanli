@@ -58,6 +58,30 @@ export function getVisibleUnitIds(user: JwtPayload): string[] | null {
   return managedIds.filter((id) => existing.has(id));
 }
 
+/** 非超管是否可访问该销售单位（未勾选单位一律拒绝） */
+export function canAccessUnitId(user: JwtPayload, unitId: string | null | undefined): boolean {
+  const visibleIds = getVisibleUnitIds(user);
+  if (visibleIds === null) return true;
+  const id = String(unitId || "").trim();
+  if (!id) return false;
+  return visibleIds.includes(id);
+}
+
+/** 写入前校验单位；失败时直接写响应并返回 false */
+export function assertUnitAccess(
+  req: Request,
+  res: Response,
+  unitId: string | null | undefined,
+): boolean {
+  if (!req.user) {
+    res.status(401).json({ error: "未登录" });
+    return false;
+  }
+  if (canAccessUnitId(req.user, unitId)) return true;
+  res.status(403).json({ error: "无权操作该销售单位的数据" });
+  return false;
+}
+
 /** 销售记录是否落在当前账号可见单位（主责单位或分业绩单位） */
 export function isSalesRowVisible(
   visibleIds: string[] | null,

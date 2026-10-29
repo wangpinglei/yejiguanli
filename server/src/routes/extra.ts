@@ -7,7 +7,13 @@ import {
   rowToTeamMgmtCommissionRule,
 } from "../db";
 import { authMiddleware } from "../auth";
-import { getVisibleUnitIds, requireEditPermission, requireModuleEdit, requireRole } from "../middleware";
+import {
+  assertUnitAccess,
+  getVisibleUnitIds,
+  requireEditPermission,
+  requireModuleEdit,
+  requireRole,
+} from "../middleware";
 
 const router = Router();
 router.use(authMiddleware);
@@ -16,7 +22,11 @@ function filterByUnit(rows: any[], user: Express.Request["user"], field = "sales
   const visibleIds = getVisibleUnitIds(user!);
   if (visibleIds === null) return rows;
   const idSet = new Set(visibleIds);
-  return rows.filter((r) => !r[field] || idSet.has(r[field]));
+  // 无单位或非授权单位一律不可见，避免空单位字段漏数据
+  return rows.filter((r) => {
+    const uid = String(r[field] || "").trim();
+    return Boolean(uid && idSet.has(uid));
+  });
 }
 
 // ---------- income ----------
@@ -30,6 +40,7 @@ router.get("/income-records", (req, res) => {
 router.post("/income-records", requireEditPermission, (req, res) => {
   const { salesUnitId, date, items, remark, isRecurring, recurringMonths, recurringStartDate, recurringEndDate, changeReason } = req.body;
   if (!salesUnitId || !date) return res.status(400).json({ error: "销售单位和日期不能为空" });
+  if (!assertUnitAccess(req, res, salesUnitId)) return;
   const costItems = items || [];
   const totalAmount = costItems.reduce((s: number, i: any) => s + (i.amount || 0), 0);
   const id = generateId("ir");
@@ -49,8 +60,10 @@ router.post("/income-records", requireEditPermission, (req, res) => {
 
 router.put("/income-records/:id", requireEditPermission, (req, res) => {
   const db = getDb();
-  const existing = db.prepare("SELECT * FROM income_records WHERE id=?").get(req.params.id);
+  const existing: any = db.prepare("SELECT * FROM income_records WHERE id=?").get(req.params.id);
   if (!existing) return res.status(404).json({ error: "收入记录不存在" });
+  if (!assertUnitAccess(req, res, existing.sales_unit_id)) return;
+  if (req.body.salesUnitId != null && !assertUnitAccess(req, res, req.body.salesUnitId)) return;
   const items = req.body.items !== undefined ? req.body.items : JSON.parse(existing.items);
   const totalAmount = items.reduce((s: number, i: any) => s + (i.amount || 0), 0);
   const nextRecurring = req.body.isRecurring != null

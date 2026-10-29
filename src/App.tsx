@@ -17,6 +17,7 @@ import UserManagement from "@/pages/UserManagement";
 import ProductSettlement from "@/pages/ProductSettlement";
 import HrManagement from "@/pages/HrManagement";
 import FinanceNotice from "@/pages/FinanceNotice";
+import Payroll from "@/pages/Payroll";
 import { usePermissions } from "@/hooks/usePermissions";
 import type { ReactNode } from "react";
 
@@ -69,6 +70,7 @@ export default function App() {
               <Route path="sales-records" element={<SalesRecords />} />
               <Route path="cost-management" element={<CostManagement />} />
               <Route path="finance-notice" element={<FinanceNotice />} />
+              <Route path="payroll" element={<Payroll />} />
               <Route path="profit-analysis" element={<ProfitAnalysis />} />
               <Route path="sales-battle-report" element={<SalesBattleReport />} />
               <Route path="product-settlement" element={<ProductSettlement />} />

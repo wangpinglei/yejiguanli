@@ -8,13 +8,14 @@ export type ModuleKey =
   | "sales_records"
   | "cost_management"
   | "finance_notice"
+  | "payroll"
   | "profit_analysis"
   | "sales_battle_report"
   | "product_settlement"
   | "users";
 
 /** 机密模块：旧角色默认不开放，仅超管在权限分配中手动勾选 */
-const CONFIDENTIAL_MODULE_KEYS = new Set<ModuleKey>(["hr_management"]);
+const CONFIDENTIAL_MODULE_KEYS = new Set<ModuleKey>(["hr_management", "payroll"]);
 
 export interface ModulePermission {
   view: boolean;
@@ -33,20 +34,80 @@ export interface ModuleDef {
 
 export const MODULE_DEFS: ModuleDef[] = [
   { key: "dashboard", label: "数据看板", path: "/", canEdit: false },
-  { key: "business_analysis", label: "经营分析", path: "/business-analysis", canEdit: false },
   { key: "sales_units", label: "销售单位", path: "/sales-units", canEdit: true },
-  { key: "personnel", label: "人员管理", path: "/personnel", canEdit: true },
-  { key: "hr_management", label: "人事管理", path: "/hr-management", canEdit: true },
   { key: "sales_records", label: "销售记录", path: "/sales-records", canEdit: true },
-  { key: "cost_management", label: "成本与收入录入", path: "/cost-management", canEdit: true },
-  { key: "finance_notice", label: "财务通知", path: "/finance-notice", canEdit: true },
-  { key: "profit_analysis", label: "盈亏分析", path: "/profit-analysis", canEdit: true },
   { key: "sales_battle_report", label: "单位战报", path: "/sales-battle-report", canEdit: true },
+  { key: "personnel", label: "人员管理", path: "/personnel", canEdit: true },
+  { key: "hr_management", label: "人事档案", path: "/hr-management", canEdit: true },
+  { key: "payroll", label: "工资核算", path: "/payroll", canEdit: true },
+  { key: "business_analysis", label: "经营分析", path: "/business-analysis", canEdit: false },
+  { key: "cost_management", label: "成本与收入录入", path: "/cost-management", canEdit: true },
+  { key: "profit_analysis", label: "盈亏分析", path: "/profit-analysis", canEdit: true },
+  { key: "finance_notice", label: "财务通知", path: "/finance-notice", canEdit: true },
   { key: "product_settlement", label: "业务域产品结算和分类", path: "/product-settlement", canEdit: true },
   { key: "users", label: "权限分配", path: "/users", canEdit: true },
 ];
 
 export const MODULE_KEYS = MODULE_DEFS.map((m) => m.key);
+
+/** 与左侧导航分组一致，权限分配按此展示，避免勾错板块 */
+export interface ModulePermissionGroup {
+  id: string;
+  label: string;
+  /** 分组说明，便于开通权限时核对 */
+  hint?: string;
+  moduleKeys: ModuleKey[];
+}
+
+export const MODULE_PERMISSION_GROUPS: ModulePermissionGroup[] = [
+  {
+    id: "dashboard",
+    label: "数据看板",
+    moduleKeys: ["dashboard"],
+  },
+  {
+    id: "warehouse",
+    label: "分仓管理",
+    hint: "销售单位 · 销售记录 · 单位战报",
+    moduleKeys: ["sales_units", "sales_records", "sales_battle_report"],
+  },
+  {
+    id: "hr",
+    label: "人事管理",
+    hint: "人员管理 · 人事档案 · 工资核算（后两项为机密，默认不开放）",
+    moduleKeys: ["personnel", "hr_management", "payroll"],
+  },
+  {
+    id: "unit-profit",
+    label: "单位盈亏管理",
+    hint: "经营分析 · 成本与收入录入 · 盈亏分析",
+    moduleKeys: ["business_analysis", "cost_management", "profit_analysis"],
+  },
+  {
+    id: "finance-notice",
+    label: "财务通知",
+    moduleKeys: ["finance_notice"],
+  },
+  {
+    id: "product-settlement",
+    label: "业务域产品结算和分类",
+    moduleKeys: ["product_settlement"],
+  },
+  {
+    id: "users",
+    label: "权限分配",
+    hint: "谨慎勾选：可开通/修改其他账号权限",
+    moduleKeys: ["users"],
+  },
+];
+
+export function isConfidentialModule(key: ModuleKey): boolean {
+  return CONFIDENTIAL_MODULE_KEYS.has(key);
+}
+
+export function getModuleDef(key: ModuleKey): ModuleDef | undefined {
+  return MODULE_DEFS.find((m) => m.key === key);
+}
 
 export function createEmptyPermissions(): UserPermissions {
   return MODULE_DEFS.reduce((acc, m) => {

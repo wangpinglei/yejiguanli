@@ -25,15 +25,6 @@ async function apiRequest<T>(method: string, path: string, body?: unknown): Prom
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
 
-  if (res.status === 401) {
-    removeToken();
-    const loginPath = import.meta.env.BASE_URL + "login";
-    if (window.location.pathname !== loginPath) {
-      window.location.href = loginPath;
-    }
-    throw new Error("登录已过期，请重新登录");
-  }
-
   const raw = await res.text();
   let data: any = null;
   try {
@@ -41,6 +32,20 @@ async function apiRequest<T>(method: string, path: string, body?: unknown): Prom
   } catch {
     throw new Error(raw?.slice(0, 200) || `请求失败 (${res.status})`);
   }
+
+  if (res.status === 401) {
+    const isLoginRequest = path.includes("/auth/login");
+    if (!isLoginRequest) {
+      removeToken();
+      const loginPath = import.meta.env.BASE_URL + "login";
+      if (window.location.pathname !== loginPath) {
+        window.location.href = loginPath;
+      }
+      throw new Error("登录已过期，请重新登录");
+    }
+    throw new Error(data?.error || data?.message || "用户名或密码错误");
+  }
+
   if (!res.ok) throw new Error(data?.error || data?.message || `请求失败 (${res.status})`);
   return data as T;
 }

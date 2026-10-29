@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, Outlet } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -19,6 +19,7 @@ import {
   Scale,
   IdCard,
   Megaphone,
+  Calculator,
 } from "lucide-react";
 import { useAuth, ROLE_LABELS } from "@/context/AuthContext";
 import { useData } from "@/context/DataContext";
@@ -46,20 +47,114 @@ interface NavItem {
   moduleKey: ModuleKey;
 }
 
-const navItems: NavItem[] = [
-  { path: "/", label: "数据看板", icon: LayoutDashboard, moduleKey: "dashboard" },
-  { path: "/business-analysis", label: "经营分析", icon: LineChart, moduleKey: "business_analysis" },
-  { path: "/sales-units", label: "销售单位", icon: Building2, moduleKey: "sales_units" },
+interface NavGroup {
+  id: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  children: NavItem[];
+}
+
+type NavEntry =
+  | { type: "item"; item: NavItem }
+  | { type: "group"; group: NavGroup };
+
+const hrNavChildren: NavItem[] = [
   { path: "/personnel", label: "人员管理", icon: Users, moduleKey: "personnel" },
-  { path: "/hr-management", label: "人事管理", icon: IdCard, moduleKey: "hr_management" },
-  { path: "/sales-records", label: "销售记录", icon: ShoppingCart, moduleKey: "sales_records" },
-  { path: "/cost-management", label: "成本与收入录入", icon: Wallet, moduleKey: "cost_management" },
-  { path: "/finance-notice", label: "财务通知", icon: Megaphone, moduleKey: "finance_notice" },
-  { path: "/profit-analysis", label: "盈亏分析", icon: TrendingUp, moduleKey: "profit_analysis" },
-  { path: "/sales-battle-report", label: "单位战报", icon: Swords, moduleKey: "sales_battle_report" },
-  { path: "/product-settlement", label: "业务域产品结算和分类", icon: Scale, moduleKey: "product_settlement" },
-  { path: "/users", label: "权限分配", icon: ShieldCheck, moduleKey: "users" },
+  { path: "/hr-management", label: "人事档案", icon: IdCard, moduleKey: "hr_management" },
+  { path: "/payroll", label: "工资核算", icon: Calculator, moduleKey: "payroll" },
 ];
+
+const warehouseNavChildren: NavItem[] = [
+  { path: "/sales-units", label: "销售单位", icon: Building2, moduleKey: "sales_units" },
+  { path: "/sales-records", label: "销售记录", icon: ShoppingCart, moduleKey: "sales_records" },
+  { path: "/sales-battle-report", label: "单位战报", icon: Swords, moduleKey: "sales_battle_report" },
+];
+
+const unitProfitNavChildren: NavItem[] = [
+  { path: "/business-analysis", label: "经营分析", icon: LineChart, moduleKey: "business_analysis" },
+  { path: "/cost-management", label: "成本与收入录入", icon: Wallet, moduleKey: "cost_management" },
+  { path: "/profit-analysis", label: "盈亏分析", icon: TrendingUp, moduleKey: "profit_analysis" },
+];
+
+const navEntries: NavEntry[] = [
+  { type: "item", item: { path: "/", label: "数据看板", icon: LayoutDashboard, moduleKey: "dashboard" } },
+  {
+    type: "group",
+    group: {
+      id: "warehouse",
+      label: "分仓管理",
+      icon: Building2,
+      children: warehouseNavChildren,
+    },
+  },
+  {
+    type: "group",
+    group: {
+      id: "hr",
+      label: "人事管理",
+      icon: IdCard,
+      children: hrNavChildren,
+    },
+  },
+  {
+    type: "group",
+    group: {
+      id: "unit-profit",
+      label: "单位盈亏管理",
+      icon: TrendingUp,
+      children: unitProfitNavChildren,
+    },
+  },
+  { type: "item", item: { path: "/finance-notice", label: "财务通知", icon: Megaphone, moduleKey: "finance_notice" } },
+  { type: "item", item: { path: "/product-settlement", label: "业务域产品结算和分类", icon: Scale, moduleKey: "product_settlement" } },
+  { type: "item", item: { path: "/users", label: "权限分配", icon: ShieldCheck, moduleKey: "users" } },
+];
+
+const flatNavItems: NavItem[] = navEntries.flatMap((entry) =>
+  entry.type === "item" ? [entry.item] : entry.group.children,
+);
+
+function isNavPathActive(pathname: string, path: string): boolean {
+  if (path === "/") return pathname === "/" || pathname === "";
+  return pathname === path || pathname.startsWith(`${path}/`);
+}
+
+function NavLinkRow({
+  item,
+  active,
+  onNavigate,
+  badge,
+  nested = false,
+}: {
+  item: NavItem;
+  active: boolean;
+  onNavigate?: () => void;
+  badge?: number;
+  nested?: boolean;
+}) {
+  const Icon = item.icon;
+  return (
+    <Link
+      to={item.path}
+      onClick={onNavigate}
+      className={cn(
+        "flex items-center gap-3 rounded-lg py-2.5 text-sm transition-colors",
+        nested ? "px-3 pl-9" : "px-3",
+        active
+          ? "bg-primary text-primary-foreground"
+          : "text-white/70 hover:bg-white/10 hover:text-white",
+      )}
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      <span className="flex-1">{item.label}</span>
+      {typeof badge === "number" && badge > 0 && (
+        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-400 px-1 text-[10px] font-bold text-amber-950">
+          {badge > 99 ? "99+" : badge}
+        </span>
+      )}
+    </Link>
+  );
+}
 
 function SidebarContent({
   onNavigate,
@@ -71,8 +166,37 @@ function SidebarContent({
   hrReminderTotal?: number;
 }) {
   const location = useLocation();
+  const pathname = location.pathname;
 
-  const visibleItems = navItems.filter((item) => canView(item.moduleKey));
+  const activeGroupIds = useMemo(() => {
+    return navEntries
+      .filter((e): e is Extract<NavEntry, { type: "group" }> => e.type === "group")
+      .filter((e) => e.group.children.some((c) => isNavPathActive(pathname, c.path)))
+      .map((e) => e.group.id);
+  }, [pathname]);
+
+  const [openGroupIds, setOpenGroupIds] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(activeGroupIds.map((id) => [id, true])),
+  );
+
+  useEffect(() => {
+    if (activeGroupIds.length === 0) return;
+    setOpenGroupIds((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const id of activeGroupIds) {
+        if (!next[id]) {
+          next[id] = true;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [activeGroupIds]);
+
+  function toggleGroup(groupId: string) {
+    setOpenGroupIds((prev) => ({ ...prev, [groupId]: !prev[groupId] }));
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -88,34 +212,72 @@ function SidebarContent({
       </div>
 
       <nav className="flex-1 space-y-1 overflow-y-auto p-3">
-        {visibleItems.map((item) => {
-          const Icon = item.icon;
-          const active =
-            item.path === "/"
-              ? location.pathname === "/" || location.pathname === ""
-              : location.pathname.startsWith(item.path);
-          const showHrBadge =
-            item.moduleKey === "hr_management" && hrReminderTotal > 0;
+        {navEntries.map((entry) => {
+          if (entry.type === "item") {
+            const item = entry.item;
+            if (!canView(item.moduleKey)) return null;
+            return (
+              <NavLinkRow
+                key={item.path}
+                item={item}
+                active={isNavPathActive(pathname, item.path)}
+                onNavigate={onNavigate}
+              />
+            );
+          }
+
+          const visibleChildren = entry.group.children.filter((c) => canView(c.moduleKey));
+          if (visibleChildren.length === 0) return null;
+          const GroupIcon = entry.group.icon;
+          const childActive = entry.group.children.some((c) =>
+            isNavPathActive(pathname, c.path),
+          );
+          const isOpen = Boolean(openGroupIds[entry.group.id]);
+          const groupBadge =
+            entry.group.id === "hr" && canView("hr_management") && hrReminderTotal > 0
+              ? hrReminderTotal
+              : 0;
+
           return (
-            <Link
-              key={item.path}
-              to={item.path}
-              onClick={onNavigate}
-              className={cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors",
-                active
-                  ? "bg-primary text-primary-foreground"
-                  : "text-white/70 hover:bg-white/10 hover:text-white"
-              )}
-            >
-              <Icon className="h-4 w-4 shrink-0" />
-              <span className="flex-1">{item.label}</span>
-              {showHrBadge && (
-                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-400 px-1 text-[10px] font-bold text-amber-950">
-                  {hrReminderTotal > 99 ? "99+" : hrReminderTotal}
-                </span>
-              )}
-            </Link>
+            <div key={entry.group.id} className="space-y-1">
+              <button
+                type="button"
+                onClick={() => toggleGroup(entry.group.id)}
+                className={cn(
+                  "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors",
+                  childActive
+                    ? "bg-white/10 text-white"
+                    : "text-white/70 hover:bg-white/10 hover:text-white",
+                )}
+              >
+                <GroupIcon className="h-4 w-4 shrink-0" />
+                <span className="flex-1 text-left">{entry.group.label}</span>
+                {groupBadge > 0 && (
+                  <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-400 px-1 text-[10px] font-bold text-amber-950">
+                    {groupBadge > 99 ? "99+" : groupBadge}
+                  </span>
+                )}
+                <ChevronDown
+                  className={cn(
+                    "h-4 w-4 shrink-0 opacity-70 transition-transform",
+                    isOpen ? "rotate-0" : "-rotate-90",
+                  )}
+                />
+              </button>
+              {isOpen &&
+                visibleChildren.map((item) => (
+                  <NavLinkRow
+                    key={item.path}
+                    item={item}
+                    nested
+                    active={isNavPathActive(pathname, item.path)}
+                    onNavigate={onNavigate}
+                    badge={
+                      item.moduleKey === "hr_management" ? hrReminderTotal : undefined
+                    }
+                  />
+                ))}
+            </div>
           );
         })}
       </nav>
@@ -156,7 +318,7 @@ export default function Layout() {
   }, [canViewHr, isSuperadmin, location.pathname]);
 
   const pageTitle =
-    navItems.find((item) => item.path === location.pathname)?.label ||
+    flatNavItems.find((item) => isNavPathActive(location.pathname, item.path))?.label ||
     MODULE_DEFS.find((m) => m.path === location.pathname)?.label ||
     "数据看板";
   const isWideTablePage = location.pathname.replace(/\/$/, "") === "/sales-records";

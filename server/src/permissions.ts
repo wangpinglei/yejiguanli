@@ -2,12 +2,14 @@
 
 export type ModuleKey =
   | "dashboard"
+  | "business_analysis"
   | "sales_units"
   | "personnel"
   | "hr_management"
   | "sales_records"
   | "cost_management"
   | "finance_notice"
+  | "payroll"
   | "profit_analysis"
   | "sales_battle_report"
   | "product_settlement"
@@ -20,22 +22,25 @@ export interface ModulePermission {
 
 export type UserPermissions = Record<ModuleKey, ModulePermission>;
 
+/** 顺序与前端导航/权限分组保持一致 */
 const MODULE_KEYS: ModuleKey[] = [
   "dashboard",
   "sales_units",
+  "sales_records",
+  "sales_battle_report",
   "personnel",
   "hr_management",
-  "sales_records",
+  "payroll",
+  "business_analysis",
   "cost_management",
-  "finance_notice",
   "profit_analysis",
-  "sales_battle_report",
+  "finance_notice",
   "product_settlement",
   "users",
 ];
 
 /** 机密模块：旧角色默认映射一律关闭，仅超管手动授权 */
-const CONFIDENTIAL = new Set<ModuleKey>(["hr_management"]);
+const CONFIDENTIAL = new Set<ModuleKey>(["hr_management", "payroll"]);
 
 const EDITABLE = new Set<ModuleKey>([
   "sales_units",
@@ -44,6 +49,7 @@ const EDITABLE = new Set<ModuleKey>([
   "sales_records",
   "cost_management",
   "finance_notice",
+  "payroll",
   "profit_analysis",
   "sales_battle_report",
   "product_settlement",

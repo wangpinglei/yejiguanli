@@ -1093,10 +1093,10 @@ export default function HrManagementPage() {
   if (!canViewHr) {
     return (
       <div className="p-6">
-        <PageHeader title="人事管理" description="机密模块，需超级管理员授权后才能访问" />
+        <PageHeader title="人事档案" description="机密模块，需超级管理员授权后才能访问" />
         <Card className="mt-4">
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            当前账号无「人事管理」查看权限
+            当前账号无「人事档案」查看权限
           </CardContent>
         </Card>
       </div>
@@ -1109,7 +1109,7 @@ export default function HrManagementPage() {
   return (
     <div className="space-y-4 p-6">
       <PageHeader
-        title="人事管理"
+        title="人事档案"
         description="可独立导入人事档案：匹配到人员管理则关联；匹配不到只建人事档。入离职日期只保存在人事档案，不会改写人员管理表格。业绩归属单位仅关联人员时显示。签署公司≠销售单位。"
         action={
           <div className="flex flex-wrap gap-2">

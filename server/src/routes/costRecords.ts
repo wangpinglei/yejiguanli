@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { getDb, rowToCostRecord, generateId } from "../db";
 import { authMiddleware } from "../auth";
-import { getVisibleUnitIds, requireEditPermission } from "../middleware";
+import { assertUnitAccess, getVisibleUnitIds, requireEditPermission } from "../middleware";
 
 const router = Router();
 
@@ -37,6 +37,7 @@ router.post("/", requireEditPermission, (req, res) => {
   if (!salesUnitId || !date) {
     return res.status(400).json({ error: "销售单位和日期不能为空" });
   }
+  if (!assertUnitAccess(req, res, salesUnitId)) return;
   const costItems = items || [];
   const totalCost = costItems.reduce((sum: number, item: any) => sum + (item.amount || 0), 0);
   const id = generateId("cr");
@@ -78,11 +79,13 @@ router.put("/:id", requireEditPermission, (req, res) => {
   if (!existing) {
     return res.status(404).json({ error: "成本记录不存在" });
   }
+  if (!assertUnitAccess(req, res, existing.sales_unit_id)) return;
 
   const {
     salesUnitId, date, items, remark, changeReason,
     isRecurring, recurringMonths, recurringStartDate, recurringEndDate,
   } = req.body;
+  if (salesUnitId != null && !assertUnitAccess(req, res, salesUnitId)) return;
   const costItems = items !== undefined ? items : JSON.parse(existing.items);
   const totalCost = costItems.reduce((sum: number, item: any) => sum + (item.amount || 0), 0);
 

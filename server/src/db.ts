@@ -1914,8 +1914,9 @@ function migrateLaborCompanyIdsFromSalesUnits() {
 }
 
 function seedDefaultAdmin() {
-  const count = db.prepare("SELECT COUNT(*) as c FROM users").get() as { c: number };
-  if (count.c === 0) {
+  const count = db.prepare("SELECT COUNT(*) as c FROM users").get() as { c: number | bigint };
+  // readBigInts: true 时 COUNT 为 0n，不能用 === 0 判断
+  if (Number(count.c) === 0) {
     const hashedPassword = bcrypt.hashSync("0720", 10);
     const perms = JSON.stringify(createFullPermissions());
     db.prepare(`
