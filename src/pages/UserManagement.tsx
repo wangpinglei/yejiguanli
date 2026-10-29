@@ -15,7 +15,9 @@ import {
   type ModuleKey,
   type UserPermissions,
 } from "@/config/modules";
-import { Plus, Pencil, Trash2, Lock, Eye, EyeOff, Shield, Database } from "lucide-react";
+import {
+  Plus, Pencil, Trash2, Lock, Eye, EyeOff, Shield, Database, Maximize2, Minimize2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -57,6 +59,8 @@ export default function UserManagement() {
   const { users, addUser, updateUser, deleteUser, user: currentUser } = useAuth();
   const { refreshAll, salesUnits } = useData();
   const [dialogOpen, setDialogOpen] = useState(false);
+  /** 编辑/开通权限弹窗默认放大，便于勾选单位与模块 */
+  const [dialogMaximized, setDialogMaximized] = useState(true);
   const [editingUser, setEditingUser] = useState<SystemUser | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -103,6 +107,7 @@ export default function UserManagement() {
       managedUnitIds: [],
     });
     setShowPassword(false);
+    setDialogMaximized(true);
     setDialogOpen(true);
   };
 
@@ -116,6 +121,7 @@ export default function UserManagement() {
       managedUnitIds: [...(u.managedUnitIds || [])],
     });
     setShowPassword(false);
+    setDialogMaximized(true);
     setDialogOpen(true);
   };
 
@@ -395,14 +401,39 @@ export default function UserManagement() {
       </Card>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
+        <DialogContent
+          className={
+            dialogMaximized
+              ? "max-w-[min(1200px,98vw)] w-[98vw] h-[95vh] max-h-[95vh] flex flex-col overflow-hidden"
+              : "max-w-lg max-h-[90vh] overflow-y-auto"
+          }
+        >
+          <button
+            type="button"
+            className="absolute top-4 right-12 rounded-xs p-1 opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden"
+            title={dialogMaximized ? "还原" : "放大"}
+            onClick={() => setDialogMaximized((v) => !v)}
+          >
+            {dialogMaximized ? (
+              <Minimize2 className="h-4 w-4" />
+            ) : (
+              <Maximize2 className="h-4 w-4" />
+            )}
+            <span className="sr-only">{dialogMaximized ? "还原" : "放大"}</span>
+          </button>
+          <DialogHeader className="shrink-0">
             <DialogTitle>{editingUser ? "编辑权限" : "开通登录权限"}</DialogTitle>
             <DialogDescription>
               配置登录账号、模块权限，以及可查看的销售单位范围。普通账号只能看到已勾选单位的数据，看不到其他单位。
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-2">
+          <div
+            className={
+              dialogMaximized
+                ? "flex-1 min-h-0 space-y-4 overflow-y-auto py-2 pr-1"
+                : "space-y-4 py-2"
+            }
+          >
             <div className="space-y-2">
               <Label>用户名 *</Label>
               <Input
@@ -646,7 +677,7 @@ export default function UserManagement() {
               </>
             )}
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0">
             <Button variant="outline" onClick={() => setDialogOpen(false)}>取消</Button>
             <Button onClick={handleSubmit}>{editingUser ? "保存" : "开通"}</Button>
           </DialogFooter>
