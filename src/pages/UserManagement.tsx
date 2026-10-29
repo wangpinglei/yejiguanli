@@ -455,22 +455,31 @@ export default function UserManagement() {
               <div className="space-y-2">
                 <Label>密码 {editingUser ? "（留空不修改）" : "*"}</Label>
                 <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Lock className="pointer-events-none absolute left-3 top-1/2 z-0 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     type={showPassword ? "text" : "password"}
                     value={form.password}
                     onChange={(e) => setForm({ ...form, password: e.target.value })}
-                    placeholder="密码"
+                    placeholder={editingUser ? "输入新密码后可点眼睛查看" : "请输入密码"}
                     className="pl-10 pr-10"
+                    autoComplete="new-password"
                   />
                   <button
                     type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    title={showPassword ? "隐藏密码" : "显示密码"}
+                    aria-label={showPassword ? "隐藏密码" : "显示密码"}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute right-2 top-1/2 z-10 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
+                {editingUser && (
+                  <p className="text-xs text-muted-foreground">
+                    已保存的密码已加密，无法查看原文；留空表示不改。若要核对，请输入新密码后再点右侧眼睛预览。
+                  </p>
+                )}
               </div>
             </div>
 
