@@ -33,7 +33,7 @@ import {
   isLikelyOpsCenterName,
   loadPayrollEntries,
   loadPayrollScopeUnitIds,
-  PAYROLL_STANDARD_WORK_DAYS,
+  PAYROLL_STANDARD_HOURS,
   savePayrollEntries,
   savePayrollScopeUnitIds,
   type PayrollMonthEntry,
@@ -221,7 +221,7 @@ export default function Payroll() {
       '标准底薪',
       '标准绩效',
       '业绩提成',
-      '出勤天数',
+      '出勤小时',
       '考核分',
       '实发底薪',
       '实发绩效',
@@ -239,7 +239,7 @@ export default function Payroll() {
         r.standardBaseSalary.toFixed(2),
         r.standardPerformance.toFixed(2),
         r.commission.toFixed(2),
-        r.attendanceDays.toFixed(2),
+        r.attendanceHours.toFixed(2),
         r.score.toFixed(1),
         r.paidBaseSalary.toFixed(2),
         r.paidPerformance.toFixed(2),
@@ -274,14 +274,14 @@ export default function Payroll() {
         <CardHeader className="pb-2">
           <CardTitle className="text-base">本期默认公式（可再改）</CardTitle>
           <CardDescription>
-            应发 = 业绩提成 + 实发底薪 + 实发绩效 + 其他加项 − 其他减项；应出勤按{' '}
-            {PAYROLL_STANDARD_WORK_DAYS} 天；未填出勤按满勤，未填考核分按 100 分。
+            应发 = 业绩提成 + 实发底薪 + 实发绩效 + 其他加项 − 其他减项；月出勤系数{' '}
+            21.75 × 7.5 = {PAYROLL_STANDARD_HOURS} 小时；未填出勤按满勤，未填考核分按 100 分。
           </CardDescription>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground space-y-1">
-          <p>实发底薪 = 标准底薪 × (出勤天数 / {PAYROLL_STANDARD_WORK_DAYS})</p>
+          <p>实发底薪 = 标准底薪 × (出勤小时 / {PAYROLL_STANDARD_HOURS})</p>
           <p>
-            实发绩效 = 标准绩效 × (出勤天数 / {PAYROLL_STANDARD_WORK_DAYS}) × (考核分 / 100)
+            实发绩效 = 标准绩效 × (出勤小时 / {PAYROLL_STANDARD_HOURS}) × (考核分 / 100)
           </p>
           <p>业绩提成 = 系统个人提成 + 内部销售提成 + 团队管理提成（只读）</p>
         </CardContent>
@@ -369,7 +369,7 @@ export default function Payroll() {
             2. 月度工资表
           </CardTitle>
           <CardDescription>
-            标准底薪/绩效、业绩提成来自系统；出勤天数与考核分需人工填写后参与计算。
+            标准底薪/绩效、业绩提成来自系统；出勤小时与考核分需人工填写后参与计算。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -427,7 +427,7 @@ export default function Payroll() {
                     <TableHead className="text-right">标准底薪</TableHead>
                     <TableHead className="text-right">标准绩效</TableHead>
                     <TableHead className="text-right">业绩提成</TableHead>
-                    <TableHead className="min-w-[100px]">出勤天数</TableHead>
+                    <TableHead className="min-w-[108px]">出勤小时</TableHead>
                     <TableHead className="min-w-[88px]">考核分</TableHead>
                     <TableHead className="text-right">实发底薪</TableHead>
                     <TableHead className="text-right">实发绩效</TableHead>
@@ -457,13 +457,13 @@ export default function Payroll() {
                             type="number"
                             step="0.5"
                             min={0}
-                            max={31}
-                            className="h-8 w-[96px]"
-                            placeholder={String(PAYROLL_STANDARD_WORK_DAYS)}
-                            value={entry.attendanceDays ?? ''}
+                            max={PAYROLL_STANDARD_HOURS * 2}
+                            className="h-8 w-[104px]"
+                            placeholder={String(PAYROLL_STANDARD_HOURS)}
+                            value={entry.attendanceHours ?? ''}
                             onChange={(e) =>
                               updateEntry(row.personnelId, {
-                                attendanceDays:
+                                attendanceHours:
                                   e.target.value === '' ? null : Number(e.target.value),
                               })
                             }

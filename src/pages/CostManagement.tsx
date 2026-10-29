@@ -5,7 +5,22 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, formatDate, formatDateTime, getYearMonth } from "@/lib/format";
 import { matchesRecurringYearMonth, RECURRING_ALL_MONTHS } from "@/utils/recurringRecord";
-import { getTotalSalaryCost, calcLeaveDeduction, MONTHLY_WORK_DAYS, isPersonnelOnDutyInMonth, filterByMonth } from "@/lib/salary";
+import {
+  getTotalSalaryCost,
+  calcLeaveDeduction,
+  MONTHLY_STANDARD_HOURS,
+  calculateMonthlySalary,
+  isPersonnelOnDutyInMonth,
+  filterByMonth,
+} from "@/lib/salary";
+import {
+  calcPayrollRow,
+  createEmptyPayrollEntry,
+  hasPayrollEntriesForMonth,
+  loadPayrollEntries,
+  sumPayrollPayableByUnit,
+} from "@/lib/payrollCalc";
+import { personBelongsToUnitInMonth } from "@/lib/unitAssignment";
 import { calcSaleInternalSalesCommissionPreview, calcSalePersonCommissionPreview } from "@/lib/commissionReward";
 import { getEffectiveConfirmAmount, getEffectiveManualCost } from "@/lib/confirmAmount";
 import { calcSaleSettlementIncome } from "@/lib/settlement";
@@ -105,6 +120,9 @@ export default function CostManagement() {
   // Delete reason state
   const [deleteReason, setDeleteReason] = useState("");
 
+  /** 预测=满勤；工资表=以工资核算应发为准 */
+  const [salaryCostMode, setSalaryCostMode] = useState<"forecast" | "payroll">("forecast");
+
   const isSuperadmin = role === "superadmin";
 
   const teamMgmtContext = useMemo(() => ({
@@ -114,7 +132,13 @@ export default function CostManagement() {
   }), [teamMgmtCommissionRules, performanceTargets, unitProductSettlements]);
 
   // ===================== 自动薪酬成本计算（按月度） =====================
-  const salaryCosts = useMemo(() => {
+  // 预测口径：满勤（请假小时不计），其他加减项仍计入
+  const forecastAdjustments = useMemo(
+    () => monthlyAdjustments.map((a) => ({ ...a, leaveDays: 0 })),
+    [monthlyAdjustments],
+  );
+
+  const forecastSalaryCosts = useMemo(() => {
     const unitIds = filterUnit === "all"
       ? salesUnits.map((u) => u.id)
       : [filterUnit];
@@ -124,11 +148,122 @@ export default function CostManagement() {
       salesRecords,
       products,
       selectedMonth,
-      monthlyAdjustments,
+      forecastAdjustments,
       productPersonCommissions,
       teamMgmtContext,
     );
-  }, [salesUnits, personnel, salesRecords, filterUnit, products, selectedMonth, monthlyAdjustments, productPersonCommissions, teamMgmtContext]);
+  }, [salesUnits, personnel, salesRecords, filterUnit, products, selectedMonth, forecastAdjustments, productPersonCommissions, teamMgmtContext]);
+
+  /** 工资核算本机录入 → 按单位应发（最终成本口径） */
+  const payrollPayableByUnit = useMemo(() => {
+    const entries = loadPayrollEntries(selectedMonth);
+    if (Object.keys(entries).length === 0) return {} as Record<string, number>;
+
+    const unitIds = filterUnit === "all"
+      ? salesUnits.map((u) => u.id)
+      : [filterUnit];
+    const unitNameMap = new Map(salesUnits.map((u) => [u.id, u.name]));
+    const rows = [];
+
+    for (const unitId of unitIds) {
+      const people = personnel.filter(
+        (p) =>
+          isPersonnelOnDutyInMonth(p, selectedMonth) &&
+          personBelongsToUnitInMonth(p, unitId, selectedMonth),
+      );
+      for (const person of people) {
+        // 仅纳入工资表已保存录入的人员（最终确认口径）
+        if (!entries[person.id]) continue;
+        const calc = calculateMonthlySalary(
+          person,
+          salesRecords,
+          products,
+          selectedMonth,
+          undefined,
+          productPersonCommissions,
+          teamMgmtContext,
+          unitId,
+        );
+        const commission =
+          (calc.personalCommission || 0) +
+          (calc.internalSalesCommission || 0) +
+          (calc.managementCommission || 0);
+        const entry = entries[person.id] || createEmptyPayrollEntry(person.id);
+        rows.push(
+          calcPayrollRow({
+            personnelId: person.id,
+            name: person.name,
+            unitId,
+            unitName: unitNameMap.get(unitId) || unitId,
+            standardBaseSalary: calc.baseSalary,
+            standardPerformance: calc.performance,
+            commission,
+            entry,
+          }),
+        );
+      }
+    }
+    return sumPayrollPayableByUnit(rows);
+  }, [
+    selectedMonth,
+    filterUnit,
+    salesUnits,
+    personnel,
+    salesRecords,
+    products,
+    productPersonCommissions,
+    teamMgmtContext,
+  ]);
+
+  const payrollAvailable =
+    Object.keys(payrollPayableByUnit).length > 0 || hasPayrollEntriesForMonth(selectedMonth);
+
+  useEffect(() => {
+    if (salaryCostMode === "payroll" && Object.keys(payrollPayableByUnit).length === 0) {
+      setSalaryCostMode("forecast");
+    }
+  }, [salaryCostMode, payrollPayableByUnit]);
+
+  const salaryCosts = useMemo(() => {
+    if (salaryCostMode !== "payroll" || Object.keys(payrollPayableByUnit).length === 0) {
+      return forecastSalaryCosts;
+    }
+    const units = forecastSalaryCosts.units.map((u) => {
+      const payable = payrollPayableByUnit[u.unitId];
+      if (payable === undefined) return u;
+      const totalSalary = payable;
+      return {
+        ...u,
+        totalSalary,
+        totalLeaveDeduction: 0,
+        totalCost: totalSalary + u.totalSocialInsurance + u.totalHousingFund,
+        details: u.details.map((d) => {
+          // 明细仍展示预测结构；单位合计已替换为工资表应发
+          return d;
+        }),
+      };
+    });
+    const grandSalary = units.reduce((sum, u) => sum + u.totalSalary, 0);
+    const grandSocialInsurance = units.reduce((sum, u) => sum + u.totalSocialInsurance, 0);
+    const grandHousingFund = units.reduce((sum, u) => sum + u.totalHousingFund, 0);
+    const grandLeaveDeduction = units.reduce((sum, u) => sum + u.totalLeaveDeduction, 0);
+    const grandOtherAdjustment = units.reduce((sum, u) => sum + u.totalOtherAdjustment, 0);
+    const grandProductCommission = units.reduce((sum, u) => sum + u.totalProductCommission, 0);
+    const grandSalesCommission = units.reduce((sum, u) => sum + u.totalSalesCommission, 0);
+    return {
+      ...forecastSalaryCosts,
+      units,
+      grandSalary,
+      grandSocialInsurance,
+      grandHousingFund,
+      grandSocialHousingFund: grandSocialInsurance + grandHousingFund,
+      grandLeaveDeduction,
+      grandOtherAdjustment,
+      grandProductCommission,
+      grandSalesCommission,
+      grandTotal: grandSalary + grandSocialInsurance + grandHousingFund,
+    };
+  }, [salaryCostMode, forecastSalaryCosts, payrollPayableByUnit]);
 
   // 按月过滤手动成本记录（含月度固定循环成本）
   const filteredRecords = useMemo(() => {
@@ -683,7 +818,9 @@ export default function CostManagement() {
                 {formatCurrency(salaryCosts.grandSalary)}
               </p>
               <p className="text-[10px] text-muted-foreground">
-                底薪/绩效/补贴/提成/调整（不含社保公积金）
+                {salaryCostMode === "payroll"
+                  ? "口径：工资表应发（不含社保公积金）"
+                  : "口径：满勤预测（不含社保公积金）"}
               </p>
             </div>
           </CardContent>
@@ -783,18 +920,39 @@ export default function CostManagement() {
             <h3 className="text-base font-semibold">
               自动计入人力成本 / 实时薪资（{selectedMonth} 月度）
               <span className="ml-2 text-xs font-normal text-muted-foreground">
-                薪酬与社保公积金分列；按人员管理入离职日期判定在岗
+                默认满勤预测；最终以工资表应发为准；月出勤系数 21.75×7.5
               </span>
             </h3>
             <Badge variant="outline" className="border-blue-200 text-blue-700">
               在岗 {onDutyCount} 人
             </Badge>
+            <Select
+              value={salaryCostMode}
+              onValueChange={(v) => setSalaryCostMode(v as "forecast" | "payroll")}
+            >
+              <SelectTrigger className="h-8 w-[168px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="forecast">预测成本（满勤）</SelectItem>
+                <SelectItem value="payroll" disabled={!payrollAvailable}>
+                  工资表确认成本
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            {salaryCostMode === "forecast" ? (
+              <Badge className="bg-sky-100 text-sky-800 hover:bg-sky-100">预测·满勤</Badge>
+            ) : (
+              <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">工资表确认</Badge>
+            )}
             <span className="text-xs text-muted-foreground">
-              请假扣款 -{formatCurrency(leaveDeductionTotal)}
-              · 其他调整 {otherAdjustmentTotal >= 0 ? "+" : ""}
-              {formatCurrency(otherAdjustmentTotal)}
+              {salaryCostMode === "forecast"
+                ? `其他调整 ${otherAdjustmentTotal >= 0 ? "+" : ""}${formatCurrency(otherAdjustmentTotal)}（请假不计）`
+                : "薪酬合计取自工资核算应发"}
             </span>
-            <Badge variant="secondary" className="ml-auto">系统自动计算</Badge>
+            <Link to="/payroll" className="ml-auto text-xs text-blue-600 hover:underline">
+              去工资核算
+            </Link>
           </div>
           <div className="overflow-x-auto">
             <Table>
@@ -1727,7 +1885,8 @@ export default function CostManagement() {
           <div className={`space-y-3 py-2 ${adjustmentDialogMaximized ? "flex-1 min-h-0 flex flex-col" : ""}`}>
             <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700 shrink-0">
               <CalendarDays className="mr-1 inline h-4 w-4" />
-              请假扣款 = 日薪 × 请假天数（日薪 = 底薪 / {MONTHLY_WORK_DAYS}）。其他加项/减项为额外薪资调整。
+              请假按小时：扣款 = 时薪 × 请假小时（时薪 = 底薪 / {MONTHLY_STANDARD_HOURS}，即 21.75×7.5）。
+              成本页默认按满勤预测，最终成本请以「工资核算」确认后切换「工资表确认成本」。
             </div>
             <div
               className={
@@ -1742,8 +1901,8 @@ export default function CostManagement() {
                     <TableHead>姓名</TableHead>
                     <TableHead>单位</TableHead>
                     <TableHead className="text-right">底薪</TableHead>
-                    <TableHead className="text-right">日薪</TableHead>
-                    <TableHead className="text-right">请假天数</TableHead>
+                    <TableHead className="text-right">时薪</TableHead>
+                    <TableHead className="text-right">请假小时</TableHead>
                     <TableHead className="text-right">请假扣款</TableHead>
                     <TableHead className="text-right">其他加项</TableHead>
                     <TableHead className="text-right">其他减项</TableHead>
@@ -1753,14 +1912,14 @@ export default function CostManagement() {
                 <TableBody>
                   {adjustmentPersonnel.map((p) => {
                     const data = adjForm[p.id] || { leaveDays: 0, otherBonus: 0, otherDeduction: 0, note: "" };
-                    const dailyRate = p.salary.baseSalary / MONTHLY_WORK_DAYS;
+                    const hourlyRate = p.salary.baseSalary / MONTHLY_STANDARD_HOURS;
                     const leaveDeduction = calcLeaveDeduction(p.salary.baseSalary, data.leaveDays);
                     return (
                       <TableRow key={p.id}>
                         <TableCell className="font-medium">{p.name}</TableCell>
                         <TableCell><Badge variant="outline">{getUnitName(p.salesUnitId)}</Badge></TableCell>
                         <TableCell className="text-right text-gray-600">{formatCurrency(p.salary.baseSalary)}</TableCell>
-                        <TableCell className="text-right text-gray-500">{formatCurrency(dailyRate)}</TableCell>
+                        <TableCell className="text-right text-gray-500">{formatCurrency(hourlyRate)}</TableCell>
                         <TableCell>
                           <Input
                             type="number"

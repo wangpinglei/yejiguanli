@@ -5,7 +5,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/PageHeader";
 import { personnelApi } from "@/lib/api";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
-import { EMPTY_SALARY, calculateMonthlySalary, getFixedSalary, filterByMonth, MONTHLY_WORK_DAYS, isSalesBattlePosition, getPersonalSales, getInternalSalesRecipientId } from "@/lib/salary";
+import { EMPTY_SALARY, calculateMonthlySalary, getFixedSalary, filterByMonth, MONTHLY_STANDARD_HOURS, isSalesBattlePosition, getPersonalSales, getInternalSalesRecipientId } from "@/lib/salary";
 import { isOnDutyPerson } from "@/lib/personnelDuty";
 import type { Personnel, PersonnelUnitAssignment, SalaryStructure } from "@/types";
 import {
@@ -1700,9 +1700,10 @@ export default function PersonnelPage() {
                 </span>
               </div>
 
-              {/* 日薪参考 */}
+              {/* 时薪参考：月出勤系数 21.75×7.5 */}
               <div className="rounded-md border px-3 py-2 text-xs text-muted-foreground">
-                日薪参考：底薪 / {MONTHLY_WORK_DAYS} = {formatCurrency(salaryDetailPerson.salary.baseSalary / MONTHLY_WORK_DAYS)} / 天
+                时薪参考：底薪 / {MONTHLY_STANDARD_HOURS}（21.75×7.5） ={' '}
+                {formatCurrency(salaryDetailPerson.salary.baseSalary / MONTHLY_STANDARD_HOURS)} / 小时
               </div>
 
               {/* 条件说明 */}

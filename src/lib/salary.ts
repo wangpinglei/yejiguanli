@@ -39,6 +39,10 @@ export type TeamMgmtSalaryContext = {
 
 // 每月法定计薪天数（中国劳动法标准）
 export const MONTHLY_WORK_DAYS = 21.75;
+/** 标准日工时（小时） */
+export const WORK_HOURS_PER_DAY = 7.5;
+/** 月出勤系数（满勤小时）= 21.75 × 7.5 */
+export const MONTHLY_STANDARD_HOURS = MONTHLY_WORK_DAYS * WORK_HOURS_PER_DAY;
 
 // 默认空薪资结构
 export const EMPTY_SALARY: SalaryStructure = {
@@ -696,13 +700,15 @@ function calcCommissionForRecords(
 }
 
 /**
- * 计算请假扣款
- * 日薪 = 底薪 / 21.75
- * 扣款 = 日薪 x 请假天数
+ * 计算请假扣款（按小时）
+ * 时薪 = 底薪 / (21.75 × 7.5)
+ * 扣款 = 时薪 × 请假小时
+ * @param leaveHours 请假小时（字段名 leaveDays 为历史兼容，语义为小时）
  */
-export function calcLeaveDeduction(baseSalary: number, leaveDays: number): number {
-  if (leaveDays <= 0) return 0;
-  return (baseSalary / MONTHLY_WORK_DAYS) * leaveDays;
+export function calcLeaveDeduction(baseSalary: number, leaveHours: number): number {
+  if (leaveHours <= 0) return 0;
+  if (MONTHLY_STANDARD_HOURS <= 0) return 0;
+  return (baseSalary / MONTHLY_STANDARD_HOURS) * leaveHours;
 }
 
 /**

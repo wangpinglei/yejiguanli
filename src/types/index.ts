@@ -555,7 +555,8 @@ export interface MonthlyAdjustment {
   id: string;
   personnelId: string;
   yearMonth: string; // "2026-08"
-  leaveDays: number; // 请假天数
+  /** 请假小时（字段名历史兼容；满勤月系数 21.75×7.5） */
+  leaveDays: number;
   otherBonus: number; // 其他加项（奖金等）
   otherDeduction: number; // 其他减项（罚款等）
   note: string; // 备注
