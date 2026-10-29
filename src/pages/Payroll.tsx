@@ -231,10 +231,15 @@ export default function Payroll() {
       '应发合计',
       '备注',
     ]
+    // Excel 会把 "2026-10" 自动当成日期显示成 Oct-26，导出用中文月份文本避免误识别
+    const monthLabel = /^\d{4}-\d{2}$/.test(yearMonth)
+      ? `${yearMonth.slice(0, 4)}年${Number(yearMonth.slice(5, 7))}月`
+      : yearMonth
+
     const lines = rows.map((r) => {
       const entry = entries[r.personnelId] || createEmptyPayrollEntry(r.personnelId)
       return [
-        yearMonth,
+        monthLabel,
         r.unitName,
         r.name,
         r.standardBaseSalary.toFixed(2),
