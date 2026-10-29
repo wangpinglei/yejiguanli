@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { personnelApi } from "@/lib/api";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
 import { EMPTY_SALARY, calculateMonthlySalary, getFixedSalary, filterByMonth, MONTHLY_STANDARD_HOURS, isSalesBattlePosition, getPersonalSales, getInternalSalesRecipientId } from "@/lib/salary";
+import { loadPayrollScopeUnitIds } from "@/lib/payrollCalc";
 import { isOnDutyPerson } from "@/lib/personnelDuty";
 import type { Personnel, PersonnelUnitAssignment, SalaryStructure } from "@/types";
 import {
@@ -139,8 +140,27 @@ export default function PersonnelPage() {
   const [filterUnit, setFilterUnit] = useState(() => searchParams.get("unit") || "all");
   /** all | active | inactive — 在职/离职（与列表「在岗/离职」一致）；默认只看在职便于梳理 */
   const [filterStatus, setFilterStatus] = useState<"all" | "active" | "inactive">("active");
-  /** all | missing — 缺产品提成配置筛选 */
+  /** all | missing — 缺产品提成配置筛选（仅工资核算已纳入单位） */
   const [filterCommission, setFilterCommission] = useState<"all" | "missing">("all");
+  /** 工资核算「纳入核算单位」名单（本机）；名单外单位不催配销售提成 */
+  const [payrollScopeUnitIds, setPayrollScopeUnitIds] = useState<string[]>(() =>
+    loadPayrollScopeUnitIds(),
+  );
+
+  useEffect(() => {
+    function refreshScope() {
+      setPayrollScopeUnitIds(loadPayrollScopeUnitIds());
+    }
+    refreshScope();
+    window.addEventListener("focus", refreshScope);
+    window.addEventListener("storage", refreshScope);
+    window.addEventListener("payroll-scope-changed", refreshScope);
+    return () => {
+      window.removeEventListener("focus", refreshScope);
+      window.removeEventListener("storage", refreshScope);
+      window.removeEventListener("payroll-scope-changed", refreshScope);
+    };
+  }, []);
   /** none | desc | asc — 销售总额排序 */
   const [salesSortOrder, setSalesSortOrder] = useState<"none" | "desc" | "asc">("none");
   const [salesRange, setSalesRange] = useState<SalesRange>("year");
@@ -196,7 +216,12 @@ export default function PersonnelPage() {
   const isSuperadmin = role === "superadmin";
   const datesOnly = isOrgDept && !canEditPersonnel;
 
-  /** 每人：已售产品数 / 已配提成数 / 缺少提成的产品数与名称 */
+  const payrollScopeSet = useMemo(
+    () => new Set(payrollScopeUnitIds),
+    [payrollScopeUnitIds],
+  );
+
+  /** 每人：已售产品数 / 已配提成数 / 缺少提成的产品数与名称（仅纳入工资核算的单位计 missing） */
   const commissionStatusByPersonId = useMemo(() => {
     const map: Record<
       string,
@@ -206,12 +231,17 @@ export default function PersonnelPage() {
         missingCount: number
         missingNames: string[]
         missingProductIds: string[]
+        /** 所属单位是否在工资核算纳入名单 */
+        inPayrollScope: boolean
       }
     > = {};
 
     const productNameById = new Map(products.map((p) => [p.id, p.name || '']));
+    const hasPayrollScope = payrollScopeSet.size > 0;
 
     for (const person of personnel) {
+      const inPayrollScope = hasPayrollScope && payrollScopeSet.has(person.salesUnitId);
+
       const soldIds = new Set<string>();
       for (const s of salesRecords) {
         const hitPerson =
@@ -239,7 +269,8 @@ export default function PersonnelPage() {
         )
         if (hasPpc) {
           configuredCount += 1
-        } else {
+        } else if (inPayrollScope) {
+          // 未纳入工资核算的单位：不算「待配提成」
           missingPairs.push({
             id: productId,
             name: productNameById.get(productId) || productId,
@@ -253,10 +284,11 @@ export default function PersonnelPage() {
         missingCount: missingPairs.length,
         missingNames: missingPairs.map((x) => x.name),
         missingProductIds: missingPairs.map((x) => x.id),
+        inPayrollScope,
       }
     }
     return map;
-  }, [personnel, salesRecords, productPersonCommissions, products]);
+  }, [personnel, salesRecords, productPersonCommissions, products, payrollScopeSet]);
 
   const missingCommissionPersonCount = useMemo(() => {
     return personnel.filter((p) => (commissionStatusByPersonId[p.id]?.missingCount || 0) > 0).length
@@ -985,7 +1017,9 @@ export default function PersonnelPage() {
             </div>
             {filteredPersonnel.length === 0 ? (
               <div className="rounded-md border border-dashed border-amber-200 bg-white/70 px-3 py-6 text-center text-sm text-muted-foreground">
-                当前单位/搜索条件下，没有未配提成的人
+                {payrollScopeUnitIds.length === 0
+                  ? "尚未设置工资核算纳入单位，暂无待配提成人员。请先到「工资核算」勾选并保存纳入单位。"
+                  : "当前单位/搜索条件下，纳入核算单位中没有未配提成的人"}
               </div>
             ) : (
               <div className="space-y-2">
@@ -1053,8 +1087,14 @@ export default function PersonnelPage() {
           )}
           <div className="mb-4 rounded-lg border border-violet-200 bg-violet-50/70 px-3 py-2 text-sm text-violet-900">
             <span className="font-medium">个人提成怎么配：</span>
-            点「一键筛选未配提成」可直接看到每人缺哪些产品；再到「提成配置」按产品设置。
+            仅「工资核算」已纳入的单位需要配销售提成；未纳入单位不提示。
+            点「未配提成清单」可看到待配产品，再到「提成配置」按产品设置。
             团队管理提成请到成本管理。
+            {payrollScopeUnitIds.length === 0 && (
+              <span className="mt-1 block text-amber-800">
+                当前尚未保存工资核算纳入名单，暂不提示未配提成。请先到工资核算勾选并保存纳入单位。
+              </span>
+            )}
           </div>
         </>
       )}

@@ -110,6 +110,7 @@ export default function Payroll() {
   function handleSaveScope() {
     savePayrollScopeUnitIds(draftScopeIds)
     setScopeUnitIds(draftScopeIds)
+    window.dispatchEvent(new Event('payroll-scope-changed'))
     setSavedTip('纳入核算单位已保存（本机）')
     window.setTimeout(() => setSavedTip(''), 2000)
   }
