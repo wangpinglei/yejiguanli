@@ -3,7 +3,6 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, ExternalLink } from 'lucide-react'
 
 import { PageHeader } from '@/components/PageHeader'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -23,7 +22,7 @@ import {
 } from '@/lib/payrollCommissionDetail'
 
 /**
- * 工资核算 → 个人业绩提成明细（核对：业绩 / 提成比例 / 实际金额）
+ * 工资核算 → 个人业绩提成明细（对齐销售记录逐单核对）
  */
 export default function PayrollCommissionDetail() {
   const [params] = useSearchParams()
@@ -75,7 +74,7 @@ export default function PayrollCommissionDetail() {
     ? buildSalesRecordsCheckHref({ personnelId, unitId, yearMonth })
     : '/sales-records'
 
-  const backHref = `/payroll`
+  const backHref = '/payroll'
 
   if (!personnelId || !unitId || !yearMonth) {
     return (
@@ -102,12 +101,13 @@ export default function PayrollCommissionDetail() {
   }
 
   const lineSum = detail.lines.reduce((s, l) => s + l.amount, 0)
+  const orderSum = detail.lines.reduce((s, l) => s + l.orderAmount, 0)
 
   return (
     <div className="space-y-6">
       <PageHeader
         title={`业绩提成明细 · ${detail.personnelName}`}
-        description={`${detail.unitName} · ${detail.yearMonth} · 用于核对工资表「业绩提成」构成`}
+        description={`${detail.unitName} · ${detail.yearMonth} · 按销售记录逐单核对`}
       />
 
       <div className="flex flex-wrap gap-2">
@@ -162,13 +162,13 @@ export default function PayrollCommissionDetail() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">明细：业绩 · 提成比例 · 实际金额</CardTitle>
+          <CardTitle className="text-base">销售明细核对</CardTitle>
           <CardDescription>
-            个人提成按产品×单位汇总；特殊奖励按单拆行；内部销售/团队管理为汇总行。
-            明细行合计 {formatCurrency(lineSum)}
-            {Math.abs(lineSum - detail.commissionTotal) > 0.05 && (
+            与销售记录一致：客户姓名、购买产品、订单金额；另附提成比例与本单实际金额。
+            订单合计 {formatCurrency(orderSum)} · 行提成合计 {formatCurrency(lineSum)}
+            {Math.abs(lineSum - detail.personalTotal) > 0.05 && (
               <span className="ml-2 text-amber-700">
-                （与合计差额 {formatCurrency(detail.commissionTotal - lineSum)}，可能因门槛跨产品汇总或分业绩口径）
+                （行合计与个人提成差额 {formatCurrency(detail.personalTotal - lineSum)}，多为月门槛汇总口径）
               </span>
             )}
           </CardDescription>
@@ -177,42 +177,34 @@ export default function PayrollCommissionDetail() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>类型</TableHead>
-                <TableHead>产品</TableHead>
-                <TableHead className="text-right">业绩</TableHead>
-                <TableHead className="text-right">数量</TableHead>
-                <TableHead>提成比例 / 规则</TableHead>
-                <TableHead className="text-right">实际金额</TableHead>
-                <TableHead>备注</TableHead>
+                <TableHead className="min-w-[120px]">客户姓名</TableHead>
+                <TableHead className="min-w-[160px]">购买产品</TableHead>
+                <TableHead className="text-right min-w-[100px]">订单金额</TableHead>
+                <TableHead className="min-w-[120px]">提成比例</TableHead>
+                <TableHead className="text-right min-w-[100px]">实际金额</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {detail.lines.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
-                    本月该单位暂无提成明细（无销售或未配置提成）
+                  <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
+                    本月该单位暂无相关销售记录
                   </TableCell>
                 </TableRow>
               ) : (
                 detail.lines.map((line) => (
                   <TableRow key={line.id}>
-                    <TableCell>
-                      <Badge variant="outline" className="font-normal">
-                        {line.kindLabel}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="max-w-[200px] truncate">{line.productName}</TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatCurrency(line.performanceAmount)}
+                    <TableCell className="font-medium">{line.customerName}</TableCell>
+                    <TableCell className="max-w-[240px] truncate" title={line.productName}>
+                      {line.productName}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {line.quantity > 0 ? line.quantity : '—'}
+                      {formatCurrency(line.orderAmount)}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">{line.rateLabel}</TableCell>
                     <TableCell className="text-right tabular-nums font-medium text-violet-700">
                       {formatCurrency(line.amount)}
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{line.note || '—'}</TableCell>
                   </TableRow>
                 ))
               )}
