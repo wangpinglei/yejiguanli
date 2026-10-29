@@ -1858,8 +1858,8 @@ export default function CostManagement() {
         <DialogContent
           className={
             adjustmentDialogMaximized
-              ? "max-w-[min(1400px,98vw)] w-[98vw] h-[95vh] max-h-[95vh] flex flex-col overflow-hidden"
-              : "max-w-4xl max-h-[90vh] overflow-y-auto"
+              ? "flex h-[95vh] max-h-[95vh] w-[98vw] !max-w-[calc(100%-1rem)] flex-col overflow-hidden sm:!max-w-[min(1400px,98vw)]"
+              : "max-h-[90vh] max-w-4xl overflow-y-auto"
           }
         >
           <button

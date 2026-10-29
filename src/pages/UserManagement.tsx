@@ -404,8 +404,9 @@ export default function UserManagement() {
         <DialogContent
           className={
             dialogMaximized
-              ? "max-w-[min(1200px,98vw)] w-[98vw] h-[95vh] max-h-[95vh] flex flex-col overflow-hidden"
-              : "max-w-lg max-h-[90vh] overflow-y-auto"
+              // Dialog 默认带 sm:max-w-lg，必须用 sm:!max-w 才能真正放大
+              ? "flex h-[96vh] max-h-[96vh] w-[98vw] !max-w-[calc(100%-1rem)] flex-col overflow-hidden sm:!max-w-[min(1400px,98vw)]"
+              : "max-h-[90vh] max-w-lg overflow-y-auto"
           }
         >
           <button
@@ -434,34 +435,42 @@ export default function UserManagement() {
                 : "space-y-4 py-2"
             }
           >
-            <div className="space-y-2">
-              <Label>用户名 *</Label>
-              <Input
-                value={form.username}
-                onChange={(e) => setForm({ ...form, username: e.target.value })}
-                placeholder="登录用户名"
-                disabled={isAdminLocked}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>密码 {editingUser ? "（留空不修改）" : "*"}</Label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <div
+              className={
+                dialogMaximized
+                  ? "grid grid-cols-1 gap-4 md:grid-cols-2"
+                  : "space-y-4"
+              }
+            >
+              <div className="space-y-2">
+                <Label>用户名 *</Label>
                 <Input
-                  type={showPassword ? "text" : "password"}
-                  value={form.password}
-                  onChange={(e) => setForm({ ...form, password: e.target.value })}
-                  placeholder="密码"
-                  className="pl-10 pr-10"
+                  value={form.username}
+                  onChange={(e) => setForm({ ...form, username: e.target.value })}
+                  placeholder="登录用户名"
+                  disabled={isAdminLocked}
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
+              </div>
+
+              <div className="space-y-2">
+                <Label>密码 {editingUser ? "（留空不修改）" : "*"}</Label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    type={showPassword ? "text" : "password"}
+                    value={form.password}
+                    onChange={(e) => setForm({ ...form, password: e.target.value })}
+                    placeholder="密码"
+                    className="pl-10 pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -481,7 +490,13 @@ export default function UserManagement() {
             </div>
 
             {!form.isSuperadmin && (
-              <>
+              <div
+                className={
+                  dialogMaximized
+                    ? "grid grid-cols-1 gap-4 xl:grid-cols-2 xl:items-start"
+                    : "space-y-4"
+                }
+              >
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <Label>可见销售单位 *</Label>
@@ -680,7 +695,7 @@ export default function UserManagement() {
                     「全选 / 本组」不会勾选机密模块（人事档案、工资核算），这两项须单独确认后再勾。
                   </p>
                 </div>
-              </>
+              </div>
             )}
           </div>
           <DialogFooter className="shrink-0">
