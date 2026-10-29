@@ -494,7 +494,13 @@ export default function UserManagement() {
                       全选
                     </label>
                   </div>
-                  <div className="rounded-lg border max-h-40 overflow-y-auto p-2 space-y-1">
+                  <div
+                    className={
+                      dialogMaximized
+                        ? "rounded-lg border max-h-[40vh] overflow-y-auto p-2 space-y-1"
+                        : "rounded-lg border max-h-40 overflow-y-auto p-2 space-y-1"
+                    }
+                  >
                     {salesUnits.length === 0 ? (
                       <p className="text-xs text-muted-foreground px-1 py-2">
                         暂无销售单位，请先在「销售单位」中录入
