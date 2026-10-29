@@ -454,7 +454,7 @@ export default function Payroll() {
                           <Link
                             to={`/payroll/commission-detail?personnelId=${encodeURIComponent(row.personnelId)}&unitId=${encodeURIComponent(row.unitId)}&yearMonth=${encodeURIComponent(yearMonth)}`}
                             className="font-medium text-violet-700 underline-offset-2 hover:underline"
-                            title="查看个人业绩提成明细（业绩 / 比例 / 金额）"
+                            title="查看个人业绩提成明细（订单金额 / 比例 / 提成）"
                           >
                             {formatCurrency(row.commission)}
                           </Link>

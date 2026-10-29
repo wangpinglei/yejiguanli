@@ -164,7 +164,7 @@ export default function PayrollCommissionDetail() {
         <CardHeader>
           <CardTitle className="text-base">销售明细核对</CardTitle>
           <CardDescription>
-            与销售记录一致：客户姓名、购买产品、订单金额；另附提成比例与本单实际金额。
+            与销售记录一致：客户姓名、购买产品、订单金额；另附提成比例与提成。
             订单合计 {formatCurrency(orderSum)} · 行提成合计 {formatCurrency(lineSum)}
             {Math.abs(lineSum - detail.personalTotal) > 0.05 && (
               <span className="ml-2 text-amber-700">
@@ -181,7 +181,7 @@ export default function PayrollCommissionDetail() {
                 <TableHead className="min-w-[160px]">购买产品</TableHead>
                 <TableHead className="text-right min-w-[100px]">订单金额</TableHead>
                 <TableHead className="min-w-[120px]">提成比例</TableHead>
-                <TableHead className="text-right min-w-[100px]">实际金额</TableHead>
+                <TableHead className="text-right min-w-[100px]">提成</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
