@@ -1,0 +1,225 @@
+import { useMemo } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { ArrowLeft, ExternalLink } from 'lucide-react'
+
+import { PageHeader } from '@/components/PageHeader'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import { useData } from '@/context/DataContext'
+import { usePermissions } from '@/hooks/usePermissions'
+import { formatCurrency } from '@/lib/format'
+import {
+  buildPayrollCommissionDetail,
+  buildSalesRecordsCheckHref,
+} from '@/lib/payrollCommissionDetail'
+
+/**
+ * 工资核算 → 个人业绩提成明细（核对：业绩 / 提成比例 / 实际金额）
+ */
+export default function PayrollCommissionDetail() {
+  const [params] = useSearchParams()
+  const navigate = useNavigate()
+  const {
+    products,
+    productPersonCommissions,
+    teamMgmtCommissionRules,
+    performanceTargets,
+    unitProductSettlements,
+  } = useData()
+  const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleSalesRecords: salesRecords } =
+    usePermissions()
+
+  const personnelId = params.get('personnelId') || ''
+  const unitId = params.get('unitId') || ''
+  const yearMonth = params.get('yearMonth') || ''
+
+  const detail = useMemo(() => {
+    if (!personnelId || !unitId || !yearMonth) return null
+    return buildPayrollCommissionDetail({
+      personnelId,
+      unitId,
+      yearMonth,
+      personnel,
+      salesUnits,
+      salesRecords,
+      products,
+      productPersonCommissions,
+      teamMgmtRules: teamMgmtCommissionRules,
+      performanceTargets,
+      unitProductSettlements,
+    })
+  }, [
+    personnelId,
+    unitId,
+    yearMonth,
+    personnel,
+    salesUnits,
+    salesRecords,
+    products,
+    productPersonCommissions,
+    teamMgmtCommissionRules,
+    performanceTargets,
+    unitProductSettlements,
+  ])
+
+  const salesHref = personnelId && unitId && yearMonth
+    ? buildSalesRecordsCheckHref({ personnelId, unitId, yearMonth })
+    : '/sales-records'
+
+  const backHref = `/payroll`
+
+  if (!personnelId || !unitId || !yearMonth) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title="业绩提成明细" description="缺少人员、单位或月份参数" />
+        <Button variant="outline" onClick={() => navigate(backHref)}>
+          <ArrowLeft className="mr-1.5 h-4 w-4" />
+          返回工资核算
+        </Button>
+      </div>
+    )
+  }
+
+  if (!detail) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title="业绩提成明细" description="未找到对应人员" />
+        <Button variant="outline" onClick={() => navigate(backHref)}>
+          <ArrowLeft className="mr-1.5 h-4 w-4" />
+          返回工资核算
+        </Button>
+      </div>
+    )
+  }
+
+  const lineSum = detail.lines.reduce((s, l) => s + l.amount, 0)
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title={`业绩提成明细 · ${detail.personnelName}`}
+        description={`${detail.unitName} · ${detail.yearMonth} · 用于核对工资表「业绩提成」构成`}
+      />
+
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" asChild>
+          <Link to={backHref}>
+            <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
+            返回工资核算
+          </Link>
+        </Button>
+        <Button variant="outline" size="sm" asChild>
+          <Link to={salesHref}>
+            <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+            打开销售记录核对
+          </Link>
+        </Button>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>本月个人业绩</CardDescription>
+            <CardTitle className="text-xl text-blue-700">
+              {formatCurrency(detail.personalSales)}
+            </CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>个人提成</CardDescription>
+            <CardTitle className="text-xl text-orange-600">
+              {formatCurrency(detail.personalTotal)}
+            </CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>内部销售 + 团队管理</CardDescription>
+            <CardTitle className="text-xl text-emerald-700">
+              {formatCurrency(detail.internalTotal + detail.teamMgmtTotal)}
+            </CardTitle>
+          </CardHeader>
+        </Card>
+        <Card className="border-violet-200 bg-violet-50/40">
+          <CardHeader className="pb-2">
+            <CardDescription>业绩提成合计（应对齐工资表）</CardDescription>
+            <CardTitle className="text-xl text-violet-700">
+              {formatCurrency(detail.commissionTotal)}
+            </CardTitle>
+          </CardHeader>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">明细：业绩 · 提成比例 · 实际金额</CardTitle>
+          <CardDescription>
+            个人提成按产品×单位汇总；特殊奖励按单拆行；内部销售/团队管理为汇总行。
+            明细行合计 {formatCurrency(lineSum)}
+            {Math.abs(lineSum - detail.commissionTotal) > 0.05 && (
+              <span className="ml-2 text-amber-700">
+                （与合计差额 {formatCurrency(detail.commissionTotal - lineSum)}，可能因门槛跨产品汇总或分业绩口径）
+              </span>
+            )}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="overflow-x-auto p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>类型</TableHead>
+                <TableHead>产品</TableHead>
+                <TableHead className="text-right">业绩</TableHead>
+                <TableHead className="text-right">数量</TableHead>
+                <TableHead>提成比例 / 规则</TableHead>
+                <TableHead className="text-right">实际金额</TableHead>
+                <TableHead>备注</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {detail.lines.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
+                    本月该单位暂无提成明细（无销售或未配置提成）
+                  </TableCell>
+                </TableRow>
+              ) : (
+                detail.lines.map((line) => (
+                  <TableRow key={line.id}>
+                    <TableCell>
+                      <Badge variant="outline" className="font-normal">
+                        {line.kindLabel}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="max-w-[200px] truncate">{line.productName}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatCurrency(line.performanceAmount)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {line.quantity > 0 ? line.quantity : '—'}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{line.rateLabel}</TableCell>
+                    <TableCell className="text-right tabular-nums font-medium text-violet-700">
+                      {formatCurrency(line.amount)}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{line.note || '—'}</TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}

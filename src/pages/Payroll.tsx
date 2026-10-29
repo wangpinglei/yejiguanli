@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 
 import { Calculator, CheckSquare, FileSpreadsheet, Save } from 'lucide-react'
 
@@ -449,8 +450,14 @@ export default function Payroll() {
                         <TableCell className="text-right tabular-nums">
                           {formatCurrency(row.standardPerformance)}
                         </TableCell>
-                        <TableCell className="text-right tabular-nums text-violet-700">
-                          {formatCurrency(row.commission)}
+                        <TableCell className="text-right tabular-nums">
+                          <Link
+                            to={`/payroll/commission-detail?personnelId=${encodeURIComponent(row.personnelId)}&unitId=${encodeURIComponent(row.unitId)}&yearMonth=${encodeURIComponent(yearMonth)}`}
+                            className="font-medium text-violet-700 underline-offset-2 hover:underline"
+                            title="查看个人业绩提成明细（业绩 / 比例 / 金额）"
+                          >
+                            {formatCurrency(row.commission)}
+                          </Link>
                         </TableCell>
                         <TableCell>
                           <Input

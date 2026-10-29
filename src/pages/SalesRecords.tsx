@@ -504,6 +504,19 @@ function textToMatrix(text: string): string[][] {
   return lines.map((line) => line.split(delimiter).map((c) => c.trim()));
 }
 
+function readSalesRecordsQuery() {
+  if (typeof window === "undefined") {
+    return { unit: "all", person: "all", from: "", to: "" };
+  }
+  const q = new URLSearchParams(window.location.search);
+  return {
+    unit: q.get("unit") || "all",
+    person: q.get("person") || "all",
+    from: q.get("from") || "",
+    to: q.get("to") || "",
+  };
+}
+
 export default function SalesRecords() {
   const {
     products, ensureProductByName, ensurePersonnelByName, addSalesRecord, updateSalesRecord, deleteSalesRecord,
@@ -511,9 +524,10 @@ export default function SalesRecords() {
   } = useData();
   const { user } = useAuth();
   const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleSalesRecords: salesRecords, canEditSales, isReadOnly } = usePermissions();
+  const initialQuery = readSalesRecordsQuery();
   const [search, setSearch] = useState("");
-  const [filterUnit, setFilterUnit] = useState("all");
-  const [filterPerson, setFilterPerson] = useState("all");
+  const [filterUnit, setFilterUnit] = useState(initialQuery.unit);
+  const [filterPerson, setFilterPerson] = useState(initialQuery.person);
   /** 筛选/录单人员下拉是否显示离职人员（默认隐藏，便于梳理） */
   const [showResignedPersonnel, setShowResignedPersonnel] = useState(false);
   const [filterSync, setFilterSync] = useState("all"); // all | manual | synced
@@ -522,8 +536,8 @@ export default function SalesRecords() {
     "all" | "duplicate" | "similar" | "unique"
   >("all");
   const [importDupFilter, setImportDupFilter] = useState<"all" | "duplicate" | "unique">("all");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [dateFrom, setDateFrom] = useState(initialQuery.from);
+  const [dateTo, setDateTo] = useState(initialQuery.to);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [dialogOpen, setDialogOpen] = useState(false);
