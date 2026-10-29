@@ -200,7 +200,7 @@ export const FINANCE_NOTICE_WEBHOOK_TARGETS: FinanceNoticeWebhookTarget[] = [
   {
     unitName: "南阳分仓",
     webhook:
-      "https://oapi.dingtalk.com/robot/send?access_token=1f22ae1d849244618a02d2bade840e817f0f2a86096f602fb17cac3f90023c8c",
+      "https://oapi.dingtalk.com/robot/send?access_token=764c20bcc073e03479c95a7fdce6724c4fa1438a877d07e3c8aad2d5833646ef",
   },
   {
     unitName: "茂名分仓",
@@ -221,6 +221,26 @@ export const FINANCE_NOTICE_WEBHOOK_TARGETS: FinanceNoticeWebhookTarget[] = [
     unitName: "太原服务站",
     webhook:
       "https://oapi.dingtalk.com/robot/send?access_token=149a994d3290cafa114e7345eba3f0e897498a88eefb456c47390733cb831316",
+  },
+  {
+    unitName: "毕节分仓",
+    webhook:
+      "https://oapi.dingtalk.com/robot/send?access_token=13dbfd0b7f7fdddb49bdeaa64fafcd7e5e58fa7a4e82f2a1e401765855dc99e5",
+  },
+  {
+    unitName: "宜春分仓",
+    webhook:
+      "https://oapi.dingtalk.com/robot/send?access_token=66f66512954434ec5267663c621b20bbe89bdece131554335d4437a6bc80d945",
+  },
+  {
+    unitName: "南宁总仓",
+    webhook:
+      "https://oapi.dingtalk.com/robot/send?access_token=229c3a6078ea4ff3a27b6046318802293576702c7a5635adc79460dd934902a5",
+  },
+  {
+    unitName: "大同分仓",
+    webhook:
+      "https://oapi.dingtalk.com/robot/send?access_token=fad810a3867037e9ea53c08c90f41cf6302bb06ac1205a455f4110bf6bf9bae9",
   },
   {
     unitName: "组织部业务通知对接群",
