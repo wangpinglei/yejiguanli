@@ -165,10 +165,9 @@ export default function PayrollCommissionDetail() {
           <CardTitle className="text-base">销售明细核对</CardTitle>
           <CardDescription>
             与销售记录一致：客户姓名、购买产品、订单金额；另附提成比例与提成。
-            订单合计 {formatCurrency(orderSum)} · 行提成合计 {formatCurrency(lineSum)}
             {Math.abs(lineSum - detail.personalTotal) > 0.05 && (
-              <span className="ml-2 text-amber-700">
-                （行合计与个人提成差额 {formatCurrency(detail.personalTotal - lineSum)}，多为月门槛汇总口径）
+              <span className="ml-1 text-amber-700">
+                （行提成合计与个人提成差额 {formatCurrency(detail.personalTotal - lineSum)}，多为月门槛汇总口径）
               </span>
             )}
           </CardDescription>
@@ -207,6 +206,18 @@ export default function PayrollCommissionDetail() {
                     </TableCell>
                   </TableRow>
                 ))
+              )}
+              {detail.lines.length > 0 && (
+                <TableRow className="border-t-2 bg-muted/40 font-semibold hover:bg-muted/40">
+                  <TableCell colSpan={2}>合计（{detail.lines.length} 单）</TableCell>
+                  <TableCell className="text-right tabular-nums text-blue-700">
+                    {formatCurrency(orderSum)}
+                  </TableCell>
+                  <TableCell />
+                  <TableCell className="text-right tabular-nums text-violet-700">
+                    {formatCurrency(lineSum)}
+                  </TableCell>
+                </TableRow>
               )}
             </TableBody>
           </Table>
