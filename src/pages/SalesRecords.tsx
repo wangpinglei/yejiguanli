@@ -1909,9 +1909,6 @@ export default function SalesRecords() {
 
       <Card ref={tableCardRef}>
         <CardContent className="p-0">
-          <p className="border-b bg-muted/30 px-4 py-2 text-sm text-muted-foreground">
-            表格可左右滑动查看全部列；右侧「操作」已固定。字太小可点右上角「放大 / 更大」。
-          </p>
           <Table className="min-w-[1780px] text-base [&_th]:text-base [&_td]:text-base">
               <TableHeader>
                 <TableRow>
