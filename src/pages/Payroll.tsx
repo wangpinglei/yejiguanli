@@ -27,7 +27,7 @@ import {
 } from '@/components/ui/table'
 import { useData } from '@/context/DataContext'
 import { usePermissions } from '@/hooks/usePermissions'
-import { formatCurrency } from '@/lib/format'
+import { formatCurrency, formatDisplayPersonName } from '@/lib/format'
 import {
   calcPayrollRow,
   createEmptyPayrollEntry,
@@ -489,10 +489,12 @@ export default function Payroll() {
                           <div className="flex flex-wrap items-center gap-1.5">
                             <Link
                               to={getPersonnelPayHref(row.personnelId)}
-                              className="underline-offset-2 hover:underline"
-                              title="打开该人员调整薪酬"
+                              className="max-w-[140px] truncate underline-offset-2 hover:underline"
+                              title={`${row.name}（打开调整薪酬）`}
                             >
-                              {row.name}
+                              {formatDisplayPersonName(row.name, {
+                                stripDistributionPrefix: row.commissionOnly,
+                              })}
                             </Link>
                             {onlyCommission && (
                               <Badge

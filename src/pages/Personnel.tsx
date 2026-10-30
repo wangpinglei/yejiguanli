@@ -4,8 +4,18 @@ import { useData } from "@/context/DataContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/PageHeader";
 import { personnelApi } from "@/lib/api";
-import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
-import { EMPTY_SALARY, calculateMonthlySalary, getFixedSalary, filterByMonth, MONTHLY_STANDARD_HOURS, isSalesBattlePosition, getPersonalSales, getInternalSalesRecipientId } from "@/lib/salary";
+import { formatCurrency, formatDate, formatDateTime, formatDisplayPersonName } from "@/lib/format";
+import {
+  EMPTY_SALARY,
+  calculateMonthlySalary,
+  filterByMonth,
+  getFixedSalary,
+  getInternalSalesRecipientId,
+  getPersonalSales,
+  isDistributionPosition,
+  isSalesBattlePosition,
+  MONTHLY_STANDARD_HOURS,
+} from "@/lib/salary";
 import { loadPayrollScopeUnitIds } from "@/lib/payrollCalc";
 import { isOnDutyPerson } from "@/lib/personnelDuty";
 import type { Personnel, PersonnelUnitAssignment, SalaryStructure } from "@/types";
@@ -1068,9 +1078,16 @@ export default function PersonnelPage() {
                       key={person.id}
                       className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-white p-3 sm:flex-row sm:items-center"
                     >
-                      <div className="min-w-[140px] shrink-0">
-                        <div className="font-medium text-foreground">{person.name}</div>
-                        <div className="text-xs text-muted-foreground">
+                      <div className="min-w-[140px] max-w-[180px] shrink-0">
+                        <div
+                          className="truncate font-medium text-foreground"
+                          title={person.name}
+                        >
+                          {formatDisplayPersonName(person.name, {
+                            stripDistributionPrefix: isDistributionPosition(person.position),
+                          })}
+                        </div>
+                        <div className="truncate text-xs text-muted-foreground">
                           {getUnitName(person.salesUnitId)} · {person.position || "-"}
                         </div>
                       </div>
@@ -1192,18 +1209,27 @@ export default function PersonnelPage() {
                   const fixed = getFixedSalary(person.salary);
                   return (
                     <TableRow key={person.id}>
-                      <TableCell>
+                      <TableCell className="max-w-[160px]">
                         <div className="flex items-center gap-2">
-                          <Avatar className="h-8 w-8">
+                          <Avatar className="h-8 w-8 shrink-0">
                             <AvatarFallback className="bg-primary/10 text-primary text-xs">
-                              {person.name[0]}
+                              {formatDisplayPersonName(person.name, {
+                                stripDistributionPrefix: isDistributionPosition(person.position),
+                              })[0] || person.name[0]}
                             </AvatarFallback>
                           </Avatar>
-                          <span className="font-medium">{person.name}</span>
+                          <span
+                            className="truncate font-medium"
+                            title={person.name}
+                          >
+                            {formatDisplayPersonName(person.name, {
+                              stripDistributionPrefix: isDistributionPosition(person.position),
+                            })}
+                          </span>
                           {duplicateNameSet.has((person.name || "").trim()) && (
                             <Badge
                               variant="outline"
-                              className="border-amber-400 text-amber-800"
+                              className="shrink-0 border-amber-400 text-amber-800"
                             >
                               同名
                             </Badge>

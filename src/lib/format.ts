@@ -66,6 +66,22 @@ export function formatCompanyTenure(
   return years ? `${years}年` : "";
 }
 
+/**
+ * 列表展示用姓名：隐藏末尾括号备注（如单位/对接人），可选去掉「分销」前缀
+ * 编辑/存库仍用原始 name；完整原文请用 title 悬停展示
+ */
+export function formatDisplayPersonName(
+  name: string,
+  options?: { stripDistributionPrefix?: boolean },
+): string {
+  let s = (name || "").trim();
+  s = s.replace(/\s*[（(][^）)]*[）)]\s*$/u, "").trim();
+  if (options?.stripDistributionPrefix) {
+    s = s.replace(/^分销\s*/u, "").trim();
+  }
+  return s || (name || "").trim() || "-";
+}
+
 // 获取月份名称
 export function getMonthName(dateStr: string): string {
   const d = new Date(dateStr);
