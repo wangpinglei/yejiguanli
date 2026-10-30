@@ -47,6 +47,7 @@ export const MONTHLY_STANDARD_HOURS = MONTHLY_WORK_DAYS * WORK_HOURS_PER_DAY;
 // 默认空薪资结构
 export const EMPTY_SALARY: SalaryStructure = {
   baseSalary: 0,
+  confidentialityFee: 0,
   performance: 0,
   performanceCondition: "",
   positionAllowance: 0,
@@ -731,6 +732,7 @@ export function calculateMonthlySalary(
   calcOptions?: SalaryCalcOptions,
 ): {
   baseSalary: number;
+  confidentialityFee: number;
   performance: number;
   positionAllowance: number;
   managementCommission: number;
@@ -814,6 +816,9 @@ export function calculateMonthlySalary(
   const productCommission = 0;
 
   const baseSalary = acc ? acc.baseSalary : (s.baseSalary || 0) * fixedRatio;
+  const confidentialityFee = acc
+    ? acc.confidentialityFee
+    : (Number(s.confidentialityFee) || 0) * fixedRatio;
   const performance = acc ? acc.performance : (s.performance || 0) * fixedRatio;
   const positionAllowance = acc
     ? acc.positionAllowance
@@ -830,6 +835,7 @@ export function calculateMonthlySalary(
 
   const total =
     baseSalary +
+    confidentialityFee +
     performance +
     positionAllowance +
     managementCommission +
@@ -841,6 +847,7 @@ export function calculateMonthlySalary(
 
   return {
     baseSalary,
+    confidentialityFee,
     performance,
     positionAllowance,
     managementCommission,
@@ -862,11 +869,12 @@ export function calculateMonthlySalary(
 }
 
 /**
- * 计算固定部分月薪（底薪 + 绩效 + 岗位补贴，不含提成）
+ * 计算固定部分月薪（底薪 + 保密费 + 绩效 + 岗位补贴，不含提成）
  */
 export function getFixedSalary(salary: SalaryStructure): number {
   const s = salary || EMPTY_SALARY;
   return (Number(s.baseSalary) || 0)
+    + (Number(s.confidentialityFee) || 0)
     + (Number(s.performance) || 0)
     + (Number(s.positionAllowance) || 0);
 }
@@ -889,6 +897,7 @@ export interface UnitSalaryCost {
     name: string;
     position: string;
     baseSalary: number;
+    confidentialityFee: number;
     performance: number;
     positionAllowance: number;
     managementCommission: number;
@@ -967,6 +976,7 @@ export function getUnitSalaryCost(
       name: p.name,
       position: p.position,
       baseSalary: calc.baseSalary,
+      confidentialityFee: calc.confidentialityFee,
       performance: calc.performance,
       positionAllowance: calc.positionAllowance,
       managementCommission: calc.managementCommission,

@@ -196,6 +196,8 @@ export default function CostManagement() {
             unitId,
             unitName: unitNameMap.get(unitId) || unitId,
             standardBaseSalary: calc.baseSalary,
+            standardConfidentialityFee: calc.confidentialityFee,
+            standardPositionAllowance: calc.positionAllowance,
             standardPerformance: calc.performance,
             commission,
             entry,
@@ -961,6 +963,7 @@ export default function CostManagement() {
                   <TableHead>销售单位</TableHead>
                   <TableHead className="text-right">在职人数</TableHead>
                   <TableHead className="text-right">底薪合计</TableHead>
+                  <TableHead className="text-right">保密费</TableHead>
                   <TableHead className="text-right">绩效合计</TableHead>
                   <TableHead className="text-right">岗位补贴</TableHead>
                   <TableHead className="text-right">团队管理提成</TableHead>
@@ -980,6 +983,7 @@ export default function CostManagement() {
                   const isExpanded = expandedSalaryRows.has(unit.unitId);
                   const sums = unit.details.reduce((acc, d) => ({
                     base: acc.base + d.baseSalary,
+                    conf: acc.conf + (d.confidentialityFee || 0),
                     perf: acc.perf + d.performance,
                     pos: acc.pos + d.positionAllowance,
                     mgmt: acc.mgmt + d.managementCommission,
@@ -987,7 +991,7 @@ export default function CostManagement() {
                     internal: acc.internal + d.internalSalesCommission,
                     leave: acc.leave + d.leaveDeduction,
                     other: acc.other + d.otherBonus - d.otherDeduction,
-                  }), { base: 0, perf: 0, pos: 0, mgmt: 0, personal: 0, internal: 0, leave: 0, other: 0 });
+                  }), { base: 0, conf: 0, perf: 0, pos: 0, mgmt: 0, personal: 0, internal: 0, leave: 0, other: 0 });
                   return (
                     <>
                       <TableRow
@@ -1005,6 +1009,7 @@ export default function CostManagement() {
                         </TableCell>
                         <TableCell className="text-right">{unit.activeCount} 人</TableCell>
                         <TableCell className="text-right text-gray-600">{formatCurrency(sums.base)}</TableCell>
+                        <TableCell className="text-right text-slate-700">{formatCurrency(sums.conf)}</TableCell>
                         <TableCell className="text-right text-blue-600">{formatCurrency(sums.perf)}</TableCell>
                         <TableCell className="text-right text-violet-600">{formatCurrency(sums.pos)}</TableCell>
                         <TableCell className="text-right text-emerald-600">{formatCurrency(sums.mgmt)}</TableCell>
@@ -1030,7 +1035,7 @@ export default function CostManagement() {
                       </TableRow>
                       {isExpanded && (
                         <TableRow key={unit.unitId + "-detail"} className="bg-blue-50/30">
-                          <TableCell colSpan={16} className="py-3">
+                          <TableCell colSpan={17} className="py-3">
                             <div className="ml-8 space-y-2">
                               {unit.details.map((d) => {
                                 const personMeta = personnel.find((p) => p.id === d.personId);
@@ -1040,7 +1045,7 @@ export default function CostManagement() {
                                   key={d.personId}
                                   className="overflow-x-auto rounded-lg border bg-card px-4 py-2 text-sm"
                                 >
-                                  <div className="flex min-w-[1080px] items-center gap-x-4 gap-y-1">
+                                  <div className="flex min-w-[1160px] items-center gap-x-4 gap-y-1">
                                     <div className="flex w-36 shrink-0 items-center gap-1.5">
                                       <span className="truncate font-medium">{d.name}</span>
                                       {isDistributionPerson ? (
@@ -1057,6 +1062,9 @@ export default function CostManagement() {
                                     </span>
                                     <span className="shrink-0 whitespace-nowrap text-gray-600">
                                       底薪 {formatCurrency(d.baseSalary)}
+                                    </span>
+                                    <span className="shrink-0 whitespace-nowrap text-slate-700">
+                                      保密费 {formatCurrency(d.confidentialityFee || 0)}
                                     </span>
                                     <span className="shrink-0 whitespace-nowrap text-blue-600">
                                       绩效 {formatCurrency(d.performance)}
@@ -1103,7 +1111,7 @@ export default function CostManagement() {
                 })}
                 {salaryCosts.units.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={16} className="text-center py-12 text-muted-foreground">暂无在职人员数据</TableCell>
+                    <TableCell colSpan={17} className="text-center py-12 text-muted-foreground">暂无在职人员数据</TableCell>
                   </TableRow>
                 )}
               </TableBody>

@@ -9,6 +9,7 @@ import type {
 
 const EMPTY_SALARY: SalaryStructure = {
   baseSalary: 0,
+  confidentialityFee: 0,
   performance: 0,
   performanceCondition: '',
   positionAllowance: 0,
@@ -154,12 +155,13 @@ export function resolvePayForDate(person: Personnel, day: string): ResolvedPay {
 
 export type FixedPayMonthTotals = {
   baseSalary: number
+  confidentialityFee: number
   performance: number
   positionAllowance: number
   socialInsurance: number
   housingFund: number
   fixedRatio: number
-  /** 计薪日加权后的月薪底薪，用于请假扣款 */
+  /** 计薪日加权后的月薪底薪，用于请假扣款（不含保密费） */
   leaveBaseSalary: number
 }
 
@@ -175,6 +177,7 @@ export function accumulateFixedPayInMonth(
   const days = eachDateInMonth(yearMonth)
   const calendar = days.length || 1
   let baseSalary = 0
+  let confidentialityFee = 0
   let performance = 0
   let positionAllowance = 0
   let socialInsurance = 0
@@ -186,6 +189,7 @@ export function accumulateFixedPayInMonth(
     const pay = resolvePayForDate(person, day)
     const s = pay.salary || EMPTY_SALARY
     baseSalary += (Number(s.baseSalary) || 0) / calendar
+    confidentialityFee += (Number(s.confidentialityFee) || 0) / calendar
     performance += (Number(s.performance) || 0) / calendar
     positionAllowance += (Number(s.positionAllowance) || 0) / calendar
     socialInsurance += (Number(pay.socialInsurance) || 0) / calendar
@@ -197,6 +201,7 @@ export function accumulateFixedPayInMonth(
     : 0
   return {
     baseSalary,
+    confidentialityFee,
     performance,
     positionAllowance,
     socialInsurance,

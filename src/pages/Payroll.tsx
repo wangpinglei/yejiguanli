@@ -43,10 +43,20 @@ import {
 import { calculateMonthlySalary, isPersonnelOnDutyInMonth } from '@/lib/salary'
 import { personBelongsToUnitInMonth } from '@/lib/unitAssignment'
 
+/** 跳转人员「调整薪酬」并定位字段 */
+function getPersonnelPayHref(
+  personnelId: string,
+  focus?: 'baseSalary' | 'confidentialityFee' | 'performance' | 'positionAllowance',
+): string {
+  const q = new URLSearchParams({ pay: personnelId })
+  if (focus) q.set('focus', focus)
+  return `/personnel?${q.toString()}`
+}
+
 /**
  * 工资核算 · 本地原型
  * - 纳入单位名单、出勤、考核分存 localStorage
- * - 底薪/绩效标准、业绩提成读系统现有数据
+ * - 底薪/保密费/岗位补贴/绩效标准、业绩提成读系统现有数据
  */
 export default function Payroll() {
   const {
@@ -174,6 +184,8 @@ export default function Payroll() {
             unitId: unit.id,
             unitName: unitNameMap.get(unit.id) || unit.name,
             standardBaseSalary: calc.baseSalary,
+            standardConfidentialityFee: calc.confidentialityFee,
+            standardPositionAllowance: calc.positionAllowance,
             standardPerformance: calc.performance,
             commission,
             entry,
@@ -203,11 +215,20 @@ export default function Payroll() {
       (acc, row) => {
         acc.commission += row.commission
         acc.paidBaseSalary += row.paidBaseSalary
+        acc.paidConfidentialityFee += row.paidConfidentialityFee
+        acc.paidPositionAllowance += row.paidPositionAllowance
         acc.paidPerformance += row.paidPerformance
         acc.payable += row.payable
         return acc
       },
-      { commission: 0, paidBaseSalary: 0, paidPerformance: 0, payable: 0 },
+      {
+        commission: 0,
+        paidBaseSalary: 0,
+        paidConfidentialityFee: 0,
+        paidPositionAllowance: 0,
+        paidPerformance: 0,
+        payable: 0,
+      },
     )
   }, [rows])
 
@@ -221,6 +242,8 @@ export default function Payroll() {
       '单位',
       '姓名',
       '标准底薪',
+      '保密费',
+      '岗位补贴',
       '标准绩效',
       '业绩提成',
       '出勤小时',
@@ -244,6 +267,8 @@ export default function Payroll() {
         r.unitName,
         r.name,
         r.standardBaseSalary.toFixed(2),
+        r.paidConfidentialityFee.toFixed(2),
+        r.paidPositionAllowance.toFixed(2),
         r.standardPerformance.toFixed(2),
         r.commission.toFixed(2),
         r.attendanceHours.toFixed(2),
@@ -281,12 +306,13 @@ export default function Payroll() {
         <CardHeader className="pb-2">
           <CardTitle className="text-base">本期默认公式（可再改）</CardTitle>
           <CardDescription>
-            应发 = 业绩提成 + 实发底薪 + 实发绩效 + 其他加项 − 其他减项；月出勤系数{' '}
+            应发 = 提成 + 实发底薪 + 保密费 + 岗位补贴 + 实发绩效 + 其他加项 − 其他减项；月出勤系数{' '}
             21.75 × 7.5 = {PAYROLL_STANDARD_HOURS} 小时；未填出勤按满勤，未填考核分按 100 分。
           </CardDescription>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground space-y-1">
-          <p>实发底薪 = 标准底薪 × (出勤小时 / {PAYROLL_STANDARD_HOURS})</p>
+          <p>实发底薪 = 标准底薪 × (出勤小时 / {PAYROLL_STANDARD_HOURS})（受考勤影响）</p>
+          <p>保密费、岗位补贴 = 标准金额全额（不受考勤影响）</p>
           <p>
             实发绩效 = 标准绩效 × (出勤小时 / {PAYROLL_STANDARD_HOURS}) × (考核分 / 100)
           </p>
@@ -376,7 +402,7 @@ export default function Payroll() {
             2. 月度工资表
           </CardTitle>
           <CardDescription>
-            标准底薪/绩效、业绩提成来自系统；出勤小时与考核分需人工填写后参与计算。
+            标准底薪/保密费/岗位补贴/绩效可点击跳转「调整薪酬」；业绩提成可点进明细。出勤小时与考核分需人工填写。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -432,6 +458,8 @@ export default function Payroll() {
                     <TableHead className="min-w-[120px]">单位</TableHead>
                     <TableHead className="min-w-[88px]">姓名</TableHead>
                     <TableHead className="text-right">标准底薪</TableHead>
+                    <TableHead className="text-right">保密费</TableHead>
+                    <TableHead className="text-right">岗位补贴</TableHead>
                     <TableHead className="text-right">标准绩效</TableHead>
                     <TableHead className="text-right">业绩提成</TableHead>
                     <TableHead className="min-w-[108px]">出勤小时</TableHead>
@@ -449,12 +477,50 @@ export default function Payroll() {
                     return (
                       <TableRow key={`${row.unitId}-${row.personnelId}`}>
                         <TableCell className="text-xs text-muted-foreground">{row.unitName}</TableCell>
-                        <TableCell className="font-medium">{row.name}</TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {formatCurrency(row.standardBaseSalary)}
+                        <TableCell className="font-medium">
+                          <Link
+                            to={getPersonnelPayHref(row.personnelId)}
+                            className="underline-offset-2 hover:underline"
+                            title="打开该人员调整薪酬"
+                          >
+                            {row.name}
+                          </Link>
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
-                          {formatCurrency(row.standardPerformance)}
+                          <Link
+                            to={getPersonnelPayHref(row.personnelId, 'baseSalary')}
+                            className="underline-offset-2 hover:underline"
+                            title="调整底薪"
+                          >
+                            {formatCurrency(row.standardBaseSalary)}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-slate-700">
+                          <Link
+                            to={getPersonnelPayHref(row.personnelId, 'confidentialityFee')}
+                            className="underline-offset-2 hover:underline"
+                            title="调整保密费"
+                          >
+                            {formatCurrency(row.paidConfidentialityFee)}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-violet-700">
+                          <Link
+                            to={getPersonnelPayHref(row.personnelId, 'positionAllowance')}
+                            className="underline-offset-2 hover:underline"
+                            title="调整岗位补贴"
+                          >
+                            {formatCurrency(row.paidPositionAllowance)}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          <Link
+                            to={getPersonnelPayHref(row.personnelId, 'performance')}
+                            className="underline-offset-2 hover:underline"
+                            title="调整绩效"
+                          >
+                            {formatCurrency(row.standardPerformance)}
+                          </Link>
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
                           <Link
@@ -499,10 +565,22 @@ export default function Payroll() {
                           />
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
-                          {formatCurrency(row.paidBaseSalary)}
+                          <Link
+                            to={getPersonnelPayHref(row.personnelId, 'baseSalary')}
+                            className="underline-offset-2 hover:underline"
+                            title="调整底薪"
+                          >
+                            {formatCurrency(row.paidBaseSalary)}
+                          </Link>
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
-                          {formatCurrency(row.paidPerformance)}
+                          <Link
+                            to={getPersonnelPayHref(row.personnelId, 'performance')}
+                            className="underline-offset-2 hover:underline"
+                            title="调整绩效"
+                          >
+                            {formatCurrency(row.paidPerformance)}
+                          </Link>
                         </TableCell>
                         <TableCell>
                           <Input
@@ -536,7 +614,7 @@ export default function Payroll() {
                   })}
                   {rows.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={12} className="py-8 text-center text-muted-foreground">
+                      <TableCell colSpan={14} className="py-8 text-center text-muted-foreground">
                         纳入单位下本月暂无在职归属人员
                       </TableCell>
                     </TableRow>
@@ -549,10 +627,16 @@ export default function Payroll() {
           {rows.length > 0 && (
             <div className="flex flex-wrap gap-4 rounded-lg border bg-muted/30 px-4 py-3 text-sm">
               <span>
-                业绩提成合计 <strong>{formatCurrency(totals.commission)}</strong>
+                提成合计 <strong>{formatCurrency(totals.commission)}</strong>
               </span>
               <span>
                 实发底薪合计 <strong>{formatCurrency(totals.paidBaseSalary)}</strong>
+              </span>
+              <span>
+                保密费合计 <strong>{formatCurrency(totals.paidConfidentialityFee)}</strong>
+              </span>
+              <span>
+                岗位补贴合计 <strong>{formatCurrency(totals.paidPositionAllowance)}</strong>
               </span>
               <span>
                 实发绩效合计 <strong>{formatCurrency(totals.paidPerformance)}</strong>

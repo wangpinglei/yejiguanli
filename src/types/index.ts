@@ -40,10 +40,12 @@ export interface SalesUnit {
   unitLeaderName?: string;
 }
 
-// 薪资结构（月薪 = 底薪 + 绩效 + 岗位补贴 + 管理提成 + 个人提成）
+// 薪资结构（月薪 = 底薪 + 保密费 + 绩效 + 岗位补贴 + 管理提成 + 个人提成）
 export interface SalaryStructure {
-  // 底薪
+  // 底薪（受考勤影响）
   baseSalary: number;
+  /** 保密费（不受考勤/请假影响，按标准全额） */
+  confidentialityFee?: number;
   // 绩效
   performance: number;
   performanceCondition: string; // 绩效发放条件描述

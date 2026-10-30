@@ -65,7 +65,16 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import MPersonProductCommission from "./Personnel/components/m-person-product-commission";
-import MPayPlanDialog from "./Personnel/components/m-pay-plan-dialog";
+import MPayPlanDialog, {
+  type PayPlanFocusField,
+} from "./Personnel/components/m-pay-plan-dialog";
+
+const PAY_PLAN_FOCUS_SET = new Set<string>([
+  'baseSalary',
+  'confidentialityFee',
+  'performance',
+  'positionAllowance',
+])
 
 // 默认表单
 const DEFAULT_FORM = {
@@ -135,7 +144,7 @@ export default function PersonnelPage() {
     upsList: unitProductSettlements,
   }), [teamMgmtCommissionRules, performanceTargets, unitProductSettlements]);
   const { visiblePersonnel: personnel, visibleSalesUnits: salesUnits, visibleSalesRecords: salesRecords, canEditPersonnel, isReadOnly, role, canEditCost } = usePermissions();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [filterUnit, setFilterUnit] = useState(() => searchParams.get("unit") || "all");
   /** all | active | inactive — 在职/离职（与列表「在岗/离职」一致）；默认只看在职便于梳理 */
@@ -175,6 +184,7 @@ export default function PersonnelPage() {
   const [merging, setMerging] = useState(false);
   const [transferPerson, setTransferPerson] = useState<Personnel | null>(null);
   const [payPerson, setPayPerson] = useState<Personnel | null>(null);
+  const [payFocusField, setPayFocusField] = useState<PayPlanFocusField | null>(null);
   const [transferUnitId, setTransferUnitId] = useState("");
   const [transferDate, setTransferDate] = useState(
     () => new Date().toISOString().slice(0, 10),
@@ -190,6 +200,23 @@ export default function PersonnelPage() {
       setFilterStatus("all");
     }
   }, [searchParams, salesUnits]);
+
+  /** 工资核算等入口：/personnel?pay=人员ID&focus=保密费等字段 → 打开调整薪酬 */
+  useEffect(() => {
+    const payId = searchParams.get('pay')
+    if (!payId || personnel.length === 0) return
+    const person = personnel.find((p) => p.id === payId)
+    if (!person) return
+    const focus = searchParams.get('focus') || ''
+    setPayFocusField(
+      PAY_PLAN_FOCUS_SET.has(focus) ? (focus as PayPlanFocusField) : null,
+    )
+    setPayPerson(person)
+    const next = new URLSearchParams(searchParams)
+    next.delete('pay')
+    next.delete('focus')
+    setSearchParams(next, { replace: true })
+  }, [searchParams, personnel, setSearchParams])
   const [editingAssignment, setEditingAssignment] = useState<PersonnelUnitAssignment | null>(null);
   const [editAssignmentUnitId, setEditAssignmentUnitId] = useState("");
   const [editAssignmentStart, setEditAssignmentStart] = useState("");
@@ -1317,9 +1344,13 @@ export default function PersonnelPage() {
         person={payPerson}
         open={!!payPerson}
         onOpenChange={(open) => {
-          if (!open) setPayPerson(null);
+          if (!open) {
+            setPayPerson(null);
+            setPayFocusField(null);
+          }
         }}
         canEdit={showActions && !isReadOnly && canEditPersonnel}
+        focusField={payFocusField}
       />
 
       <MPersonProductCommission
@@ -1473,15 +1504,26 @@ export default function PersonnelPage() {
                     </Badge>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    月薪 = 底薪 + 绩效 + 岗位补贴 + 管理提成 + 个人提成（提成根据销售业绩动态计算）。
-                    试用转正、调薪请用列表「调整薪酬」并填写生效日，否则会改掉历史月份成本。
+                    月薪 = 底薪 + 保密费 + 绩效 + 岗位补贴 + 管理提成 + 个人提成（提成根据销售业绩动态计算）。
+                    保密费不受考勤影响；试用转正、调薪请用列表「调整薪酬」并填写生效日，否则会改掉历史月份成本。
                   </p>
 
-                  {/* 底薪 */}
+                  {/* 底薪 / 保密费 */}
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1">
                       <Label className="text-xs">底薪 (¥)</Label>
                       <Input type="number" value={form.salary.baseSalary} onChange={(e) => updateSalary("baseSalary", Number(e.target.value))} placeholder="0" />
+                      <p className="text-[10px] text-muted-foreground">受出勤影响</p>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">保密费 (¥)</Label>
+                      <Input
+                        type="number"
+                        value={form.salary.confidentialityFee ?? 0}
+                        onChange={(e) => updateSalary('confidentialityFee', Number(e.target.value))}
+                        placeholder="0"
+                      />
+                      <p className="text-[10px] text-muted-foreground">不受考勤影响，按月全额</p>
                     </div>
                   </div>
 
@@ -1665,6 +1707,10 @@ export default function PersonnelPage() {
                 <div className="flex justify-between rounded-md border px-3 py-2">
                   <span className="text-muted-foreground">底薪</span>
                   <span className="font-medium">{formatCurrency(salaryDetail.baseSalary)}</span>
+                </div>
+                <div className="flex justify-between rounded-md border px-3 py-2">
+                  <span className="text-muted-foreground">保密费</span>
+                  <span className="font-medium">{formatCurrency(salaryDetail.confidentialityFee)}</span>
                 </div>
                 <div className="flex justify-between rounded-md border px-3 py-2">
                   <span className="text-muted-foreground">绩效</span>

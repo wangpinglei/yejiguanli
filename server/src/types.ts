@@ -53,6 +53,8 @@ export interface SalesUnit {
 
 export interface SalaryStructure {
   baseSalary: number;
+  /** 保密费（不受考勤影响） */
+  confidentialityFee?: number;
   performance: number;
   performanceCondition: string;
   positionAllowance: number;

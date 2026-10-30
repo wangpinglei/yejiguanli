@@ -668,10 +668,12 @@ router.post("/merge", requireEditPermission, (req, res) => {
       const removeSal = parseSalary(remove.salary);
       const keepFixed =
         Number(keepSal.baseSalary || 0)
+        + Number(keepSal.confidentialityFee || 0)
         + Number(keepSal.performance || 0)
         + Number(keepSal.positionAllowance || 0);
       const removeFixed =
         Number(removeSal.baseSalary || 0)
+        + Number(removeSal.confidentialityFee || 0)
         + Number(removeSal.performance || 0)
         + Number(removeSal.positionAllowance || 0);
       if (keepFixed <= 0 && removeFixed > 0) {
@@ -1019,6 +1021,7 @@ router.post("/:id/enable-distribution", requireEditPermission, (req, res) => {
   const newSalary = {
     ...oldSalary,
     baseSalary: 0,
+    confidentialityFee: 0,
     performance: 0,
     positionAllowance: 0,
     personalCommissionRate:

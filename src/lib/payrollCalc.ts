@@ -1,4 +1,4 @@
-/** 工资核算本地原型：出勤小时 + 考核分影响底薪/绩效 */
+/** 工资核算本地原型：出勤小时 + 考核分影响底薪/绩效；保密费/岗位补贴不受考勤影响 */
 
 import { MONTHLY_STANDARD_HOURS, WORK_HOURS_PER_DAY } from '@/lib/salary'
 
@@ -30,6 +30,10 @@ export interface PayrollRowInput {
   unitId: string
   unitName: string
   standardBaseSalary: number
+  /** 标准保密费（不受考勤影响） */
+  standardConfidentialityFee: number
+  /** 标准岗位补贴（不受考勤影响） */
+  standardPositionAllowance: number
   standardPerformance: number
   /** 系统业绩提成（个人+内部销售+团队管理） */
   commission: number
@@ -42,6 +46,8 @@ export interface PayrollRowResult extends PayrollRowInput {
   score: number
   scoreRatio: number
   paidBaseSalary: number
+  paidConfidentialityFee: number
+  paidPositionAllowance: number
   paidPerformance: number
   payable: number
 }
@@ -170,11 +176,19 @@ export function calcPayrollRow(input: PayrollRowInput): PayrollRowResult {
   const attendanceRatio = getAttendanceRatio(attendanceHours)
   const scoreRatio = getScoreRatio(score)
   const paidBaseSalary = input.standardBaseSalary * attendanceRatio
+  const paidConfidentialityFee = Number(input.standardConfidentialityFee) || 0
+  const paidPositionAllowance = Number(input.standardPositionAllowance) || 0
   const paidPerformance = input.standardPerformance * attendanceRatio * scoreRatio
   const otherBonus = Number(entry.otherBonus) || 0
   const otherDeduction = Number(entry.otherDeduction) || 0
   const payable =
-    input.commission + paidBaseSalary + paidPerformance + otherBonus - otherDeduction
+    input.commission
+    + paidBaseSalary
+    + paidConfidentialityFee
+    + paidPositionAllowance
+    + paidPerformance
+    + otherBonus
+    - otherDeduction
 
   return {
     ...input,
@@ -184,6 +198,8 @@ export function calcPayrollRow(input: PayrollRowInput): PayrollRowResult {
     score,
     scoreRatio,
     paidBaseSalary,
+    paidConfidentialityFee,
+    paidPositionAllowance,
     paidPerformance,
     payable,
   }

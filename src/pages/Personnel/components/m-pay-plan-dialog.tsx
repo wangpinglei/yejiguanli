@@ -15,11 +15,19 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 
+export type PayPlanFocusField =
+  | 'baseSalary'
+  | 'confidentialityFee'
+  | 'performance'
+  | 'positionAllowance'
+
 type Props = {
   person: Personnel | null
   open: boolean
   onOpenChange: (open: boolean) => void
   canEdit: boolean
+  /** 打开时滚动并高亮对应薪酬字段 */
+  focusField?: PayPlanFocusField | null
 }
 
 type PayForm = {
@@ -50,11 +58,19 @@ function getDefaultForm(person: Personnel | null): PayForm {
   }
 }
 
+const FOCUS_FIELD_IDS: Record<PayPlanFocusField, string> = {
+  baseSalary: 'pay-plan-baseSalary',
+  confidentialityFee: 'pay-plan-confidentialityFee',
+  performance: 'pay-plan-performance',
+  positionAllowance: 'pay-plan-positionAllowance',
+}
+
 export default function MPayPlanDialog({
   person,
   open,
   onOpenChange,
   canEdit,
+  focusField = null,
 }: Props) {
   const { adjustPersonnelPay, personnel } = useData()
   const [form, setForm] = useState<PayForm>(() => getDefaultForm(person))
@@ -63,6 +79,20 @@ export default function MPayPlanDialog({
   useEffect(() => {
     if (open) setForm(getDefaultForm(person))
   }, [open, person])
+
+  useEffect(() => {
+    if (!open || !focusField || !canEdit) return
+    const id = FOCUS_FIELD_IDS[focusField]
+    const timer = window.setTimeout(() => {
+      const el = document.getElementById(id)
+      if (!el) return
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      const input = el.querySelector('input')
+      input?.focus()
+      input?.select()
+    }, 80)
+    return () => window.clearTimeout(timer)
+  }, [open, focusField, canEdit, person?.id])
 
   const livePerson = useMemo(
     () => personnel.find((p) => p.id === person?.id) || person,
@@ -212,7 +242,10 @@ export default function MPayPlanDialog({
                       placeholder="如：转正"
                     />
                   </div>
-                  <div className="space-y-1">
+                  <div
+                    id={FOCUS_FIELD_IDS.baseSalary}
+                    className={`space-y-1 rounded-md p-1 ${focusField === 'baseSalary' ? 'ring-2 ring-sky-400' : ''}`}
+                  >
                     <Label>底薪 (¥)</Label>
                     <Input
                       type="number"
@@ -220,7 +253,24 @@ export default function MPayPlanDialog({
                       onChange={(e) => updateSalary('baseSalary', Number(e.target.value))}
                     />
                   </div>
-                  <div className="space-y-1">
+                  <div
+                    id={FOCUS_FIELD_IDS.confidentialityFee}
+                    className={`space-y-1 rounded-md p-1 ${focusField === 'confidentialityFee' ? 'ring-2 ring-sky-400' : ''}`}
+                  >
+                    <Label>保密费 (¥)</Label>
+                    <Input
+                      type="number"
+                      value={form.salary.confidentialityFee ?? 0}
+                      onChange={(e) => updateSalary(
+                        'confidentialityFee',
+                        Number(e.target.value),
+                      )}
+                    />
+                  </div>
+                  <div
+                    id={FOCUS_FIELD_IDS.performance}
+                    className={`space-y-1 rounded-md p-1 ${focusField === 'performance' ? 'ring-2 ring-sky-400' : ''}`}
+                  >
                     <Label>绩效 (¥)</Label>
                     <Input
                       type="number"
@@ -231,7 +281,10 @@ export default function MPayPlanDialog({
                       )}
                     />
                   </div>
-                  <div className="space-y-1">
+                  <div
+                    id={FOCUS_FIELD_IDS.positionAllowance}
+                    className={`space-y-1 rounded-md p-1 ${focusField === 'positionAllowance' ? 'ring-2 ring-sky-400' : ''}`}
+                  >
                     <Label>岗位补贴 (¥)</Label>
                     <Input
                       type="number"
