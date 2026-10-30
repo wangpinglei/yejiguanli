@@ -40,7 +40,11 @@ import {
   type PayrollMonthEntry,
   type PayrollRowResult,
 } from '@/lib/payrollCalc'
-import { calculateMonthlySalary, isPersonnelOnDutyInMonth } from '@/lib/salary'
+import {
+  calculateMonthlySalary,
+  isPayrollCommissionOnly,
+  isPersonnelOnDutyInMonth,
+} from '@/lib/salary'
 import { personBelongsToUnitInMonth } from '@/lib/unitAssignment'
 
 /** 跳转人员「调整薪酬」并定位字段 */
@@ -183,6 +187,7 @@ export default function Payroll() {
             name: person.name,
             unitId: unit.id,
             unitName: unitNameMap.get(unit.id) || unit.name,
+            commissionOnly: isPayrollCommissionOnly(person, yearMonth),
             standardBaseSalary: calc.baseSalary,
             standardConfidentialityFee: calc.confidentialityFee,
             standardPositionAllowance: calc.positionAllowance,
@@ -308,6 +313,7 @@ export default function Payroll() {
           <CardDescription>
             应发 = 提成 + 实发底薪 + 保密费 + 岗位补贴 + 实发绩效 + 其他加项 − 其他减项；月出勤系数{' '}
             21.75 × 7.5 = {PAYROLL_STANDARD_HOURS} 小时；未填出勤按满勤，未填考核分按 100 分。
+            岗位含「分销」的只核算提成，不计底薪/社保与出勤考核。
           </CardDescription>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground space-y-1">
@@ -317,6 +323,7 @@ export default function Payroll() {
             实发绩效 = 标准绩效 × (出勤小时 / {PAYROLL_STANDARD_HOURS}) × (考核分 / 100)
           </p>
           <p>业绩提成 = 系统个人提成 + 内部销售提成 + 团队管理提成（只读）</p>
+          <p>分销岗位：应发 = 提成 + 其他加项 − 其他减项（不显示出勤/考核/固定薪酬）</p>
         </CardContent>
       </Card>
 
@@ -474,53 +481,80 @@ export default function Payroll() {
                 <TableBody>
                   {rows.map((row) => {
                     const entry = entries[row.personnelId] || createEmptyPayrollEntry(row.personnelId)
+                    const onlyCommission = row.commissionOnly
                     return (
                       <TableRow key={`${row.unitId}-${row.personnelId}`}>
                         <TableCell className="text-xs text-muted-foreground">{row.unitName}</TableCell>
                         <TableCell className="font-medium">
-                          <Link
-                            to={getPersonnelPayHref(row.personnelId)}
-                            className="underline-offset-2 hover:underline"
-                            title="打开该人员调整薪酬"
-                          >
-                            {row.name}
-                          </Link>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <Link
+                              to={getPersonnelPayHref(row.personnelId)}
+                              className="underline-offset-2 hover:underline"
+                              title="打开该人员调整薪酬"
+                            >
+                              {row.name}
+                            </Link>
+                            {onlyCommission && (
+                              <Badge
+                                variant="outline"
+                                className="border-violet-200 px-1 py-0 text-[10px] text-violet-700"
+                              >
+                                分销·仅提成
+                              </Badge>
+                            )}
+                          </div>
                         </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          <Link
-                            to={getPersonnelPayHref(row.personnelId, 'baseSalary')}
-                            className="underline-offset-2 hover:underline"
-                            title="调整底薪"
-                          >
-                            {formatCurrency(row.standardBaseSalary)}
-                          </Link>
+                        <TableCell className="text-right tabular-nums text-muted-foreground">
+                          {onlyCommission ? (
+                            '—'
+                          ) : (
+                            <Link
+                              to={getPersonnelPayHref(row.personnelId, 'baseSalary')}
+                              className="underline-offset-2 hover:underline"
+                              title="调整底薪"
+                            >
+                              {formatCurrency(row.standardBaseSalary)}
+                            </Link>
+                          )}
                         </TableCell>
                         <TableCell className="text-right tabular-nums text-slate-700">
-                          <Link
-                            to={getPersonnelPayHref(row.personnelId, 'confidentialityFee')}
-                            className="underline-offset-2 hover:underline"
-                            title="调整保密费"
-                          >
-                            {formatCurrency(row.paidConfidentialityFee)}
-                          </Link>
+                          {onlyCommission ? (
+                            <span className="text-muted-foreground">—</span>
+                          ) : (
+                            <Link
+                              to={getPersonnelPayHref(row.personnelId, 'confidentialityFee')}
+                              className="underline-offset-2 hover:underline"
+                              title="调整保密费"
+                            >
+                              {formatCurrency(row.paidConfidentialityFee)}
+                            </Link>
+                          )}
                         </TableCell>
                         <TableCell className="text-right tabular-nums text-violet-700">
-                          <Link
-                            to={getPersonnelPayHref(row.personnelId, 'positionAllowance')}
-                            className="underline-offset-2 hover:underline"
-                            title="调整岗位补贴"
-                          >
-                            {formatCurrency(row.paidPositionAllowance)}
-                          </Link>
+                          {onlyCommission ? (
+                            <span className="text-muted-foreground">—</span>
+                          ) : (
+                            <Link
+                              to={getPersonnelPayHref(row.personnelId, 'positionAllowance')}
+                              className="underline-offset-2 hover:underline"
+                              title="调整岗位补贴"
+                            >
+                              {formatCurrency(row.paidPositionAllowance)}
+                            </Link>
+                          )}
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
-                          <Link
-                            to={getPersonnelPayHref(row.personnelId, 'performance')}
-                            className="underline-offset-2 hover:underline"
-                            title="调整绩效"
-                          >
-                            {formatCurrency(row.standardPerformance)}
-                          </Link>
+                          {onlyCommission ? (
+                            <span className="text-muted-foreground">—</span>
+                          ) : (
+                            <Link
+                              to={getPersonnelPayHref(row.personnelId, 'performance')}
+                              className="underline-offset-2 hover:underline"
+                              title="调整绩效"
+                            >
+                              {formatCurrency(row.standardPerformance)}
+                            </Link>
+                          )}
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
                           <Link
@@ -532,55 +566,71 @@ export default function Payroll() {
                           </Link>
                         </TableCell>
                         <TableCell>
-                          <Input
-                            type="number"
-                            step="0.5"
-                            min={0}
-                            max={PAYROLL_STANDARD_HOURS * 2}
-                            className="h-8 w-[104px]"
-                            placeholder={String(PAYROLL_STANDARD_HOURS)}
-                            value={entry.attendanceHours ?? ''}
-                            onChange={(e) =>
-                              updateEntry(row.personnelId, {
-                                attendanceHours:
-                                  e.target.value === '' ? null : Number(e.target.value),
-                              })
-                            }
-                          />
+                          {onlyCommission ? (
+                            <span className="text-muted-foreground">—</span>
+                          ) : (
+                            <Input
+                              type="number"
+                              step="0.5"
+                              min={0}
+                              max={PAYROLL_STANDARD_HOURS * 2}
+                              className="h-8 w-[104px]"
+                              placeholder={String(PAYROLL_STANDARD_HOURS)}
+                              value={entry.attendanceHours ?? ''}
+                              onChange={(e) =>
+                                updateEntry(row.personnelId, {
+                                  attendanceHours:
+                                    e.target.value === '' ? null : Number(e.target.value),
+                                })
+                              }
+                            />
+                          )}
                         </TableCell>
                         <TableCell>
-                          <Input
-                            type="number"
-                            step="1"
-                            min={0}
-                            max={100}
-                            className="h-8 w-[84px]"
-                            placeholder="100"
-                            value={entry.score ?? ''}
-                            onChange={(e) =>
-                              updateEntry(row.personnelId, {
-                                score: e.target.value === '' ? null : Number(e.target.value),
-                              })
-                            }
-                          />
+                          {onlyCommission ? (
+                            <span className="text-muted-foreground">—</span>
+                          ) : (
+                            <Input
+                              type="number"
+                              step="1"
+                              min={0}
+                              max={100}
+                              className="h-8 w-[84px]"
+                              placeholder="100"
+                              value={entry.score ?? ''}
+                              onChange={(e) =>
+                                updateEntry(row.personnelId, {
+                                  score: e.target.value === '' ? null : Number(e.target.value),
+                                })
+                              }
+                            />
+                          )}
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
-                          <Link
-                            to={getPersonnelPayHref(row.personnelId, 'baseSalary')}
-                            className="underline-offset-2 hover:underline"
-                            title="调整底薪"
-                          >
-                            {formatCurrency(row.paidBaseSalary)}
-                          </Link>
+                          {onlyCommission ? (
+                            <span className="text-muted-foreground">—</span>
+                          ) : (
+                            <Link
+                              to={getPersonnelPayHref(row.personnelId, 'baseSalary')}
+                              className="underline-offset-2 hover:underline"
+                              title="调整底薪"
+                            >
+                              {formatCurrency(row.paidBaseSalary)}
+                            </Link>
+                          )}
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
-                          <Link
-                            to={getPersonnelPayHref(row.personnelId, 'performance')}
-                            className="underline-offset-2 hover:underline"
-                            title="调整绩效"
-                          >
-                            {formatCurrency(row.paidPerformance)}
-                          </Link>
+                          {onlyCommission ? (
+                            <span className="text-muted-foreground">—</span>
+                          ) : (
+                            <Link
+                              to={getPersonnelPayHref(row.personnelId, 'performance')}
+                              className="underline-offset-2 hover:underline"
+                              title="调整绩效"
+                            >
+                              {formatCurrency(row.paidPerformance)}
+                            </Link>
+                          )}
                         </TableCell>
                         <TableCell>
                           <Input

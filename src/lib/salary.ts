@@ -3,6 +3,7 @@ import {
   isDistributionDay,
   resolvePayForMonth,
   accumulateFixedPayInMonth,
+  getFixedPayRatioInMonth,
   resolvePpcListForSaleDate,
 } from "@/lib/compensation";
 import {
@@ -201,6 +202,27 @@ const SALES_POSITION_KEYWORDS = [
 ] as const;
 
 /**
+ * 是否为分销岗位（岗位名含「分销」）
+ * 分销岗不计底薪/保密费/绩效/补贴/社保公积金，工资核算只计提成
+ */
+export function isDistributionPosition(position?: string): boolean {
+  const pos = (position || "").trim().replace(/\s+/g, "");
+  return pos.includes("分销");
+}
+
+/**
+ * 工资核算是否「仅提成」：分销岗位，或已启用分销且该月无固定计薪日
+ */
+export function isPayrollCommissionOnly(
+  person: Personnel,
+  yearMonth: string,
+): boolean {
+  if (isDistributionPosition(person.position)) return true;
+  if (!person.highCommissionFrom) return false;
+  return getFixedPayRatioInMonth(person, yearMonth) <= 0;
+}
+
+/**
  * 是否应作为「销售相关岗位」进入战报名单
  * 规则：含「销售」→ 是；命中非销售词 → 否；否则必须命中销售相关词
  * 注意：有当月业绩的非销售岗仍应进战报，见 shouldShowOnBattleReport
@@ -208,6 +230,8 @@ const SALES_POSITION_KEYWORDS = [
 export function isSalesBattlePosition(position?: string): boolean {
   const pos = (position || "").trim().toLowerCase().replace(/\s+/g, "");
   if (!pos) return false;
+  // 分销岗也进销售战报
+  if (pos.includes("分销")) return true;
   // 含「销售」优先视为销售岗
   if (pos.includes("销售")) return true;
   if (NON_SALES_POSITION_KEYWORDS.some((k) => pos.includes(k.toLowerCase()))) {

@@ -29,6 +29,8 @@ export interface PayrollRowInput {
   name: string
   unitId: string
   unitName: string
+  /** 分销岗位：只核算提成，不计底薪/出勤/考核 */
+  commissionOnly?: boolean
   standardBaseSalary: number
   /** 标准保密费（不受考勤影响） */
   standardConfidentialityFee: number
@@ -41,6 +43,7 @@ export interface PayrollRowInput {
 }
 
 export interface PayrollRowResult extends PayrollRowInput {
+  commissionOnly: boolean
   attendanceHours: number
   attendanceRatio: number
   score: number
@@ -168,6 +171,33 @@ export function getScoreRatio(score: number): number {
 
 export function calcPayrollRow(input: PayrollRowInput): PayrollRowResult {
   const entry = normalizePayrollEntry(input.personnelId, input.entry)
+  const commissionOnly = Boolean(input.commissionOnly)
+  const otherBonus = Number(entry.otherBonus) || 0
+  const otherDeduction = Number(entry.otherDeduction) || 0
+
+  // 分销岗位：只发提成（+加减项），不算出勤/底薪/保密费/补贴/绩效
+  if (commissionOnly) {
+    const payable = input.commission + otherBonus - otherDeduction
+    return {
+      ...input,
+      commissionOnly: true,
+      standardBaseSalary: 0,
+      standardConfidentialityFee: 0,
+      standardPositionAllowance: 0,
+      standardPerformance: 0,
+      entry,
+      attendanceHours: 0,
+      attendanceRatio: 0,
+      score: 0,
+      scoreRatio: 0,
+      paidBaseSalary: 0,
+      paidConfidentialityFee: 0,
+      paidPositionAllowance: 0,
+      paidPerformance: 0,
+      payable,
+    }
+  }
+
   const attendanceHours =
     entry.attendanceHours == null
       ? PAYROLL_STANDARD_HOURS
@@ -179,8 +209,6 @@ export function calcPayrollRow(input: PayrollRowInput): PayrollRowResult {
   const paidConfidentialityFee = Number(input.standardConfidentialityFee) || 0
   const paidPositionAllowance = Number(input.standardPositionAllowance) || 0
   const paidPerformance = input.standardPerformance * attendanceRatio * scoreRatio
-  const otherBonus = Number(entry.otherBonus) || 0
-  const otherDeduction = Number(entry.otherDeduction) || 0
   const payable =
     input.commission
     + paidBaseSalary
@@ -192,6 +220,7 @@ export function calcPayrollRow(input: PayrollRowInput): PayrollRowResult {
 
   return {
     ...input,
+    commissionOnly: false,
     entry,
     attendanceHours,
     attendanceRatio,

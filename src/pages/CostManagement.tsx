@@ -10,6 +10,7 @@ import {
   calcLeaveDeduction,
   MONTHLY_STANDARD_HOURS,
   calculateMonthlySalary,
+  isPayrollCommissionOnly,
   isPersonnelOnDutyInMonth,
   filterByMonth,
 } from "@/lib/salary";
@@ -195,6 +196,7 @@ export default function CostManagement() {
             name: person.name,
             unitId,
             unitName: unitNameMap.get(unitId) || unitId,
+            commissionOnly: isPayrollCommissionOnly(person, selectedMonth),
             standardBaseSalary: calc.baseSalary,
             standardConfidentialityFee: calc.confidentialityFee,
             standardPositionAllowance: calc.positionAllowance,

@@ -1448,7 +1448,12 @@ export default function PersonnelPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>职位</Label>
-                    <Input value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} placeholder="如：销售经理" />
+                    <Input value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} placeholder="如：销售经理 / 分销" />
+                    {(form.position || '').includes('分销') && (
+                      <p className="text-[10px] text-violet-700">
+                        分销岗位：不计底薪与社保公积金，工资核算只计提成
+                      </p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label>状态</Label>

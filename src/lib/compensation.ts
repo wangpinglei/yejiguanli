@@ -65,10 +65,13 @@ export function hasDistributionPlan(person: Personnel): boolean {
  * - 入职前不计
  * - 离职日次日起不计（离职日含当天仍计）
  * - 分销生效日起不计（含当天）
+ * - 分销岗位整段不计（只核算提成）
  */
 export function isFixedPayDay(person: Personnel, day: string): boolean {
   const d = toDateOnly(day)
   if (!d) return false
+  const pos = (person.position || '').trim().replace(/\s+/g, '')
+  if (pos.includes('分销')) return false
   const hire = toDateOnly(person.hireDate)
   const resign = toDateOnly(person.resignDate)
   const highFrom = toDateOnly(person.highCommissionFrom)
