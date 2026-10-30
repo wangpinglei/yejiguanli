@@ -85,6 +85,11 @@ export interface Personnel {
   resignDate?: string; // 离职日期
   status: "active" | "inactive";
   /**
+   * 是否内部员工。false = 不计底薪/社保公积金，工资核算只计提成。
+   * 缺省按 true（内部员工）处理。
+   */
+  isInternalEmployee?: boolean;
+  /**
    * 分销/高提成生效日（含当天）。成交日 ≥ 此日用当前提成；此前用 regularCompensation 快照。
    * 空 = 未启用分销分段。
    */

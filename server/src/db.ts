@@ -489,10 +489,23 @@ function initSchema() {
     { name: "permissions", ddl: "permissions TEXT DEFAULT '{}'" },
   ]);
 
-  ensureColumns("personnel", [
-    { name: "high_commission_from", ddl: "high_commission_from TEXT DEFAULT ''" },
-    { name: "regular_compensation", ddl: "regular_compensation TEXT DEFAULT ''" },
-  ]);
+  {
+    const personnelCols = db.prepare("PRAGMA table_info(personnel)").all() as Array<{ name: string }>;
+    const hadInternal = personnelCols.some((c) => c.name === "is_internal_employee");
+    ensureColumns("personnel", [
+      { name: "high_commission_from", ddl: "high_commission_from TEXT DEFAULT ''" },
+      { name: "regular_compensation", ddl: "regular_compensation TEXT DEFAULT ''" },
+      { name: "is_internal_employee", ddl: "is_internal_employee INTEGER DEFAULT 1" },
+    ]);
+    // 首次加列：岗位含「分销」的默认标为非内部员工（仅提成）
+    if (!hadInternal) {
+      db.exec(`
+        UPDATE personnel
+        SET is_internal_employee = 0
+        WHERE instr(COALESCE(position, ''), '分销') > 0
+      `);
+    }
+  }
 
   ensureColumns("personnel_unit_assignments", [
     { name: "operator", ddl: "operator TEXT DEFAULT ''" },
@@ -2053,6 +2066,9 @@ export function rowToPersonnel(row: any, assignments?: any[], payPlans?: any[]) 
     hireDate: row.hire_date || "",
     resignDate: row.resign_date || undefined,
     status: row.status || "active",
+    isInternalEmployee: row.is_internal_employee === undefined || row.is_internal_employee === null
+      ? !String(row.position || "").includes("分销")
+      : Number(row.is_internal_employee) !== 0,
     highCommissionFrom: row.high_commission_from || undefined,
     regularCompensation: regularCompensation || undefined,
     unitAssignments: Array.isArray(assignments)

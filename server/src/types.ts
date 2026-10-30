@@ -80,6 +80,8 @@ export interface Personnel {
   hireDate: string;
   resignDate?: string;
   status: "active" | "inactive";
+  /** false = 非内部员工，不计底薪/社保，只核算提成 */
+  isInternalEmployee?: boolean;
 }
 
 export interface Product {

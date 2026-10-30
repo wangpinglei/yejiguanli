@@ -31,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Table,
@@ -89,6 +90,8 @@ const DEFAULT_FORM = {
   hireDate: "",
   resignDate: "",
   status: "active" as Personnel["status"],
+  /** 默认内部员工，核算底薪/社保；关闭后只核算提成 */
+  isInternalEmployee: true,
 };
 
 // 销售总额时间范围
@@ -476,6 +479,12 @@ export default function PersonnelPage() {
 
   const openEdit = (person: Personnel) => {
     setEditingPerson(person);
+    const internal =
+      person.isInternalEmployee === false
+        ? false
+        : person.isInternalEmployee === true
+          ? true
+          : !(person.position || '').includes('分销');
     setForm({
       name: person.name,
       salesUnitId: person.salesUnitId,
@@ -488,6 +497,7 @@ export default function PersonnelPage() {
       hireDate: person.hireDate,
       resignDate: person.resignDate || "",
       status: person.status,
+      isInternalEmployee: internal,
     });
     setDialogOpen(true);
   };
@@ -1448,12 +1458,25 @@ export default function PersonnelPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>职位</Label>
-                    <Input value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} placeholder="如：销售经理 / 分销" />
-                    {(form.position || '').includes('分销') && (
-                      <p className="text-[10px] text-violet-700">
-                        分销岗位：不计底薪与社保公积金，工资核算只计提成
-                      </p>
-                    )}
+                    <Input
+                      value={form.position}
+                      onChange={(e) => {
+                        const position = e.target.value
+                        setForm((prev) => {
+                          const next = { ...prev, position }
+                          // 首次改成含「分销」时默认关掉内部员工；用户可再手动打开
+                          if (
+                            position.includes('分销')
+                            && !(prev.position || '').includes('分销')
+                            && prev.isInternalEmployee
+                          ) {
+                            next.isInternalEmployee = false
+                          }
+                          return next
+                        })
+                      }}
+                      placeholder="如：销售经理 / 分销"
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>状态</Label>
@@ -1465,6 +1488,20 @@ export default function PersonnelPage() {
                       </SelectContent>
                     </Select>
                   </div>
+                </div>
+                <div className="flex items-start justify-between gap-4 rounded-md border border-violet-200 bg-violet-50/40 px-3 py-2.5">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="is-internal-employee">内部员工</Label>
+                    <p className="text-[11px] text-muted-foreground leading-snug">
+                      开启：核算底薪、保密费、补贴、绩效、社保公积金与出勤。
+                      关闭：工资核算只计提成（适合分销/非入职合作）。
+                    </p>
+                  </div>
+                  <Switch
+                    id="is-internal-employee"
+                    checked={form.isInternalEmployee}
+                    onCheckedChange={(checked) => setForm({ ...form, isInternalEmployee: checked })}
+                  />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">

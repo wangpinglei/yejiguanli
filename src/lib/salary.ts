@@ -202,22 +202,29 @@ const SALES_POSITION_KEYWORDS = [
 ] as const;
 
 /**
- * 是否为分销岗位（岗位名含「分销」）
- * 分销岗不计底薪/保密费/绩效/补贴/社保公积金，工资核算只计提成
+ * 是否为分销岗位（岗位名含「分销」）——展示/兼容用
  */
 export function isDistributionPosition(position?: string): boolean {
   const pos = (position || "").trim().replace(/\s+/g, "");
   return pos.includes("分销");
 }
 
+/** 是否按内部员工核算固定薪酬（缺省 true） */
+export function isInternalEmployeePerson(person: Pick<Personnel, "isInternalEmployee" | "position">): boolean {
+  if (person.isInternalEmployee === false) return false;
+  if (person.isInternalEmployee === true) return true;
+  // 旧数据未写字段：岗位含分销视为非内部
+  return !isDistributionPosition(person.position);
+}
+
 /**
- * 工资核算是否「仅提成」：分销岗位，或已启用分销且该月无固定计薪日
+ * 工资核算是否「仅提成」：非内部员工，或已启用分销且该月无固定计薪日
  */
 export function isPayrollCommissionOnly(
   person: Personnel,
   yearMonth: string,
 ): boolean {
-  if (isDistributionPosition(person.position)) return true;
+  if (!isInternalEmployeePerson(person)) return true;
   if (!person.highCommissionFrom) return false;
   return getFixedPayRatioInMonth(person, yearMonth) <= 0;
 }

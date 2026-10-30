@@ -313,7 +313,7 @@ export default function Payroll() {
           <CardDescription>
             应发 = 提成 + 实发底薪 + 保密费 + 岗位补贴 + 实发绩效 + 其他加项 − 其他减项；月出勤系数{' '}
             21.75 × 7.5 = {PAYROLL_STANDARD_HOURS} 小时；未填出勤按满勤，未填考核分按 100 分。
-            岗位含「分销」的只核算提成，不计底薪/社保与出勤考核。
+            人员档案关闭「内部员工」后只核算提成，不计底薪/社保与出勤考核。
           </CardDescription>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground space-y-1">
@@ -323,7 +323,7 @@ export default function Payroll() {
             实发绩效 = 标准绩效 × (出勤小时 / {PAYROLL_STANDARD_HOURS}) × (考核分 / 100)
           </p>
           <p>业绩提成 = 系统个人提成 + 内部销售提成 + 团队管理提成（只读）</p>
-          <p>分销岗位：应发 = 提成 + 其他加项 − 其他减项（不显示出勤/考核/固定薪酬）</p>
+          <p>非内部员工：应发 = 提成 + 其他加项 − 其他减项（不显示出勤/考核/固定薪酬）</p>
         </CardContent>
       </Card>
 
@@ -499,7 +499,7 @@ export default function Payroll() {
                                 variant="outline"
                                 className="border-violet-200 px-1 py-0 text-[10px] text-violet-700"
                               >
-                                分销·仅提成
+                                非内部·仅提成
                               </Badge>
                             )}
                           </div>
