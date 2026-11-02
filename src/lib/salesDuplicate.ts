@@ -27,13 +27,43 @@ export function normalizeSaleText(value?: string): string {
     .replace(/）/g, ')')
 }
 
-/** 统一为 YYYY-MM-DD；避免 2026-9-28 这类未补零在字符串排序时排到 2026-10 前面 */
+function isRealYmd(year: number, month: number, day: number): boolean {
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+}
+
+function formatYmd(year: number, month: number, day: number): string {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
+/** 两位年份：00–69 为 2000 年代，70–99 为 1900 年代 */
+function expandTwoDigitYear(year: number): number {
+  if (year >= 100) return year
+  return year >= 70 ? 1900 + year : 2000 + year
+}
+
+/**
+ * 统一为 YYYY-MM-DD。
+ * 覆盖未补零的 2026-9-28，以及 Excel 美式短日期被截成 9/28/26 0: 的情况。
+ * 截断串按字符串降序会排在所有 2026- 开头的日期前面。
+ */
 export function normalizeSaleDate(value?: string): string {
   const s = String(value || '').trim()
   if (!s) return ''
   const ymd = s.match(/^(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})/)
   if (ymd) {
-    return `${ymd[1]}-${ymd[2].padStart(2, '0')}-${ymd[3].padStart(2, '0')}`
+    const year = Number(ymd[1])
+    const month = Number(ymd[2])
+    const day = Number(ymd[3])
+    if (isRealYmd(year, month, day)) return formatYmd(year, month, day)
+  }
+  const mdy = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?:\D|$)/)
+  if (mdy) {
+    const month = Number(mdy[1])
+    const day = Number(mdy[2])
+    const year = expandTwoDigitYear(Number(mdy[3]))
+    if (isRealYmd(year, month, day)) return formatYmd(year, month, day)
   }
   return s.slice(0, 10)
 }

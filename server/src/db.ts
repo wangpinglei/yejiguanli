@@ -4,6 +4,7 @@ import path from "path";
 import type { SystemUser, UserRole } from "./types";
 import { createFullPermissions, normalizePermissions } from "./permissions";
 import { parsePerformanceSplitText } from "./lib/parsePerformanceSplit";
+import { normalizeSaleDate } from "./lib/saleDate";
 
 const DB_PATH = path.join(__dirname, "..", "data", "database.db");
 
@@ -2375,14 +2376,7 @@ export function rowToSalesRecord(row: any) {
     quantity: row.quantity || 1,
     unitPrice: row.unit_price || 0,
     totalAmount: row.total_amount || 0,
-    saleDate: (() => {
-      const s = String(row.sale_date || "").trim();
-      const ymd = s.match(/^(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})/);
-      if (ymd) {
-        return `${ymd[1]}-${ymd[2].padStart(2, "0")}-${ymd[3].padStart(2, "0")}`;
-      }
-      return s.slice(0, 10);
-    })(),
+    saleDate: normalizeSaleDate(row.sale_date),
     remark: row.remark || "",
     collaborators,
     shareMode,

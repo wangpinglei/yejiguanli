@@ -337,21 +337,18 @@ function cellToString(cell: unknown): string {
 function parseDate(dateStr: string): string {
   const s = dateStr.trim();
   if (!s) return "";
-  const ymdDash = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
-  if (ymdDash) {
-    const [, y, m, d] = ymdDash;
-    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
-  }
   const ymdCompact = s.match(/^(\d{4})(\d{2})(\d{2})$/);
   if (ymdCompact) {
     const [, y, m, d] = ymdCompact;
     return `${y}-${m}-${d}`;
   }
   const excelNum = parseFloat(s);
-  if (!isNaN(excelNum) && excelNum > 30000 && excelNum < 80000) {
+  if (/^\d+(\.\d+)?$/.test(s) && !isNaN(excelNum) && excelNum > 30000 && excelNum < 80000) {
     const date = new Date(Date.UTC(1899, 11, 30) + excelNum * 86400000);
     return date.toISOString().slice(0, 10);
   }
+  const normalized = normalizeSaleDate(s);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return normalized;
   return s;
 }
 
@@ -1909,7 +1906,7 @@ export default function SalesRecords() {
 
       <Card ref={tableCardRef}>
         <CardContent className="p-0">
-          <Table className="min-w-[1780px] text-base [&_th]:text-base [&_td]:text-base">
+          <Table className="min-w-[1680px] text-base [&_th]:text-base [&_td]:text-base">
               <TableHeader>
                 <TableRow>
                   <TableHead className="h-14 w-14 px-3 text-center text-base">
@@ -1932,7 +1929,12 @@ export default function SalesRecords() {
                   <TableHead className="h-14 min-w-[8rem] px-3 text-base">销售单位</TableHead>
                   <TableHead className="h-14 min-w-[10rem] px-3 text-base">销售人员</TableHead>
                   <TableHead className="h-14 min-w-[8rem] px-3 text-base">成交日期</TableHead>
-                  <TableHead className="h-14 min-w-[10rem] px-3 text-base">参加活动</TableHead>
+                  <TableHead
+                    className="h-14 w-[4.5rem] max-w-[4.5rem] px-1.5 text-center text-base"
+                    title="参加活动"
+                  >
+                    活动
+                  </TableHead>
                   <TableHead className="h-14 min-w-[7rem] px-3 text-right text-base">提成预估</TableHead>
                   <TableHead className="h-14 min-w-[6rem] px-3 text-base">来源</TableHead>
                   <TableHead
@@ -2023,13 +2025,20 @@ export default function SalesRecords() {
                     <TableCell className="px-3 py-3 font-medium whitespace-nowrap">
                       {formatDate(record.saleDate)}
                     </TableCell>
-                    <TableCell className="px-3 py-3 text-muted-foreground whitespace-nowrap">
+                    <TableCell
+                      className="max-w-[4.5rem] px-1.5 py-3 text-center text-muted-foreground"
+                      title={
+                        record.activityName && record.activityName !== "无活动"
+                          ? record.activityName
+                          : undefined
+                      }
+                    >
                       {record.activityName && record.activityName !== "无活动" ? (
-                        <Badge className="bg-amber-100 text-amber-700 text-sm">
+                        <Badge className="max-w-full truncate bg-amber-100 px-1.5 text-xs font-normal text-amber-700">
                           {record.activityName}
                         </Badge>
                       ) : (
-                        <span className="text-sm">-</span>
+                        <span className="text-xs">-</span>
                       )}
                     </TableCell>
                     <TableCell className="px-3 py-3 text-right text-violet-600 font-medium whitespace-nowrap">
@@ -2845,7 +2854,7 @@ export default function SalesRecords() {
                       <TableHead>销售单位</TableHead>
                       <TableHead>销售人员</TableHead>
                       <TableHead>成交日期</TableHead>
-                      <TableHead>参加活动</TableHead>
+                      <TableHead title="参加活动">活动</TableHead>
                       <TableHead>匹配状态</TableHead>
                     </TableRow>
                   </TableHeader>

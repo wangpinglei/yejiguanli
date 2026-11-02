@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { getDb, rowToSalesRecord, generateId } from "../db";
 import { authMiddleware } from "../auth";
+import { normalizeSaleDate } from "../lib/saleDate";
 import {
   getVisibleUnitIds,
   isSalesRowVisible,
@@ -52,16 +53,6 @@ function normalizeCollaborators(raw: any, shareMode?: string): string {
     .filter((c: { personnelId: string }) => c.personnelId);
   if (cleaned.length === 0) return "";
   return JSON.stringify({ mode, shares: cleaned });
-}
-
-function normalizeSaleDate(value: unknown): string {
-  const s = String(value || "").trim();
-  if (!s) return "";
-  const ymd = s.match(/^(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})/);
-  if (ymd) {
-    return `${ymd[1]}-${ymd[2].padStart(2, "0")}-${ymd[3].padStart(2, "0")}`;
-  }
-  return s.slice(0, 10);
 }
 
 function pick(body: any, existing?: any) {

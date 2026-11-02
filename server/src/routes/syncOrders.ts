@@ -2,6 +2,7 @@ import { createHash } from 'crypto'
 import { Router, Request, Response } from 'express'
 import { getDb, generateId, rowToSalesRecord, findProductRowByNameOrAlias } from '../db'
 import { parsePerformanceSplitText } from '../lib/parsePerformanceSplit'
+import { normalizeSaleDate } from '../lib/saleDate'
 import { authMiddleware } from '../auth'
 import { getVisibleUnitIds, isSalesRowVisible } from '../middleware'
 
@@ -81,9 +82,9 @@ function normalizeOrder(raw: PlainObj): SyncOrderInput | null {
   const salesPersonName = asStr(
     pickField(raw, 'salesPersonName', 'sales_person_name', '销售人员', '销售员'),
   )
-  const saleDate = asStr(
-    pickField(raw, 'saleDate', 'sale_date', 'orderDate', 'order_date', '成交日期'),
-  ).slice(0, 10)
+  const saleDate = normalizeSaleDate(
+    asStr(pickField(raw, 'saleDate', 'sale_date', 'orderDate', 'order_date', '成交日期')),
+  )
   const orderType = asStr(pickField(raw, 'orderType', 'order_type', '订单类型'))
   const activityName = asStr(
     pickField(raw, 'activityName', 'activity_name', '参加活动', '活动'),

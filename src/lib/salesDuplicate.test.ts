@@ -130,4 +130,16 @@ const maps = buildSaleNameMaps(
   assertEqual(rows[1].id, 'sept')
 }
 
+{
+  assertEqual(normalizeSaleDate('9/28/26 0:'), '2026-09-28')
+  assertEqual(normalizeSaleDate('9/28/26 0:00'), '2026-09-28')
+  assertEqual(normalizeSaleDate('09/28/2026'), '2026-09-28')
+  const rows = [
+    { id: 'truncated', saleDate: '9/28/26 0:' },
+    { id: 'nov', saleDate: '2026-11-02' },
+  ].sort(compareSaleDateDesc)
+  assertEqual(rows[0].id, 'nov', '美式短日期截断后不应排在标准日期前面')
+  assertEqual(rows[1].id, 'truncated')
+}
+
 console.log('salesDuplicate.test.ts: ok')
