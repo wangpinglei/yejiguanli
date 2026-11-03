@@ -160,21 +160,24 @@ export default function MPayPlanDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent
+        className="!flex !h-[92vh] !max-h-[92vh] !w-[96vw] !max-w-[96vw] flex-col gap-3 overflow-hidden p-5 sm:!max-w-[96vw]"
+        style={{ width: '96vw', maxWidth: '96vw', height: '92vh', maxHeight: '92vh' }}
+      >
+        <DialogHeader className="shrink-0 pr-8">
           <DialogTitle className="flex items-center gap-2">
             <Wallet className="h-5 w-5" />
             调整薪酬{person ? ` · ${person.name}` : ''}
           </DialogTitle>
         </DialogHeader>
         {person && (
-          <div className="space-y-4 py-1">
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto py-1 pr-1">
             <p className="text-sm text-muted-foreground">
               与调岗、分销一样按生效日分段。试用转正请把生效日设为转正月 1 日，
               并改底薪、社保、公积金；更早月份不会被新标准覆盖。
               若之前误填了过晚的生效日，可把生效日改早，系统会覆盖该日及之后的薪酬段。
             </p>
-            <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+            <div className="rounded-md border bg-muted/30 px-4 py-3 text-sm">
               当前固定月薪 {formatCurrency(currentFixed)}
               ，社保 {formatCurrency(person.socialInsurance || 0)}
               ，公积金 {formatCurrency(person.housingFund || 0)}
@@ -183,7 +186,7 @@ export default function MPayPlanDialog({
             {planRows.length > 0 && (
               <div className="space-y-2">
                 <Label>薪酬记录</Label>
-                <div className="rounded-md border overflow-x-auto">
+                <div className="max-h-[36vh] overflow-auto rounded-md border">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -213,7 +216,7 @@ export default function MPayPlanDialog({
                           <TableCell className="text-right">
                             {formatCurrency(row.housingFund)}
                           </TableCell>
-                          <TableCell className="max-w-[100px] truncate">
+                          <TableCell className="max-w-[140px] truncate">
                             {row.remark || '—'}
                           </TableCell>
                           <TableCell>{row.operator || '—'}</TableCell>
@@ -229,15 +232,15 @@ export default function MPayPlanDialog({
             )}
 
             {canEdit && (
-              <div className="space-y-3 border-t pt-4">
+              <div className="space-y-4 border-t pt-4">
                 <div className="flex items-center justify-between">
                   <Label className="text-base font-medium">新标准</Label>
                   <Badge variant="secondary">
                     固定月薪 {formatCurrency(nextFixed)}
                   </Badge>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
+                <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
+                  <div className="space-y-1.5">
                     <Label>生效日 *</Label>
                     <Input
                       type="date"
@@ -253,7 +256,7 @@ export default function MPayPlanDialog({
                       </p>
                     )}
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-1.5">
                     <Label>说明</Label>
                     <Input
                       value={form.remark}
@@ -263,7 +266,7 @@ export default function MPayPlanDialog({
                   </div>
                   <div
                     id={FOCUS_FIELD_IDS.baseSalary}
-                    className={`space-y-1 rounded-md p-1 ${focusField === 'baseSalary' ? 'ring-2 ring-sky-400' : ''}`}
+                    className={`space-y-1.5 rounded-md p-1 ${focusField === 'baseSalary' ? 'ring-2 ring-sky-400' : ''}`}
                   >
                     <Label>底薪 (¥)</Label>
                     <Input
@@ -274,7 +277,7 @@ export default function MPayPlanDialog({
                   </div>
                   <div
                     id={FOCUS_FIELD_IDS.confidentialityFee}
-                    className={`space-y-1 rounded-md p-1 ${focusField === 'confidentialityFee' ? 'ring-2 ring-sky-400' : ''}`}
+                    className={`space-y-1.5 rounded-md p-1 ${focusField === 'confidentialityFee' ? 'ring-2 ring-sky-400' : ''}`}
                   >
                     <Label>保密费 (¥)</Label>
                     <Input
@@ -288,7 +291,7 @@ export default function MPayPlanDialog({
                   </div>
                   <div
                     id={FOCUS_FIELD_IDS.performance}
-                    className={`space-y-1 rounded-md p-1 ${focusField === 'performance' ? 'ring-2 ring-sky-400' : ''}`}
+                    className={`space-y-1.5 rounded-md p-1 ${focusField === 'performance' ? 'ring-2 ring-sky-400' : ''}`}
                   >
                     <Label>绩效 (¥)</Label>
                     <Input
@@ -302,7 +305,7 @@ export default function MPayPlanDialog({
                   </div>
                   <div
                     id={FOCUS_FIELD_IDS.positionAllowance}
-                    className={`space-y-1 rounded-md p-1 ${focusField === 'positionAllowance' ? 'ring-2 ring-sky-400' : ''}`}
+                    className={`space-y-1.5 rounded-md p-1 ${focusField === 'positionAllowance' ? 'ring-2 ring-sky-400' : ''}`}
                   >
                     <Label>岗位补贴 (¥)</Label>
                     <Input
@@ -314,7 +317,7 @@ export default function MPayPlanDialog({
                       )}
                     />
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-1.5">
                     <Label>社保 (¥/月)</Label>
                     <Input
                       type="number"
@@ -325,7 +328,7 @@ export default function MPayPlanDialog({
                       })}
                     />
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-1.5">
                     <Label>公积金 (¥/月)</Label>
                     <Input
                       type="number"
@@ -341,7 +344,7 @@ export default function MPayPlanDialog({
             )}
           </div>
         )}
-        <DialogFooter>
+        <DialogFooter className="shrink-0 border-t pt-3">
           <Button
             variant="outline"
             onClick={() => onOpenChange(false)}
