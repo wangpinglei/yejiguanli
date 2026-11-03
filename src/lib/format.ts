@@ -1,5 +1,12 @@
-// 格式化货币；digits 为小数位数，默认 0（整元），工资实发等可传 2
-export function formatCurrency(amount: number, digits = 0): string {
+/** 金额保留两位小数（四舍五入到分） */
+export function roundMoney(amount: number): number {
+  const n = Number(amount);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 100) / 100;
+}
+
+// 格式化货币；digits 默认 2（到分）
+export function formatCurrency(amount: number, digits = 2): string {
   const n = Number(amount);
   const safe = Number.isFinite(n) ? n : 0;
   const fractionDigits = Math.max(0, Math.min(4, Math.floor(Number(digits) || 0)));

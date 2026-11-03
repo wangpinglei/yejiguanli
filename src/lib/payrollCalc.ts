@@ -1,6 +1,9 @@
 /** 工资核算本地原型：出勤小时 + 考核分影响底薪/绩效；保密费/岗位补贴不受考勤影响 */
 
+import { roundMoney } from '@/lib/format'
 import { MONTHLY_STANDARD_HOURS, WORK_HOURS_PER_DAY } from '@/lib/salary'
+
+export { roundMoney }
 
 /** 月应出勤小时 = 21.75 × 7.5 */
 export const PAYROLL_STANDARD_HOURS = MONTHLY_STANDARD_HOURS
@@ -236,13 +239,6 @@ export function getAttendanceRatio(
 /** 考核得分系数：0–100 → 0–1 */
 export function getScoreRatio(score: number): number {
   return Math.min(1, Math.max(0, score / 100))
-}
-
-/** 金额保留两位小数（四舍五入） */
-export function roundMoney(amount: number): number {
-  const n = Number(amount)
-  if (!Number.isFinite(n)) return 0
-  return Math.round(n * 100) / 100
 }
 
 export function calcPayrollRow(input: PayrollRowInput): PayrollRowResult {

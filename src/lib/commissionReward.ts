@@ -1,3 +1,4 @@
+import { roundMoney } from '@/lib/format'
 import { isSaleDateInRange, toDateOnly } from '@/lib/settlement'
 import type { ProductPersonCommission, SalesRecord, SalesUnit } from '@/types'
 
@@ -25,7 +26,7 @@ export function calcSaleCommissionReward(
   if (sale.saleDate && !isSaleDateInRange(sale.saleDate, ppc.rewardFrom, ppc.rewardTo)) {
     return 0
   }
-  return (ppc.rewardAmount || 0) * (sale.quantity || 0)
+  return roundMoney((ppc.rewardAmount || 0) * (sale.quantity || 0))
 }
 
 /**
@@ -53,10 +54,10 @@ export function calcSaleInternalSalesCommissionPreview(
   if (!ppc) return 0
 
   if (ppc.internalSalesCommissionType === 'fixed') {
-    return (sale.quantity || 0) * (ppc.internalSalesCommissionAmount || 0)
+    return roundMoney((sale.quantity || 0) * (ppc.internalSalesCommissionAmount || 0))
   }
   if ((ppc.internalSalesCommissionRate || 0) > 0) {
-    return (sale.totalAmount || 0) * (ppc.internalSalesCommissionRate / 100)
+    return roundMoney((sale.totalAmount || 0) * (ppc.internalSalesCommissionRate / 100))
   }
   return 0
 }
@@ -86,7 +87,7 @@ export function calcSalePersonCommissionPreview(
   } else if ((ppc.personalCommissionRate || 0) > 0) {
     base = (sale.totalAmount || 0) * (ppc.personalCommissionRate / 100)
   }
-  return base + calcSaleCommissionReward(sale, ppc)
+  return roundMoney(base + calcSaleCommissionReward(sale, ppc))
 }
 
 export function formatCommissionRewardPeriod(ppc?: ProductPersonCommission): string {
@@ -159,8 +160,8 @@ export function groupCommissionRewardHits(options: {
     }
     group.hits.push(hit)
     group.totalQty += hit.sale.quantity || 0
-    group.totalAmount += hit.sale.totalAmount || 0
-    group.totalReward += hit.reward
+    group.totalAmount = roundMoney(group.totalAmount + (hit.sale.totalAmount || 0))
+    group.totalReward = roundMoney(group.totalReward + hit.reward)
   }
 
   return Array.from(groupMap.values()).sort((a, b) =>

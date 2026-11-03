@@ -5,6 +5,7 @@ import {
   calcSalePersonCommissionPreview,
   findProductPersonCommission,
 } from '@/lib/commissionReward'
+import { roundMoney } from '@/lib/format'
 import {
   calculateMonthlySalary,
   filterByMonth,
@@ -171,9 +172,9 @@ function buildSaleRecordLines(options: {
       customerName: (sale.customerName || '').trim() || '—',
       productName: productNameOf(sale.productId, sale.productName),
       productId: sale.productId,
-      orderAmount,
+      orderAmount: roundMoney(orderAmount),
       rateLabel,
-      amount,
+      amount: roundMoney(amount),
     }
   })
 }
@@ -227,9 +228,9 @@ export function buildPayrollCommissionDetail(options: {
     teamMgmtContext,
     unitId,
   )
-  const personalTotal = calc.personalCommission || 0
-  const internalTotal = calc.internalSalesCommission || 0
-  const teamMgmtTotal = calc.managementCommission || 0
+  const personalTotal = roundMoney(calc.personalCommission || 0)
+  const internalTotal = roundMoney(calc.internalSalesCommission || 0)
+  const teamMgmtTotal = roundMoney(calc.managementCommission || 0)
 
   const lines = buildSaleRecordLines({
     person,
@@ -249,8 +250,8 @@ export function buildPayrollCommissionDetail(options: {
     personalTotal,
     internalTotal,
     teamMgmtTotal,
-    commissionTotal: personalTotal + internalTotal + teamMgmtTotal,
-    personalSales: getPersonalSales(personnelId, unitScopedSales, person.name),
+    commissionTotal: roundMoney(personalTotal + internalTotal + teamMgmtTotal),
+    personalSales: roundMoney(getPersonalSales(personnelId, unitScopedSales, person.name)),
     lines,
   }
 }
