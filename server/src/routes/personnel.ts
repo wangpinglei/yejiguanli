@@ -129,11 +129,41 @@ function closeAllOpenPayPlans(
   let closed = 0;
   for (const row of openRows) {
     const openStart = String(row.start_date || "").slice(0, 10);
+    // 生效日早于该段开始日时，该段应由后续逻辑删除/重建，这里仍先收口避免空悬
     const end = openStart && endDate < openStart ? openStart : endDate;
     updateEnd.run(end, row.id);
     closed += 1;
   }
   return closed;
+}
+
+/**
+ * 按生效日整理薪酬时间轴，允许把生效日改早以修正错误段：
+ * - 删除 start >= effectiveDate 的段（含误填的未来开始日）
+ * - 将仍覆盖到生效日之后的段在生效日收口
+ */
+function reshapePayPlansAtEffectiveDate(
+  db: ReturnType<typeof getDb>,
+  personnelId: string,
+  effectiveDate: string,
+): void {
+  db.prepare(`
+    DELETE FROM personnel_pay_plans
+    WHERE personnel_id = ?
+      AND substr(COALESCE(start_date, ''), 1, 10) >= ?
+  `).run(personnelId, effectiveDate);
+
+  db.prepare(`
+    UPDATE personnel_pay_plans
+    SET end_date = ?
+    WHERE personnel_id = ?
+      AND substr(COALESCE(start_date, ''), 1, 10) < ?
+      AND (
+        end_date IS NULL
+        OR TRIM(end_date) = ''
+        OR substr(end_date, 1, 10) > ?
+      )
+  `).run(effectiveDate, personnelId, effectiveDate, effectiveDate);
 }
 
 function insertOpenPayPlan(
@@ -814,21 +844,23 @@ router.post("/:id/adjust-pay", requireEditPermission, (req, res) => {
     : (existing.housing_fund || 0);
 
   const openRows = listOpenPayPlans(db, id);
-  if (openRows.length > 0) {
-    const latestStart = openRows
+  const allPlanCount = (
+    db.prepare(
+      "SELECT COUNT(1) AS c FROM personnel_pay_plans WHERE personnel_id = ?",
+    ).get(id) as { c: number }
+  ).c;
+  const latestStart = openRows.length > 0
+    ? openRows
       .map((r) => String(r.start_date || "").slice(0, 10))
+      .filter(Boolean)
       .sort()
-      .pop();
-    if (latestStart && effectiveDate < latestStart) {
-      return res.status(400).json({
-        error: `生效日不能早于当前薪酬段开始日 ${latestStart}`,
-      });
-    }
-  }
+      .pop()
+    : "";
 
   runInTransaction(() => {
-    if (openRows.length > 0) {
-      closeAllOpenPayPlans(db, id, effectiveDate);
+    if (allPlanCount > 0) {
+      // 允许生效日早于当前段：删除该日及之后的段，并收口更早的段
+      reshapePayPlansAtEffectiveDate(db, id, effectiveDate);
     } else {
       const hire = String(existing.hire_date || "").slice(0, 10) || "1970-01-01";
       const oldStart = hire <= effectiveDate ? hire : effectiveDate;
@@ -855,7 +887,7 @@ router.post("/:id/adjust-pay", requireEditPermission, (req, res) => {
       salaryJson,
       nextSocial,
       nextHousing,
-      remark || "调薪",
+      remark || (latestStart && effectiveDate < latestStart ? "调薪（修正生效日）" : "调薪"),
       getOperator(req),
     );
     db.prepare(`

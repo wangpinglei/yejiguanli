@@ -45,10 +45,9 @@ function sortPayPlans(list: PersonnelPayPlan[]): PersonnelPayPlan[] {
 }
 
 function getDefaultForm(person: Personnel | null): PayForm {
-  const nextMonth = new Date()
-  nextMonth.setMonth(nextMonth.getMonth() + 1)
-  nextMonth.setDate(1)
-  const suggested = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}-01`
+  // 默认当月 1 日（转正/调薪常用）；需要可再改早或改晚
+  const now = new Date()
+  const suggested = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
   return {
     effectiveDate: suggested,
     remark: '转正',
@@ -110,19 +109,33 @@ export default function MPayPlanDialog({
     }))
   }
 
+  const latestOpenStart = useMemo(() => {
+    const open = planRows.filter((p) => !p.endDate)
+    if (open.length === 0) return ''
+    return open
+      .map((p) => (p.startDate || '').slice(0, 10))
+      .filter(Boolean)
+      .sort()
+      .pop() || ''
+  }, [planRows])
+
   async function handleSubmit() {
     if (!person) return
     if (!/^\d{4}-\d{2}-\d{2}$/.test(form.effectiveDate)) {
       alert('请填写薪酬生效日')
       return
     }
-    if (
-      !confirm(
-        `确认「${person.name}」自 ${form.effectiveDate} 起使用新薪酬？\n\n`
+    const isEarlierCorrection = Boolean(
+      latestOpenStart && form.effectiveDate < latestOpenStart,
+    )
+    const confirmText = isEarlierCorrection
+      ? `确认「${person.name}」自 ${form.effectiveDate} 起使用新薪酬？\n\n`
+        + `生效日早于当前薪酬段开始日 ${latestOpenStart}，将删除 ${form.effectiveDate} 及之后的薪酬段并重建。\n`
+        + '此前月份仍按更早段落计算；提成仍按成交当月配置。'
+      : `确认「${person.name}」自 ${form.effectiveDate} 起使用新薪酬？\n\n`
         + '生效日前（含试用期月份）仍按旧底薪/社保公积金计算；'
-        + '从生效日起按新标准。提成仍按成交当月配置。',
-      )
-    ) {
+        + '从生效日起按新标准。提成仍按成交当月配置。'
+    if (!confirm(confirmText)) {
       return
     }
     setSaving(true)
@@ -158,7 +171,8 @@ export default function MPayPlanDialog({
           <div className="space-y-4 py-1">
             <p className="text-sm text-muted-foreground">
               与调岗、分销一样按生效日分段。试用转正请把生效日设为转正月 1 日，
-              并改底薪、社保、公积金；9 月成本不会被 10 月新标准覆盖。
+              并改底薪、社保、公积金；更早月份不会被新标准覆盖。
+              若之前误填了过晚的生效日，可把生效日改早，系统会覆盖该日及之后的薪酬段。
             </p>
             <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
               当前固定月薪 {formatCurrency(currentFixed)}
@@ -233,6 +247,11 @@ export default function MPayPlanDialog({
                         effectiveDate: e.target.value,
                       })}
                     />
+                    {latestOpenStart && form.effectiveDate && form.effectiveDate < latestOpenStart && (
+                      <p className="text-[11px] text-amber-700">
+                        早于当前段 {latestOpenStart}，保存后将覆盖该日及之后薪酬段
+                      </p>
+                    )}
                   </div>
                   <div className="space-y-1">
                     <Label>说明</Label>
