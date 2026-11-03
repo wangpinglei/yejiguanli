@@ -42,6 +42,7 @@ import {
 } from '@/lib/payrollCalc'
 import MPayrollAdjCell from '@/pages/Payroll/components/m-payroll-adj-cell'
 import MPayrollEntryLinks, {
+  type PayrollCalcPhase,
   type PayrollEntryMode,
 } from '@/pages/Payroll/components/m-payroll-entry-links'
 import { enrichPayrollRowWithTax, resolvePayrollTax } from '@/lib/payrollTaxApply'
@@ -68,7 +69,8 @@ function showPayrollCol(
     | 'insurance'
     | 'tax',
 ): boolean {
-  if (mode === 'all') return true
+  // 最终工资表不展示出勤三列（仅在考勤录入步骤显示）
+  if (mode === 'all') return col !== 'attendance'
   if (mode === 'attendance') {
     return col === 'core' || col === 'attendance' || col === 'salary'
   }
@@ -84,11 +86,11 @@ function showPayrollCol(
 
 function payrollColSpan(mode: PayrollEntryMode): number {
   // 与表头条件保持一致：单位+姓名=2
-  if (mode === 'attendance') return 2 + 1 + 1 + 2 + 1 // 标准底薪 + 出勤 + 缺勤 + 应出勤 + 实发底薪
+  if (mode === 'attendance') return 2 + 1 + 1 + 2 + 1 // 标准底薪 + 实际/缺勤/应出勤 + 实发底薪
   if (mode === 'score') return 2 + 1 + 1 + 1 // 标准绩效 + 分数 + 实发绩效
   if (mode === 'insurance') return 2 + 1 + 2 // 应发 + 社保 + 公积金
   if (mode === 'tax') return 2 + 1 + 2 + 3 // 应发 + 社保公积金 + 专项/个税/实发
-  return 19
+  return 16 // 最终表不含出勤三列
 }
 
 /** 跳转人员「调整薪酬」并定位字段 */
@@ -122,6 +124,7 @@ export default function Payroll() {
   const [draftScopeIds, setDraftScopeIds] = useState<string[]>(() => loadPayrollScopeUnitIds())
   const [entries, setEntries] = useState<Record<string, PayrollMonthEntry>>({})
   const [filterUnitId, setFilterUnitId] = useState('all')
+  const [calcPhase, setCalcPhase] = useState<PayrollCalcPhase>('idle')
   const [entryMode, setEntryMode] = useState<PayrollEntryMode>('all')
   const [savedTip, setSavedTip] = useState('')
 
@@ -516,68 +519,53 @@ export default function Payroll() {
               <Calculator className="h-5 w-5" />
               2. 月度工资表
             </CardTitle>
-            <MPayrollEntryLinks mode={entryMode} onChange={setEntryMode} />
+            <MPayrollEntryLinks
+              phase={calcPhase}
+              mode={entryMode}
+              onPhaseChange={setCalcPhase}
+              onModeChange={setEntryMode}
+            />
           </div>
           <CardDescription>
-            标准底薪/保密费/岗位补贴/绩效可点击跳转「调整薪酬」；业绩提成可点进明细。
-            出勤小时与绩效分数需人工填写。点右上角可切换录入专注模式。
+            {calcPhase === 'idle' && (
+              <>默认不展示录入项与工资明细。请先点「去核算工资」，依次完成考勤、绩效分数、社保公积金、个税录入，再生成工资表。</>
+            )}
+            {calcPhase === 'wizard' && (
+              <>请按步骤填写本月录入项；完成后点「生成工资表」。标准底薪/保密费/岗位补贴/绩效可点姓名跳转调整。</>
+            )}
+            {calcPhase === 'result' && (
+              <>工资表已生成。出勤明细仅在核算「考勤录入」步骤中填写，本表按核算结果展示应发/实发。</>
+            )}
           </CardDescription>
-          {entryMode === 'attendance' && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
-              <p>
-                当前：考勤录入 — 应出勤固定 {PAYROLL_STANDARD_HOURS} 小时；填写缺勤时间后，
-                实际出勤 = 应出勤 − 缺勤。保存后影响实发底薪。
-              </p>
-              <button
-                type="button"
-                className="shrink-0 rounded border border-sky-300 bg-white px-2 py-1 text-xs font-medium text-sky-900 hover:bg-sky-100"
-                onClick={() => setEntryMode('all')}
-              >
-                ← 返回工资表
-              </button>
-            </div>
+          {calcPhase === 'wizard' && entryMode === 'attendance' && (
+            <p className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+              步骤 1/4 考勤录入 — 应出勤固定 {PAYROLL_STANDARD_HOURS} 小时；填写缺勤后，
+              实际出勤 = 应出勤 − 缺勤。
+            </p>
           )}
-          {entryMode === 'score' && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-              <p>当前：绩效分数录入 — 请填写考核分（0–100）；保存后影响实发绩效。</p>
-              <button
-                type="button"
-                className="shrink-0 rounded border border-emerald-300 bg-white px-2 py-1 text-xs font-medium text-emerald-900 hover:bg-emerald-100"
-                onClick={() => setEntryMode('all')}
-              >
-                ← 返回工资表
-              </button>
-            </div>
+          {calcPhase === 'wizard' && entryMode === 'score' && (
+            <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+              步骤 2/4 绩效分数录入 — 请填写考核分（0–100）。
+            </p>
           )}
-          {entryMode === 'insurance' && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              <p>当前：社保公积金录入 — 填写个人代扣；默认来自人员「个税扣除」档案，可按月改。</p>
-              <button
-                type="button"
-                className="shrink-0 rounded border border-amber-300 bg-white px-2 py-1 text-xs font-medium text-amber-950 hover:bg-amber-100"
-                onClick={() => setEntryMode('all')}
-              >
-                ← 返回工资表
-              </button>
-            </div>
+          {calcPhase === 'wizard' && entryMode === 'insurance' && (
+            <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              步骤 3/4 社保公积金录入 — 填写个人代扣；默认来自人员「个税扣除」档案。
+            </p>
           )}
-          {entryMode === 'tax' && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
-              <p>
-                当前：个税扣除预报 — 专项附加来自人员档案；本期个税按累计预扣自动算，可手工改。
-                专项附加请到人员管理点「个税扣除」维护。
-              </p>
-              <button
-                type="button"
-                className="shrink-0 rounded border border-violet-300 bg-white px-2 py-1 text-xs font-medium text-violet-950 hover:bg-violet-100"
-                onClick={() => setEntryMode('all')}
-              >
-                ← 返回工资表
-              </button>
-            </div>
+          {calcPhase === 'wizard' && entryMode === 'tax' && (
+            <p className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
+              步骤 4/4 个税扣除预报 — 专项附加来自人员档案；本期个税可自动算或手工改。完成后点「生成工资表」。
+            </p>
           )}
         </CardHeader>
         <CardContent className="space-y-4">
+          {calcPhase === 'idle' ? (
+            <div className="rounded-lg border border-dashed bg-muted/20 px-4 py-10 text-center text-sm text-muted-foreground">
+              尚未开始核算。请点击右上角「去核算工资」，按考勤 → 绩效分数 → 社保公积金 → 个税依次录入后生成工资表。
+            </div>
+          ) : (
+          <>
           <div className="flex flex-wrap items-end gap-3">
             <div className="space-y-1">
               <Label htmlFor="payrollMonth">核算月份</Label>
@@ -1039,7 +1027,9 @@ export default function Payroll() {
               </span>
             </div>
           )}
-        </CardContent>
+                  </>
+          )}
+</CardContent>
       </Card>
     </div>
   )
