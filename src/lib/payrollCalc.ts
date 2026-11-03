@@ -11,6 +11,12 @@ export const PAYROLL_STANDARD_WORK_DAYS = MONTHLY_STANDARD_HOURS / WORK_HOURS_PE
 export const PAYROLL_SCOPE_STORAGE_KEY = 'pm_payroll_scope_unit_ids'
 export const PAYROLL_ENTRY_STORAGE_KEY = 'pm_payroll_entries'
 
+/** 加减项明细行（金额合计写入 otherBonus / otherDeduction） */
+export interface PayrollAdjLine {
+  label: string
+  amount: number
+}
+
 export interface PayrollMonthEntry {
   personnelId: string
   /** 实际出勤小时，空则默认按满勤 */
@@ -21,6 +27,15 @@ export interface PayrollMonthEntry {
   score: number | null
   otherBonus: number
   otherDeduction: number
+  /** 加项明细备注（可多行文字；有 lines 时由明细汇总生成） */
+  otherBonusNote: string
+  /** 减项明细备注 */
+  otherDeductionNote: string
+  /** 加项明细行；有有效行时金额以合计为准 */
+  otherBonusLines: PayrollAdjLine[]
+  /** 减项明细行 */
+  otherDeductionLines: PayrollAdjLine[]
+  /** @deprecated 旧总备注，读取时并入加减备注 */
   note: string
 }
 
@@ -74,6 +89,38 @@ export function savePayrollScopeUnitIds(ids: string[]): void {
   localStorage.setItem(PAYROLL_SCOPE_STORAGE_KEY, JSON.stringify(ids))
 }
 
+function normalizeAdjLines(raw: unknown): PayrollAdjLine[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null
+      const row = item as { label?: unknown; amount?: unknown }
+      const label = String(row.label || '').trim()
+      const amount = Number(row.amount) || 0
+      if (!label && amount === 0) return null
+      return { label, amount }
+    })
+    .filter((x): x is PayrollAdjLine => Boolean(x))
+}
+
+export function sumAdjLines(lines: PayrollAdjLine[]): number {
+  return lines.reduce((sum, line) => sum + (Number(line.amount) || 0), 0)
+}
+
+export function formatAdjLinesNote(lines: PayrollAdjLine[]): string {
+  return lines
+    .map((line) => {
+      const label = (line.label || '').trim()
+      const amount = Number(line.amount) || 0
+      if (!label && amount === 0) return ''
+      if (!label) return String(amount)
+      if (amount === 0) return label
+      return `${label}${amount}`
+    })
+    .filter(Boolean)
+    .join('；')
+}
+
 /** 兼容旧「出勤天数」字段：有 hours 用 hours，否则天数 × 7.5 */
 export function normalizePayrollEntry(
   personnelId: string,
@@ -99,13 +146,31 @@ export function normalizePayrollEntry(
     attendanceHours = null
   }
 
+  const legacyNote = String(raw.note || '').trim()
+  const otherBonusLines = normalizeAdjLines(raw.otherBonusLines)
+  const otherDeductionLines = normalizeAdjLines(raw.otherDeductionLines)
+  const otherBonusNote = String(raw.otherBonusNote || '').trim()
+    || (otherBonusLines.length > 0 ? formatAdjLinesNote(otherBonusLines) : '')
+    || legacyNote
+  const otherDeductionNote = String(raw.otherDeductionNote || '').trim()
+    || (otherDeductionLines.length > 0 ? formatAdjLinesNote(otherDeductionLines) : '')
+
+  let otherBonus = Number(raw.otherBonus) || 0
+  let otherDeduction = Number(raw.otherDeduction) || 0
+  if (otherBonusLines.length > 0) otherBonus = sumAdjLines(otherBonusLines)
+  if (otherDeductionLines.length > 0) otherDeduction = sumAdjLines(otherDeductionLines)
+
   return {
     personnelId,
     attendanceHours,
     score: raw.score === undefined ? null : raw.score,
-    otherBonus: Number(raw.otherBonus) || 0,
-    otherDeduction: Number(raw.otherDeduction) || 0,
-    note: raw.note || '',
+    otherBonus,
+    otherDeduction,
+    otherBonusNote,
+    otherDeductionNote,
+    otherBonusLines,
+    otherDeductionLines,
+    note: legacyNote,
   }
 }
 
@@ -151,6 +216,10 @@ export function createEmptyPayrollEntry(personnelId: string): PayrollMonthEntry 
     score: null,
     otherBonus: 0,
     otherDeduction: 0,
+    otherBonusNote: '',
+    otherDeductionNote: '',
+    otherBonusLines: [],
+    otherDeductionLines: [],
     note: '',
   }
 }

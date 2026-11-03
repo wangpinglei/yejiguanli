@@ -40,6 +40,7 @@ import {
   type PayrollMonthEntry,
   type PayrollRowResult,
 } from '@/lib/payrollCalc'
+import MPayrollAdjCell from '@/pages/Payroll/components/m-payroll-adj-cell'
 import {
   calculateMonthlySalary,
   isPayrollCommissionOnly,
@@ -256,9 +257,10 @@ export default function Payroll() {
       '实发底薪',
       '实发绩效',
       '其他加项',
+      '加项明细',
       '其他减项',
+      '减项明细',
       '应发合计',
-      '备注',
     ]
     // Excel 会把 "2026-10" 自动当成日期显示成 Oct-26，导出用中文月份文本避免误识别
     const monthLabel = /^\d{4}-\d{2}$/.test(yearMonth)
@@ -281,9 +283,10 @@ export default function Payroll() {
         r.paidBaseSalary.toFixed(2),
         r.paidPerformance.toFixed(2),
         (entry.otherBonus || 0).toFixed(2),
+        entry.otherBonusNote || '',
         (entry.otherDeduction || 0).toFixed(2),
+        entry.otherDeductionNote || '',
         r.payable.toFixed(2),
-        entry.note || '',
       ]
         .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
         .join(',')
@@ -313,6 +316,7 @@ export default function Payroll() {
           <CardDescription>
             应发 = 提成 + 实发底薪 + 保密费 + 岗位补贴 + 实发绩效 + 其他加项 − 其他减项；月出勤系数{' '}
             21.75 × 7.5 = {PAYROLL_STANDARD_HOURS} 小时；未填出勤按满勤，未填考核分按 100 分。
+            加项/减项可点「明细」录入多行说明与金额，表内会显示备注；导出 CSV 含加项明细、减项明细列。
             人员档案关闭「内部员工」后只核算提成，不计底薪/社保与出勤考核。
           </CardDescription>
         </CardHeader>
@@ -473,8 +477,8 @@ export default function Payroll() {
                     <TableHead className="min-w-[88px]">考核分</TableHead>
                     <TableHead className="text-right">实发底薪</TableHead>
                     <TableHead className="text-right">实发绩效</TableHead>
-                    <TableHead className="min-w-[88px]">加项</TableHead>
-                    <TableHead className="min-w-[88px]">减项</TableHead>
+                    <TableHead className="min-w-[148px]">加项 / 明细</TableHead>
+                    <TableHead className="min-w-[148px]">减项 / 明细</TableHead>
                     <TableHead className="text-right font-semibold">应发</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -635,25 +639,31 @@ export default function Payroll() {
                           )}
                         </TableCell>
                         <TableCell>
-                          <Input
-                            type="number"
-                            className="h-8 w-[84px]"
-                            value={entry.otherBonus || 0}
-                            onChange={(e) =>
+                          <MPayrollAdjCell
+                            kind="bonus"
+                            amount={entry.otherBonus || 0}
+                            note={entry.otherBonusNote || ''}
+                            lines={entry.otherBonusLines || []}
+                            onChange={(next) =>
                               updateEntry(row.personnelId, {
-                                otherBonus: Number(e.target.value) || 0,
+                                otherBonus: next.amount,
+                                otherBonusNote: next.note,
+                                otherBonusLines: next.lines,
                               })
                             }
                           />
                         </TableCell>
                         <TableCell>
-                          <Input
-                            type="number"
-                            className="h-8 w-[84px]"
-                            value={entry.otherDeduction || 0}
-                            onChange={(e) =>
+                          <MPayrollAdjCell
+                            kind="deduction"
+                            amount={entry.otherDeduction || 0}
+                            note={entry.otherDeductionNote || ''}
+                            lines={entry.otherDeductionLines || []}
+                            onChange={(next) =>
                               updateEntry(row.personnelId, {
-                                otherDeduction: Number(e.target.value) || 0,
+                                otherDeduction: next.amount,
+                                otherDeductionNote: next.note,
+                                otherDeductionLines: next.lines,
                               })
                             }
                           />
