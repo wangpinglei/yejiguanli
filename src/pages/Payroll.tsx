@@ -41,6 +41,10 @@ import {
   type PayrollRowResult,
 } from '@/lib/payrollCalc'
 import MPayrollAdjCell from '@/pages/Payroll/components/m-payroll-adj-cell'
+import MPayrollEntryLinks, {
+  type PayrollEntryMode,
+} from '@/pages/Payroll/components/m-payroll-entry-links'
+import { enrichPayrollRowWithTax, resolvePayrollTax } from '@/lib/payrollTaxApply'
 import {
   calculateMonthlySalary,
   isPayrollCommissionOnly,
@@ -51,6 +55,40 @@ import { personBelongsToUnitInMonth } from '@/lib/unitAssignment'
 /** 工资表金额统一展示两位小数 */
 function money(amount: number): string {
   return formatCurrency(amount, 2)
+}
+
+function showPayrollCol(
+  mode: PayrollEntryMode,
+  col:
+    | 'core'
+    | 'salary'
+    | 'attendance'
+    | 'score'
+    | 'adjust'
+    | 'insurance'
+    | 'tax',
+): boolean {
+  if (mode === 'all') return true
+  if (mode === 'attendance') {
+    return col === 'core' || col === 'attendance' || col === 'salary'
+  }
+  if (mode === 'score') {
+    return col === 'core' || col === 'score' || col === 'salary'
+  }
+  if (mode === 'insurance') {
+    return col === 'core' || col === 'insurance' || col === 'salary'
+  }
+  // tax
+  return col === 'core' || col === 'insurance' || col === 'tax' || col === 'salary'
+}
+
+function payrollColSpan(mode: PayrollEntryMode): number {
+  // 与表头条件保持一致：单位+姓名=2
+  if (mode === 'attendance') return 2 + 1 + 1 + 2 + 1 // 标准底薪 + 出勤 + 缺勤 + 应出勤 + 实发底薪
+  if (mode === 'score') return 2 + 1 + 1 + 1 // 标准绩效 + 分数 + 实发绩效
+  if (mode === 'insurance') return 2 + 1 + 2 // 应发 + 社保 + 公积金
+  if (mode === 'tax') return 2 + 1 + 2 + 3 // 应发 + 社保公积金 + 专项/个税/实发
+  return 19
 }
 
 /** 跳转人员「调整薪酬」并定位字段 */
@@ -84,6 +122,7 @@ export default function Payroll() {
   const [draftScopeIds, setDraftScopeIds] = useState<string[]>(() => loadPayrollScopeUnitIds())
   const [entries, setEntries] = useState<Record<string, PayrollMonthEntry>>({})
   const [filterUnitId, setFilterUnitId] = useState('all')
+  const [entryMode, setEntryMode] = useState<PayrollEntryMode>('all')
   const [savedTip, setSavedTip] = useState('')
 
   const teamMgmtContext = useMemo(
@@ -150,8 +189,29 @@ export default function Payroll() {
   }
 
   function handleSaveEntries() {
-    savePayrollEntries(yearMonth, entries)
-    setSavedTip(`${yearMonth} 出勤/考核录入已保存（本机）`)
+    const next: Record<string, PayrollMonthEntry> = { ...entries }
+    for (const row of rows) {
+      const person = personnel.find((p) => p.id === row.personnelId)
+      if (!person) continue
+      const base = next[row.personnelId] || createEmptyPayrollEntry(row.personnelId)
+      const tax = resolvePayrollTax({
+        person,
+        yearMonth,
+        payable: row.payable,
+        entry: base,
+      })
+      next[row.personnelId] = {
+        ...base,
+        socialInsurancePersonal: tax.socialInsurancePersonal,
+        housingFundPersonal: tax.housingFundPersonal,
+        specialAdditional: tax.specialAdditional,
+        incomeTax: tax.incomeTax,
+        payableSnapshot: row.payable,
+      }
+    }
+    setEntries(next)
+    savePayrollEntries(yearMonth, next)
+    setSavedTip(`${yearMonth} 出勤/考核/代扣个税已保存（本机）`)
     window.setTimeout(() => setSavedTip(''), 2000)
   }
 
@@ -187,21 +247,20 @@ export default function Payroll() {
           (calc.managementCommission || 0)
 
         const entry = entries[person.id] || createEmptyPayrollEntry(person.id)
-        list.push(
-          calcPayrollRow({
-            personnelId: person.id,
-            name: person.name,
-            unitId: unit.id,
-            unitName: unitNameMap.get(unit.id) || unit.name,
-            commissionOnly: isPayrollCommissionOnly(person, yearMonth),
-            standardBaseSalary: calc.baseSalary,
-            standardConfidentialityFee: calc.confidentialityFee,
-            standardPositionAllowance: calc.positionAllowance,
-            standardPerformance: calc.performance,
-            commission,
-            entry,
-          }),
-        )
+        const baseRow = calcPayrollRow({
+          personnelId: person.id,
+          name: person.name,
+          unitId: unit.id,
+          unitName: unitNameMap.get(unit.id) || unit.name,
+          commissionOnly: isPayrollCommissionOnly(person, yearMonth),
+          standardBaseSalary: calc.baseSalary,
+          standardConfidentialityFee: calc.confidentialityFee,
+          standardPositionAllowance: calc.positionAllowance,
+          standardPerformance: calc.performance,
+          commission,
+          entry,
+        })
+        list.push(enrichPayrollRowWithTax(baseRow, person, yearMonth, entry))
       }
     }
 
@@ -230,6 +289,10 @@ export default function Payroll() {
         acc.paidPositionAllowance += row.paidPositionAllowance
         acc.paidPerformance += row.paidPerformance
         acc.payable += row.payable
+        acc.socialPersonal += row.socialInsurancePersonal || 0
+        acc.housingPersonal += row.housingFundPersonal || 0
+        acc.incomeTax += row.incomeTax || 0
+        acc.netPay += row.netPay || 0
         return acc
       },
       {
@@ -239,6 +302,10 @@ export default function Payroll() {
         paidPositionAllowance: 0,
         paidPerformance: 0,
         payable: 0,
+        socialPersonal: 0,
+        housingPersonal: 0,
+        incomeTax: 0,
+        netPay: 0,
       },
     )
   }, [rows])
@@ -257,7 +324,9 @@ export default function Payroll() {
       '岗位补贴',
       '标准绩效',
       '业绩提成',
-      '出勤小时',
+      '实际出勤',
+      '缺勤时间',
+      '应出勤时间',
       '考核分',
       '实发底薪',
       '实发绩效',
@@ -266,6 +335,11 @@ export default function Payroll() {
       '其他减项',
       '减项明细',
       '应发合计',
+      '社保个人',
+      '公积金个人',
+      '专项附加',
+      '本期个税',
+      '实发',
     ]
     // Excel 会把 "2026-10" 自动当成日期显示成 Oct-26，导出用中文月份文本避免误识别
     const monthLabel = /^\d{4}-\d{2}$/.test(yearMonth)
@@ -284,6 +358,8 @@ export default function Payroll() {
         r.standardPerformance.toFixed(2),
         r.commission.toFixed(2),
         r.attendanceHours.toFixed(2),
+        r.absenceHours.toFixed(2),
+        r.expectedAttendanceHours.toFixed(2),
         r.score.toFixed(1),
         r.paidBaseSalary.toFixed(2),
         r.paidPerformance.toFixed(2),
@@ -292,6 +368,11 @@ export default function Payroll() {
         (entry.otherDeduction || 0).toFixed(2),
         entry.otherDeductionNote || '',
         r.payable.toFixed(2),
+        (r.socialInsurancePersonal || 0).toFixed(2),
+        (r.housingFundPersonal || 0).toFixed(2),
+        (r.specialAdditional || 0).toFixed(2),
+        (r.incomeTax || 0).toFixed(2),
+        (r.netPay || 0).toFixed(2),
       ]
         .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
         .join(',')
@@ -337,16 +418,16 @@ export default function Payroll() {
           <CardTitle className="text-base">本期默认公式（可再改）</CardTitle>
           <CardDescription>
             应发 = 提成 + 实发底薪 + 保密费 + 岗位补贴 + 实发绩效 + 其他加项 − 其他减项；月出勤系数{' '}
-            21.75 × 7.5 = {PAYROLL_STANDARD_HOURS} 小时；未填出勤按满勤，未填考核分按 100 分。
-            加项/减项可点「明细」录入多行说明与金额，表内会显示备注；导出 CSV 含加项明细、减项明细列。
-            人员档案关闭「内部员工」后只核算提成，不计底薪/社保与出勤考核。
+            21.75 × 7.5 = {PAYROLL_STANDARD_HOURS} 小时；未填缺勤按满勤（缺勤=0），未填考核分按 100 分。
+            加项/减项可点「明细」录入多行说明与金额；黄列为人社代扣与累计个税（可改），实发=应发−社保个人−公积金个人−本期个税。
+            专项附加与个人代扣默认在人员列表「个税扣除」维护（本机）。人员关闭「内部员工」后只核算提成。
           </CardDescription>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground space-y-1">
-          <p>实发底薪 = 标准底薪 × (出勤小时 / {PAYROLL_STANDARD_HOURS})（受考勤影响）</p>
+          <p>实发底薪 = 标准底薪 × (实际出勤 / 应出勤)；应出勤固定 {PAYROLL_STANDARD_HOURS}，实际出勤 = 应出勤 − 缺勤</p>
           <p>保密费、岗位补贴 = 标准金额全额（不受考勤影响）</p>
           <p>
-            实发绩效 = 标准绩效 × (出勤小时 / {PAYROLL_STANDARD_HOURS}) × (考核分 / 100)
+            实发绩效 = 标准绩效 × (实际出勤 / 应出勤) × (考核分 / 100)
           </p>
           <p>业绩提成 = 系统个人提成 + 内部销售提成 + 团队管理提成（只读）</p>
           <p>非内部员工：应发 = 提成 + 其他加项 − 其他减项（不显示出勤/考核/固定薪酬）</p>
@@ -429,14 +510,72 @@ export default function Payroll() {
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Calculator className="h-5 w-5" />
-            2. 月度工资表
-          </CardTitle>
+        <CardHeader className="space-y-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Calculator className="h-5 w-5" />
+              2. 月度工资表
+            </CardTitle>
+            <MPayrollEntryLinks mode={entryMode} onChange={setEntryMode} />
+          </div>
           <CardDescription>
-            标准底薪/保密费/岗位补贴/绩效可点击跳转「调整薪酬」；业绩提成可点进明细。出勤小时与考核分需人工填写。
+            标准底薪/保密费/岗位补贴/绩效可点击跳转「调整薪酬」；业绩提成可点进明细。
+            出勤小时与绩效分数需人工填写。点右上角可切换录入专注模式。
           </CardDescription>
+          {entryMode === 'attendance' && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+              <p>
+                当前：考勤录入 — 应出勤固定 {PAYROLL_STANDARD_HOURS} 小时；填写缺勤时间后，
+                实际出勤 = 应出勤 − 缺勤。保存后影响实发底薪。
+              </p>
+              <button
+                type="button"
+                className="shrink-0 rounded border border-sky-300 bg-white px-2 py-1 text-xs font-medium text-sky-900 hover:bg-sky-100"
+                onClick={() => setEntryMode('all')}
+              >
+                ← 返回工资表
+              </button>
+            </div>
+          )}
+          {entryMode === 'score' && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+              <p>当前：绩效分数录入 — 请填写考核分（0–100）；保存后影响实发绩效。</p>
+              <button
+                type="button"
+                className="shrink-0 rounded border border-emerald-300 bg-white px-2 py-1 text-xs font-medium text-emerald-900 hover:bg-emerald-100"
+                onClick={() => setEntryMode('all')}
+              >
+                ← 返回工资表
+              </button>
+            </div>
+          )}
+          {entryMode === 'insurance' && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <p>当前：社保公积金录入 — 填写个人代扣；默认来自人员「个税扣除」档案，可按月改。</p>
+              <button
+                type="button"
+                className="shrink-0 rounded border border-amber-300 bg-white px-2 py-1 text-xs font-medium text-amber-950 hover:bg-amber-100"
+                onClick={() => setEntryMode('all')}
+              >
+                ← 返回工资表
+              </button>
+            </div>
+          )}
+          {entryMode === 'tax' && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
+              <p>
+                当前：个税扣除预报 — 专项附加来自人员档案；本期个税按累计预扣自动算，可手工改。
+                专项附加请到人员管理点「个税扣除」维护。
+              </p>
+              <button
+                type="button"
+                className="shrink-0 rounded border border-violet-300 bg-white px-2 py-1 text-xs font-medium text-violet-950 hover:bg-violet-100"
+                onClick={() => setEntryMode('all')}
+              >
+                ← 返回工资表
+              </button>
+            </div>
+          )}
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap items-end gap-3">
@@ -484,24 +623,75 @@ export default function Payroll() {
               尚未纳入核算单位，请先在上方勾选并保存。
             </p>
           ) : (
-            <div className="overflow-x-auto rounded-md border">
+            <div id="payroll-month-table" className="overflow-x-auto rounded-md border">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="min-w-[120px]">单位</TableHead>
                     <TableHead className="min-w-[88px]">姓名</TableHead>
-                    <TableHead className="text-right">标准底薪</TableHead>
-                    <TableHead className="text-right">保密费</TableHead>
-                    <TableHead className="text-right">岗位补贴</TableHead>
-                    <TableHead className="text-right">标准绩效</TableHead>
-                    <TableHead className="text-right">业绩提成</TableHead>
-                    <TableHead className="min-w-[108px]">出勤小时</TableHead>
-                    <TableHead className="min-w-[88px]">考核分</TableHead>
-                    <TableHead className="text-right">实发底薪</TableHead>
-                    <TableHead className="text-right">实发绩效</TableHead>
-                    <TableHead className="min-w-[148px]">加项 / 明细</TableHead>
-                    <TableHead className="min-w-[148px]">减项 / 明细</TableHead>
-                    <TableHead className="text-right font-semibold">应发</TableHead>
+                    {showPayrollCol(entryMode, 'salary') && entryMode !== 'score' && (
+                      <TableHead className="text-right">标准底薪</TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'salary') && entryMode === 'all' && (
+                      <TableHead className="text-right">保密费</TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'salary') && entryMode === 'all' && (
+                      <TableHead className="text-right">岗位补贴</TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'salary') &&
+                      (entryMode === 'all' || entryMode === 'score') && (
+                      <TableHead className="text-right">标准绩效</TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'salary') && entryMode === 'all' && (
+                      <TableHead className="text-right">业绩提成</TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'attendance') && (
+                      <TableHead className="min-w-[108px] bg-sky-50/80">实际出勤</TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'attendance') && (
+                      <TableHead className="min-w-[96px] bg-sky-50/80">缺勤时间</TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'attendance') && (
+                      <TableHead className="min-w-[96px] bg-sky-50/80">应出勤时间</TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'score') && (
+                      <TableHead className="min-w-[88px] bg-emerald-50/80">绩效分数</TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'salary') &&
+                      (entryMode === 'all' || entryMode === 'attendance') && (
+                      <TableHead className="text-right">实发底薪</TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'salary') &&
+                      (entryMode === 'all' || entryMode === 'score') && (
+                      <TableHead className="text-right">实发绩效</TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'adjust') && (
+                      <TableHead className="min-w-[148px]">加项 / 明细</TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'adjust') && (
+                      <TableHead className="min-w-[148px]">减项 / 明细</TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'salary') &&
+                      (entryMode === 'all' ||
+                        entryMode === 'insurance' ||
+                        entryMode === 'tax') && (
+                      <TableHead className="text-right font-semibold">应发</TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'insurance') && (
+                      <TableHead className="min-w-[96px] bg-amber-50/80">社保个人</TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'insurance') && (
+                      <TableHead className="min-w-[96px] bg-amber-50/80">公积金个人</TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'tax') && (
+                      <TableHead className="text-right min-w-[96px] bg-amber-50/80">专项附加</TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'tax') && (
+                      <TableHead className="min-w-[100px] bg-amber-50/80">本期个税</TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'tax') && (
+                      <TableHead className="text-right font-semibold min-w-[100px] bg-amber-50/80">实发</TableHead>
+                    )}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -532,6 +722,7 @@ export default function Payroll() {
                             )}
                           </div>
                         </TableCell>
+                        {showPayrollCol(entryMode, 'salary') && entryMode !== 'score' && (
                         <TableCell className="text-right tabular-nums text-muted-foreground">
                           {onlyCommission ? (
                             '—'
@@ -545,6 +736,8 @@ export default function Payroll() {
                             </Link>
                           )}
                         </TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'salary') && entryMode === 'all' && (
                         <TableCell className="text-right tabular-nums text-slate-700">
                           {onlyCommission ? (
                             <span className="text-muted-foreground">—</span>
@@ -558,6 +751,8 @@ export default function Payroll() {
                             </Link>
                           )}
                         </TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'salary') && entryMode === 'all' && (
                         <TableCell className="text-right tabular-nums text-violet-700">
                           {onlyCommission ? (
                             <span className="text-muted-foreground">—</span>
@@ -571,6 +766,9 @@ export default function Payroll() {
                             </Link>
                           )}
                         </TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'salary') &&
+                          (entryMode === 'all' || entryMode === 'score') && (
                         <TableCell className="text-right tabular-nums">
                           {onlyCommission ? (
                             <span className="text-muted-foreground">—</span>
@@ -584,6 +782,8 @@ export default function Payroll() {
                             </Link>
                           )}
                         </TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'salary') && entryMode === 'all' && (
                         <TableCell className="text-right tabular-nums">
                           <Link
                             to={`/payroll/commission-detail?personnelId=${encodeURIComponent(row.personnelId)}&unitId=${encodeURIComponent(row.unitId)}&yearMonth=${encodeURIComponent(yearMonth)}`}
@@ -593,7 +793,21 @@ export default function Payroll() {
                             {money(row.commission)}
                           </Link>
                         </TableCell>
-                        <TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'attendance') && (
+                        <TableCell
+                          className={
+                            entryMode === 'attendance'
+                              ? 'bg-sky-50/40 text-right tabular-nums text-muted-foreground'
+                              : 'text-right tabular-nums text-muted-foreground'
+                          }
+                          title="实际出勤 = 应出勤 − 缺勤"
+                        >
+                          {onlyCommission ? '—' : row.attendanceHours.toFixed(3)}
+                        </TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'attendance') && (
+                        <TableCell className={entryMode === 'attendance' ? 'bg-sky-50/40' : undefined}>
                           {onlyCommission ? (
                             <span className="text-muted-foreground">—</span>
                           ) : (
@@ -601,20 +815,35 @@ export default function Payroll() {
                               type="number"
                               step="0.5"
                               min={0}
-                              max={PAYROLL_STANDARD_HOURS * 2}
-                              className="h-8 w-[104px]"
-                              placeholder={String(PAYROLL_STANDARD_HOURS)}
-                              value={entry.attendanceHours ?? ''}
+                              max={PAYROLL_STANDARD_HOURS}
+                              className="h-8 w-[96px]"
+                              title="缺勤从应出勤中扣除；实际出勤 = 应出勤 − 缺勤"
+                              placeholder="0"
+                              value={entry.absenceHours ?? ''}
                               onChange={(e) =>
                                 updateEntry(row.personnelId, {
-                                  attendanceHours:
+                                  absenceHours:
                                     e.target.value === '' ? null : Number(e.target.value),
                                 })
                               }
                             />
                           )}
                         </TableCell>
-                        <TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'attendance') && (
+                        <TableCell
+                          className={
+                            entryMode === 'attendance'
+                              ? 'bg-sky-50/40 text-right tabular-nums text-muted-foreground'
+                              : 'text-right tabular-nums text-muted-foreground'
+                          }
+                          title="月应出勤固定（21.75×7.5）"
+                        >
+                          {onlyCommission ? '—' : row.expectedAttendanceHours.toFixed(3)}
+                        </TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'score') && (
+                        <TableCell className={entryMode === 'score' ? 'bg-emerald-50/40' : undefined}>
                           {onlyCommission ? (
                             <span className="text-muted-foreground">—</span>
                           ) : (
@@ -634,6 +863,9 @@ export default function Payroll() {
                             />
                           )}
                         </TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'salary') &&
+                          (entryMode === 'all' || entryMode === 'attendance') && (
                         <TableCell className="text-right tabular-nums">
                           {onlyCommission ? (
                             <span className="text-muted-foreground">—</span>
@@ -647,6 +879,9 @@ export default function Payroll() {
                             </Link>
                           )}
                         </TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'salary') &&
+                          (entryMode === 'all' || entryMode === 'score') && (
                         <TableCell className="text-right tabular-nums">
                           {onlyCommission ? (
                             <span className="text-muted-foreground">—</span>
@@ -660,6 +895,8 @@ export default function Payroll() {
                             </Link>
                           )}
                         </TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'adjust') && (
                         <TableCell>
                           <MPayrollAdjCell
                             kind="bonus"
@@ -675,6 +912,8 @@ export default function Payroll() {
                             }
                           />
                         </TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'adjust') && (
                         <TableCell>
                           <MPayrollAdjCell
                             kind="deduction"
@@ -690,15 +929,79 @@ export default function Payroll() {
                             }
                           />
                         </TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'salary') &&
+                          (entryMode === 'all' ||
+                            entryMode === 'insurance' ||
+                            entryMode === 'tax') && (
                         <TableCell className="text-right tabular-nums font-semibold text-emerald-700">
                           {money(row.payable)}
                         </TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'insurance') && (
+                        <TableCell className="bg-amber-50/40">
+                          <Input
+                            type="number"
+                            className="h-8 w-[92px]"
+                            value={entry.socialInsurancePersonal ?? row.socialInsurancePersonal ?? 0}
+                            onChange={(e) =>
+                              updateEntry(row.personnelId, {
+                                socialInsurancePersonal: Number(e.target.value) || 0,
+                              })
+                            }
+                          />
+                        </TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'insurance') && (
+                        <TableCell className="bg-amber-50/40">
+                          <Input
+                            type="number"
+                            className="h-8 w-[92px]"
+                            value={entry.housingFundPersonal ?? row.housingFundPersonal ?? 0}
+                            onChange={(e) =>
+                              updateEntry(row.personnelId, {
+                                housingFundPersonal: Number(e.target.value) || 0,
+                              })
+                            }
+                          />
+                        </TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'tax') && (
+                        <TableCell className="text-right tabular-nums bg-amber-50/40">
+                          {money(row.specialAdditional || 0)}
+                        </TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'tax') && (
+                        <TableCell className="bg-amber-50/40">
+                          <Input
+                            type="number"
+                            className="h-8 w-[96px]"
+                            title="可手工覆盖系统累计预扣结果"
+                            value={
+                              entry.incomeTaxOverride != null
+                                ? entry.incomeTaxOverride
+                                : (row.incomeTax || 0)
+                            }
+                            onChange={(e) =>
+                              updateEntry(row.personnelId, {
+                                incomeTaxOverride:
+                                  e.target.value === '' ? null : Number(e.target.value) || 0,
+                              })
+                            }
+                          />
+                        </TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'tax') && (
+                        <TableCell className="text-right tabular-nums font-semibold text-sky-700 bg-amber-50/40">
+                          {money(row.netPay || 0)}
+                        </TableCell>
+                        )}
                       </TableRow>
                     )
                   })}
                   {rows.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={14} className="py-8 text-center text-muted-foreground">
+                      <TableCell colSpan={payrollColSpan(entryMode)} className="py-8 text-center text-muted-foreground">
                         纳入单位下本月暂无在职归属人员
                       </TableCell>
                     </TableRow>
@@ -727,6 +1030,12 @@ export default function Payroll() {
               </span>
               <span className="text-emerald-700">
                 应发合计 <strong>{money(totals.payable)}</strong>
+              </span>
+              <span>
+                代扣个税合计 <strong>{money(totals.incomeTax)}</strong>
+              </span>
+              <span className="text-sky-700">
+                实发合计 <strong>{money(totals.netPay)}</strong>
               </span>
             </div>
           )}

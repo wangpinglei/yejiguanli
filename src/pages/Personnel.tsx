@@ -79,6 +79,7 @@ import MPersonProductCommission from "./Personnel/components/m-person-product-co
 import MPayPlanDialog, {
   type PayPlanFocusField,
 } from "./Personnel/components/m-pay-plan-dialog";
+import MTaxProfileDialog from "./Personnel/components/m-tax-profile-dialog";
 
 const PAY_PLAN_FOCUS_SET = new Set<string>([
   'baseSalary',
@@ -197,6 +198,7 @@ export default function PersonnelPage() {
   const [merging, setMerging] = useState(false);
   const [transferPerson, setTransferPerson] = useState<Personnel | null>(null);
   const [payPerson, setPayPerson] = useState<Personnel | null>(null);
+  const [taxPerson, setTaxPerson] = useState<Personnel | null>(null);
   const [payFocusField, setPayFocusField] = useState<PayPlanFocusField | null>(null);
   const [transferUnitId, setTransferUnitId] = useState("");
   const [transferDate, setTransferDate] = useState(
@@ -1347,6 +1349,17 @@ export default function PersonnelPage() {
                                   调整薪酬
                                 </Button>
                               )}
+                              {canEditPersonnel && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 px-2 text-xs"
+                                  title="专项附加扣除与社保公积金个人代扣默认"
+                                  onClick={() => setTaxPerson(person)}
+                                >
+                                  个税扣除
+                                </Button>
+                              )}
                               <Button variant="ghost" size="icon" onClick={() => openEdit(person)}>
                                 <Pencil className="h-4 w-4" />
                               </Button>
@@ -1387,6 +1400,14 @@ export default function PersonnelPage() {
         }}
         canEdit={showActions && !isReadOnly && canEditPersonnel}
         focusField={payFocusField}
+      />
+
+      <MTaxProfileDialog
+        person={taxPerson}
+        open={!!taxPerson}
+        onOpenChange={(open) => {
+          if (!open) setTaxPerson(null);
+        }}
       />
 
       <MPersonProductCommission

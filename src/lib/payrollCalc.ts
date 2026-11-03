@@ -22,8 +22,15 @@ export interface PayrollAdjLine {
 
 export interface PayrollMonthEntry {
   personnelId: string
-  /** 实际出勤小时，空则默认按满勤 */
+  /**
+   * @deprecated 旧「直接录出勤」；若无缺勤字段则反推缺勤 = 应出勤 − 出勤。
+   * 现行：实际出勤 = 固定应出勤 − 缺勤，不再直接录入出勤。
+   */
   attendanceHours: number | null
+  /** 缺勤小时（开放录入）；空按 0。实际出勤 = 应出勤 − 缺勤 */
+  absenceHours: number | null
+  /** @deprecated 旧应出勤录入，现行固定为月标准 */
+  expectedAttendanceHours?: number | null
   /** @deprecated 旧字段（天），读取时按 ×7.5 迁到 attendanceHours */
   attendanceDays?: number | null
   /** 绩效考核分 0–100，空则按 100 分 */
@@ -40,6 +47,18 @@ export interface PayrollMonthEntry {
   otherDeductionLines: PayrollAdjLine[]
   /** @deprecated 旧总备注，读取时并入加减备注 */
   note: string
+  /** 社保个人代扣；null=用档案默认 */
+  socialInsurancePersonal: number | null
+  /** 公积金个人代扣；null=用档案默认 */
+  housingFundPersonal: number | null
+  /** 专项附加扣除本月；null=用档案合计 */
+  specialAdditional: number | null
+  /** 系统计算的本期个税 */
+  incomeTax: number
+  /** 手工覆盖本期个税；null=用系统值 */
+  incomeTaxOverride: number | null
+  /** 保存时应发快照，供本年累计个税使用 */
+  payableSnapshot?: number
 }
 
 export interface PayrollRowInput {
@@ -63,6 +82,10 @@ export interface PayrollRowInput {
 export interface PayrollRowResult extends PayrollRowInput {
   commissionOnly: boolean
   attendanceHours: number
+  /** 缺勤小时（录入，空按 0） */
+  absenceHours: number
+  /** 应出勤小时（固定月标准） */
+  expectedAttendanceHours: number
   attendanceRatio: number
   score: number
   scoreRatio: number
@@ -71,6 +94,12 @@ export interface PayrollRowResult extends PayrollRowInput {
   paidPositionAllowance: number
   paidPerformance: number
   payable: number
+  /** 以下为个税代扣展示（由页面注入计算后写回 row） */
+  socialInsurancePersonal?: number
+  housingFundPersonal?: number
+  specialAdditional?: number
+  incomeTax?: number
+  netPay?: number
 }
 
 export function isLikelyOpsCenterName(name: string): boolean {
@@ -163,9 +192,47 @@ export function normalizePayrollEntry(
   if (otherBonusLines.length > 0) otherBonus = sumAdjLines(otherBonusLines)
   if (otherDeductionLines.length > 0) otherDeduction = sumAdjLines(otherDeductionLines)
 
+  const socialInsurancePersonal =
+    raw.socialInsurancePersonal === undefined || raw.socialInsurancePersonal === null
+      ? null
+      : Number(raw.socialInsurancePersonal)
+  const housingFundPersonal =
+    raw.housingFundPersonal === undefined || raw.housingFundPersonal === null
+      ? null
+      : Number(raw.housingFundPersonal)
+  const specialAdditional =
+    raw.specialAdditional === undefined || raw.specialAdditional === null
+      ? null
+      : Number(raw.specialAdditional)
+  const incomeTaxOverride =
+    raw.incomeTaxOverride === undefined || raw.incomeTaxOverride === null
+      ? null
+      : Number(raw.incomeTaxOverride)
+
+  let absenceHours: number | null =
+    raw.absenceHours === undefined || raw.absenceHours === null
+      ? null
+      : Number(raw.absenceHours)
+  if (absenceHours != null && Number.isNaN(absenceHours)) {
+    absenceHours = null
+  }
+
+  // 兼容旧版只录了出勤、或录了应出勤：反推缺勤
+  if (absenceHours == null) {
+    const expected =
+      raw.expectedAttendanceHours != null && raw.expectedAttendanceHours !== undefined
+        && Number.isFinite(Number(raw.expectedAttendanceHours))
+        ? Number(raw.expectedAttendanceHours)
+        : PAYROLL_STANDARD_HOURS
+    if (attendanceHours != null) {
+      absenceHours = Math.max(0, expected - attendanceHours)
+    }
+  }
+
   return {
     personnelId,
-    attendanceHours,
+    attendanceHours: null, // 实际出勤改为按应出勤−缺勤核算，不再持久化直接出勤
+    absenceHours,
     score: raw.score === undefined ? null : raw.score,
     otherBonus,
     otherDeduction,
@@ -174,6 +241,22 @@ export function normalizePayrollEntry(
     otherBonusLines,
     otherDeductionLines,
     note: legacyNote,
+    socialInsurancePersonal: socialInsurancePersonal != null && Number.isFinite(socialInsurancePersonal)
+      ? socialInsurancePersonal
+      : null,
+    housingFundPersonal: housingFundPersonal != null && Number.isFinite(housingFundPersonal)
+      ? housingFundPersonal
+      : null,
+    specialAdditional: specialAdditional != null && Number.isFinite(specialAdditional)
+      ? specialAdditional
+      : null,
+    incomeTax: Number(raw.incomeTax) || 0,
+    incomeTaxOverride: incomeTaxOverride != null && Number.isFinite(incomeTaxOverride)
+      ? incomeTaxOverride
+      : null,
+    payableSnapshot: raw.payableSnapshot === undefined || raw.payableSnapshot === null
+      ? undefined
+      : Number(raw.payableSnapshot) || 0,
   }
 }
 
@@ -216,6 +299,7 @@ export function createEmptyPayrollEntry(personnelId: string): PayrollMonthEntry 
   return {
     personnelId,
     attendanceHours: null,
+    absenceHours: null,
     score: null,
     otherBonus: 0,
     otherDeduction: 0,
@@ -224,6 +308,11 @@ export function createEmptyPayrollEntry(personnelId: string): PayrollMonthEntry 
     otherBonusLines: [],
     otherDeductionLines: [],
     note: '',
+    socialInsurancePersonal: null,
+    housingFundPersonal: null,
+    specialAdditional: null,
+    incomeTax: 0,
+    incomeTaxOverride: null,
   }
 }
 
@@ -234,6 +323,36 @@ export function getAttendanceRatio(
 ): number {
   if (standardHours <= 0) return 0
   return Math.min(1, Math.max(0, attendanceHours / standardHours))
+}
+
+export type AttendanceBreakdown = {
+  /** 实际出勤 = 应出勤 − 缺勤 */
+  attendanceHours: number
+  /** 缺勤（录入，空按 0） */
+  absenceHours: number
+  /** 应出勤（固定月标准） */
+  expectedAttendanceHours: number
+}
+
+/**
+ * 出勤分解。
+ * 应出勤固定为月标准；缺勤开放录入；实际出勤 = 应出勤 − 缺勤。
+ * 恒等式：实际出勤 + 缺勤 = 应出勤。
+ */
+export function resolveAttendanceBreakdown(
+  entry: Pick<PayrollMonthEntry, 'absenceHours'>,
+): AttendanceBreakdown {
+  const expectedAttendanceHours = PAYROLL_STANDARD_HOURS
+  const absenceHours =
+    entry.absenceHours == null
+      ? 0
+      : Math.max(0, Number(entry.absenceHours) || 0)
+  const attendanceHours = Math.max(0, expectedAttendanceHours - absenceHours)
+  return {
+    attendanceHours,
+    absenceHours,
+    expectedAttendanceHours,
+  }
 }
 
 /** 考核得分系数：0–100 → 0–1 */
@@ -259,6 +378,8 @@ export function calcPayrollRow(input: PayrollRowInput): PayrollRowResult {
       standardPerformance: 0,
       entry,
       attendanceHours: 0,
+      absenceHours: 0,
+      expectedAttendanceHours: 0,
       attendanceRatio: 0,
       score: 0,
       scoreRatio: 0,
@@ -270,12 +391,12 @@ export function calcPayrollRow(input: PayrollRowInput): PayrollRowResult {
     }
   }
 
-  const attendanceHours =
-    entry.attendanceHours == null
-      ? PAYROLL_STANDARD_HOURS
-      : Number(entry.attendanceHours) || 0
+  const breakdown = resolveAttendanceBreakdown(entry)
+  const attendanceHours = breakdown.attendanceHours
+  const absenceHours = breakdown.absenceHours
+  const expectedAttendanceHours = breakdown.expectedAttendanceHours
   const score = entry.score == null ? 100 : Number(entry.score) || 0
-  const attendanceRatio = getAttendanceRatio(attendanceHours)
+  const attendanceRatio = getAttendanceRatio(attendanceHours, expectedAttendanceHours)
   const scoreRatio = getScoreRatio(score)
   const paidBaseSalary = roundMoney(input.standardBaseSalary * attendanceRatio)
   const paidConfidentialityFee = roundMoney(input.standardConfidentialityFee)
@@ -298,6 +419,8 @@ export function calcPayrollRow(input: PayrollRowInput): PayrollRowResult {
     commissionOnly: false,
     entry,
     attendanceHours,
+    absenceHours,
+    expectedAttendanceHours,
     attendanceRatio,
     score,
     scoreRatio,
