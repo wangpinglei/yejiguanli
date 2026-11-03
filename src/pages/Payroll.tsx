@@ -300,10 +300,27 @@ export default function Payroll() {
     const blob = new Blob([bom + [header.join(','), ...lines].join('\n')], {
       type: 'text/csv;charset=utf-8',
     })
+    // 文件名：单位名称 + 月份（与筛选/导出内容一致）
+    const unitNames = Array.from(new Set(rows.map((r) => r.unitName).filter(Boolean)))
+    let unitLabel = '全部纳入单位'
+    if (filterUnitId !== 'all') {
+      const hit = scopedUnits.find((u) => u.id === filterUnitId)
+      unitLabel = hit?.name || unitNames[0] || unitLabel
+    } else if (unitNames.length === 1) {
+      unitLabel = unitNames[0]
+    } else if (unitNames.length > 1) {
+      unitLabel = unitNames.length <= 3
+        ? unitNames.join('、')
+        : `${unitNames.slice(0, 2).join('、')}等${unitNames.length}家`
+    }
+    const safeUnit = unitLabel
+      .replace(/[\\/:*?"<>|]/g, '_')
+      .replace(/\s+/g, '')
+      .slice(0, 60) || '工资表'
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `工资核算原型_${yearMonth}.csv`
+    a.download = `${safeUnit}_${monthLabel}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
