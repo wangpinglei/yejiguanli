@@ -238,6 +238,13 @@ export function getScoreRatio(score: number): number {
   return Math.min(1, Math.max(0, score / 100))
 }
 
+/** 金额保留两位小数（四舍五入） */
+export function roundMoney(amount: number): number {
+  const n = Number(amount)
+  if (!Number.isFinite(n)) return 0
+  return Math.round(n * 100) / 100
+}
+
 export function calcPayrollRow(input: PayrollRowInput): PayrollRowResult {
   const entry = normalizePayrollEntry(input.personnelId, input.entry)
   const commissionOnly = Boolean(input.commissionOnly)
@@ -246,7 +253,7 @@ export function calcPayrollRow(input: PayrollRowInput): PayrollRowResult {
 
   // 分销岗位：只发提成（+加减项），不算出勤/底薪/保密费/补贴/绩效
   if (commissionOnly) {
-    const payable = input.commission + otherBonus - otherDeduction
+    const payable = roundMoney(input.commission + otherBonus - otherDeduction)
     return {
       ...input,
       commissionOnly: true,
@@ -274,18 +281,21 @@ export function calcPayrollRow(input: PayrollRowInput): PayrollRowResult {
   const score = entry.score == null ? 100 : Number(entry.score) || 0
   const attendanceRatio = getAttendanceRatio(attendanceHours)
   const scoreRatio = getScoreRatio(score)
-  const paidBaseSalary = input.standardBaseSalary * attendanceRatio
-  const paidConfidentialityFee = Number(input.standardConfidentialityFee) || 0
-  const paidPositionAllowance = Number(input.standardPositionAllowance) || 0
-  const paidPerformance = input.standardPerformance * attendanceRatio * scoreRatio
-  const payable =
+  const paidBaseSalary = roundMoney(input.standardBaseSalary * attendanceRatio)
+  const paidConfidentialityFee = roundMoney(input.standardConfidentialityFee)
+  const paidPositionAllowance = roundMoney(input.standardPositionAllowance)
+  const paidPerformance = roundMoney(
+    input.standardPerformance * attendanceRatio * scoreRatio,
+  )
+  const payable = roundMoney(
     input.commission
     + paidBaseSalary
     + paidConfidentialityFee
     + paidPositionAllowance
     + paidPerformance
     + otherBonus
-    - otherDeduction
+    - otherDeduction,
+  )
 
   return {
     ...input,

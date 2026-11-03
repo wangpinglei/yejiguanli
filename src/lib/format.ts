@@ -1,12 +1,13 @@
-// 格式化货币
-export function formatCurrency(amount: number): string {
+// 格式化货币；digits 为小数位数，默认 0（整元），工资实发等可传 2
+export function formatCurrency(amount: number, digits = 0): string {
   const n = Number(amount);
   const safe = Number.isFinite(n) ? n : 0;
+  const fractionDigits = Math.max(0, Math.min(4, Math.floor(Number(digits) || 0)));
   return new Intl.NumberFormat("zh-CN", {
     style: "currency",
     currency: "CNY",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
   }).format(safe);
 }
 

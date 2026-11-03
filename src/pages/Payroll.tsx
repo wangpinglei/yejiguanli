@@ -48,6 +48,11 @@ import {
 } from '@/lib/salary'
 import { personBelongsToUnitInMonth } from '@/lib/unitAssignment'
 
+/** 工资表金额统一展示两位小数 */
+function money(amount: number): string {
+  return formatCurrency(amount, 2)
+}
+
 /** 跳转人员「调整薪酬」并定位字段 */
 function getPersonnelPayHref(
   personnelId: string,
@@ -519,7 +524,7 @@ export default function Payroll() {
                               className="underline-offset-2 hover:underline"
                               title="调整底薪"
                             >
-                              {formatCurrency(row.standardBaseSalary)}
+                              {money(row.standardBaseSalary)}
                             </Link>
                           )}
                         </TableCell>
@@ -532,7 +537,7 @@ export default function Payroll() {
                               className="underline-offset-2 hover:underline"
                               title="调整保密费"
                             >
-                              {formatCurrency(row.paidConfidentialityFee)}
+                              {money(row.paidConfidentialityFee)}
                             </Link>
                           )}
                         </TableCell>
@@ -545,7 +550,7 @@ export default function Payroll() {
                               className="underline-offset-2 hover:underline"
                               title="调整岗位补贴"
                             >
-                              {formatCurrency(row.paidPositionAllowance)}
+                              {money(row.paidPositionAllowance)}
                             </Link>
                           )}
                         </TableCell>
@@ -558,7 +563,7 @@ export default function Payroll() {
                               className="underline-offset-2 hover:underline"
                               title="调整绩效"
                             >
-                              {formatCurrency(row.standardPerformance)}
+                              {money(row.standardPerformance)}
                             </Link>
                           )}
                         </TableCell>
@@ -568,7 +573,7 @@ export default function Payroll() {
                             className="font-medium text-violet-700 underline-offset-2 hover:underline"
                             title="查看个人业绩提成明细（订单金额 / 比例 / 提成）"
                           >
-                            {formatCurrency(row.commission)}
+                            {money(row.commission)}
                           </Link>
                         </TableCell>
                         <TableCell>
@@ -621,7 +626,7 @@ export default function Payroll() {
                               className="underline-offset-2 hover:underline"
                               title="调整底薪"
                             >
-                              {formatCurrency(row.paidBaseSalary)}
+                              {money(row.paidBaseSalary)}
                             </Link>
                           )}
                         </TableCell>
@@ -634,7 +639,7 @@ export default function Payroll() {
                               className="underline-offset-2 hover:underline"
                               title="调整绩效"
                             >
-                              {formatCurrency(row.paidPerformance)}
+                              {money(row.paidPerformance)}
                             </Link>
                           )}
                         </TableCell>
@@ -669,7 +674,7 @@ export default function Payroll() {
                           />
                         </TableCell>
                         <TableCell className="text-right tabular-nums font-semibold text-emerald-700">
-                          {formatCurrency(row.payable)}
+                          {money(row.payable)}
                         </TableCell>
                       </TableRow>
                     )
@@ -689,22 +694,22 @@ export default function Payroll() {
           {rows.length > 0 && (
             <div className="flex flex-wrap gap-4 rounded-lg border bg-muted/30 px-4 py-3 text-sm">
               <span>
-                提成合计 <strong>{formatCurrency(totals.commission)}</strong>
+                提成合计 <strong>{money(totals.commission)}</strong>
               </span>
               <span>
-                实发底薪合计 <strong>{formatCurrency(totals.paidBaseSalary)}</strong>
+                实发底薪合计 <strong>{money(totals.paidBaseSalary)}</strong>
               </span>
               <span>
-                保密费合计 <strong>{formatCurrency(totals.paidConfidentialityFee)}</strong>
+                保密费合计 <strong>{money(totals.paidConfidentialityFee)}</strong>
               </span>
               <span>
-                岗位补贴合计 <strong>{formatCurrency(totals.paidPositionAllowance)}</strong>
+                岗位补贴合计 <strong>{money(totals.paidPositionAllowance)}</strong>
               </span>
               <span>
-                实发绩效合计 <strong>{formatCurrency(totals.paidPerformance)}</strong>
+                实发绩效合计 <strong>{money(totals.paidPerformance)}</strong>
               </span>
               <span className="text-emerald-700">
-                应发合计 <strong>{formatCurrency(totals.payable)}</strong>
+                应发合计 <strong>{money(totals.payable)}</strong>
               </span>
             </div>
           )}
