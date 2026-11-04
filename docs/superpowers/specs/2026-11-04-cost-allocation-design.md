@@ -6,7 +6,9 @@
 
 ## 规则
 
-- 配置 ≥2 个单位且比例合计 100% 时启用；否则沿用调岗按天归属。
+- 模式：`ratio`（按比例，合计 100%）或 `fixedAmount`（固定金额，每行 >0）。
+- 固定金额：各单位按填写金额承担；合计不足实际成本时剩余归主单位，超出则等比缩放。
+- 配置 ≥2 个单位且校验通过时启用；否则沿用调岗按天归属。
 - 仅内部员工；合作方不参与。
 - 请假扣款随分摊；其他加减项挂主单位（`salesUnitId`）。
 - 成本管理 / 盈亏分析通过 `getUnitSalaryCost` 同源计入。
@@ -17,8 +19,9 @@
 
 ```json
 {
+  "mode": "ratio",
   "shares": [{ "salesUnitId": "u1", "ratio": 60 }],
-  "monthOverrides": [{ "yearMonth": "2026-11", "shares": [...] }]
+  "monthOverrides": [{ "yearMonth": "2026-11", "mode": "fixedAmount", "shares": [{ "salesUnitId": "u1", "amount": 3000 }] }]
 }
 ```
 

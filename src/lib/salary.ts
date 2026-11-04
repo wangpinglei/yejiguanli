@@ -16,7 +16,10 @@ import {
 import { getPersonTeamMgmtCommission } from "@/lib/teamMgmtCommission";
 import {
   getCostAllocationRatioForUnit,
+  getCostAllocationUnitIds,
+  getFixedCostTotalForAllocation,
   hasCostAllocation,
+  resolveCostAllocation,
 } from "@/lib/costAllocation";
 import {
   getUnitFixedPayRatioInMonth,
@@ -984,17 +987,14 @@ export function getUnitSalaryCost(
 
   const memberMap = new Map<string, Personnel>();
   personnel.forEach((p) => {
-    const allocRatio = yearMonth
-      ? getCostAllocationRatioForUnit(p, unitId, yearMonth)
-      : getCostAllocationRatioForUnit(p, unitId);
-    const hasAllocShare = allocRatio != null && allocRatio > 0;
+    const allocUnits = getCostAllocationUnitIds(p, yearMonth);
+    const hasAllocShare = allocUnits.includes(unitId);
     const belongsUnit = yearMonth
       ? personBelongsToUnitInMonth(p, unitId, yearMonth)
       : p.salesUnitId === unitId;
     const hasSalesHere = salesPersonIdSet.has(p.id);
-    // 比例分摊命中本单位时也纳入（即使当月无调岗归属日）
+    // 分摊命中本单位时也纳入（即使当月无调岗归属日）
     if (!belongsUnit && !hasSalesHere && !hasAllocShare) return;
-    // 本单位成员：按月在岗；仅因有销售/分摊挂进来的：始终计入
     if (
       belongsUnit
       && !isPersonnelOnDutyInMonth(p, yearMonth)
@@ -1019,12 +1019,10 @@ export function getUnitSalaryCost(
       (a) => a.personnelId === p.id && a.yearMonth === yearMonth
     );
     const unitSalesRecords = buildUnitScopedSalesRecords(salesRecords, unitId, personnel);
-    const allocRatio = yearMonth
-      ? getCostAllocationRatioForUnit(p, unitId, yearMonth)
-      : getCostAllocationRatioForUnit(p, unitId);
-    const useRatioSplit = allocRatio != null && hasCostAllocation(p, yearMonth);
+    const alloc = resolveCostAllocation(p, yearMonth);
+    const useAllocSplit = alloc != null;
 
-    // 提成：始终按本单位成交；固定成本：比例分摊用全月口径再乘比例，否则按归属日
+    // 提成：始终按本单位成交；固定成本：分摊用全月口径再乘权重，否则按归属日
     const commissionCalc = calculateMonthlySalary(
       p,
       unitSalesRecords,
@@ -1049,9 +1047,9 @@ export function getUnitSalaryCost(
     let housingFund = commissionCalc.housingFund;
     let otherBonus = commissionCalc.otherBonus;
     let otherDeduction = commissionCalc.otherDeduction;
+    let allocRatio: number | undefined;
 
-    if (useRatioSplit) {
-      // 全月固定成本（不按单位切天），再按比例拆
+    if (useAllocSplit) {
       const fullCalc = calculateMonthlySalary(
         p,
         salesRecords,
@@ -1066,7 +1064,9 @@ export function getUnitSalaryCost(
           internalSalesRecords: salesRecords,
         },
       );
-      const r = allocRatio || 0;
+      const totalFixed = getFixedCostTotalForAllocation(fullCalc);
+      const r = getCostAllocationRatioForUnit(p, unitId, yearMonth, totalFixed) || 0;
+      allocRatio = r;
       baseSalary = fullCalc.baseSalary * r;
       confidentialityFee = fullCalc.confidentialityFee * r;
       performance = fullCalc.performance * r;
@@ -1074,12 +1074,10 @@ export function getUnitSalaryCost(
       leaveDeduction = fullCalc.leaveDeduction * r;
       socialInsurance = fullCalc.socialInsurance * r;
       housingFund = fullCalc.housingFund * r;
-      // 其他加减项只挂主单位，避免重复计入
       const isPrimary = p.salesUnitId === unitId;
       otherBonus = isPrimary ? fullCalc.otherBonus : 0;
       otherDeduction = isPrimary ? fullCalc.otherDeduction : 0;
     } else if (hasCostAllocation(p, yearMonth)) {
-      // 启用了分摊但不含本单位：固定成本为 0，只保留本单位提成
       baseSalary = 0;
       confidentialityFee = 0;
       performance = 0;
@@ -1123,7 +1121,9 @@ export function getUnitSalaryCost(
       housingFund,
       total,
       adjustment: adj,
-      costAllocationRatio: useRatioSplit ? (allocRatio || 0) : undefined,
+      costAllocationRatio: useAllocSplit && (allocRatio || 0) > 0
+        ? allocRatio
+        : undefined,
     };
   });
 

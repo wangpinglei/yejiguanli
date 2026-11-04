@@ -107,26 +107,35 @@ export interface Personnel {
   /** 薪酬时间轴（试用/转正/调薪）；缺省则仅认当前 salary/社保公积金 */
   payPlans?: PersonnelPayPlan[];
   /**
-   * 固定人力成本跨单位比例分摊（底薪/绩效/补贴/社保公积金企业）。
-   * 有效配置（≥2 单位且合计 100%）时优先生效；否则走调岗按天归属。
+   * 固定人力成本跨单位分摊（底薪/绩效/补贴/社保公积金企业）。
+   * 支持按比例或固定金额；有效配置时优先生效，否则走调岗按天归属。
    */
   costAllocation?: PersonnelCostAllocation;
 }
 
-/** 单个单位的成本分摊比例（百分比，如 60 = 60%） */
+/** 分摊模式：按比例 % / 固定金额 ¥ */
+export type CostAllocationMode = 'ratio' | 'fixedAmount'
+
+/** 单个单位的成本分摊 */
 export interface CostAllocationShare {
   salesUnitId: string;
-  ratio: number;
+  /** 比例模式：百分比，如 60 = 60% */
+  ratio?: number;
+  /** 固定金额模式：元 */
+  amount?: number;
 }
 
 /** 某月覆盖默认分摊 */
 export interface CostAllocationMonthOverride {
   yearMonth: string;
+  mode?: CostAllocationMode;
   shares: CostAllocationShare[];
 }
 
 /** 人员成本分摊配置 */
 export interface PersonnelCostAllocation {
+  /** 默认模式，缺省 ratio */
+  mode?: CostAllocationMode;
   /** 默认分摊 */
   shares?: CostAllocationShare[];
   /** 按月覆盖 */

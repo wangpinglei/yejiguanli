@@ -19,12 +19,14 @@ import {
 } from "@/lib/salary";
 import {
   isValidCostAllocationShares,
+  normalizeCostAllocationMode,
   normalizeCostAllocationShares,
   parsePersonnelCostAllocation,
 } from "@/lib/costAllocation";
 import { loadPayrollScopeUnitIds } from "@/lib/payrollCalc";
 import { isOnDutyPerson } from "@/lib/personnelDuty";
 import type {
+  CostAllocationMode,
   CostAllocationMonthOverride,
   CostAllocationShare,
   Personnel,
@@ -119,7 +121,9 @@ const DEFAULT_FORM = {
   status: "active" as Personnel["status"],
   /** 默认内部员工，核算底薪/社保；关闭后只核算提成 */
   isInternalEmployee: true,
-  /** 固定成本默认分摊（单位+比例%） */
+  /** 分摊模式：按比例 / 固定金额 */
+  costAllocationMode: 'ratio' as CostAllocationMode,
+  /** 固定成本默认分摊（单位+比例%或金额） */
   costAllocationShares: [] as CostAllocationShare[],
   /** 月度覆盖 */
   costAllocationMonthOverrides: [] as CostAllocationMonthOverride[],
@@ -520,6 +524,7 @@ export default function PersonnelPage() {
       housingFund: 0,
       socialInsurancePersonal: 0,
       housingFundPersonal: 0,
+      costAllocationMode: 'ratio',
       costAllocationShares: [],
       costAllocationMonthOverrides: [],
       salesUnitId: salesUnits[0]?.id || "",
@@ -565,11 +570,15 @@ export default function PersonnelPage() {
       resignDate: person.resignDate || "",
       status: person.status,
       isInternalEmployee: internal,
-      costAllocationShares: alloc?.shares ? [...alloc.shares] : [],
+      costAllocationMode: normalizeCostAllocationMode(alloc?.mode),
+      costAllocationShares: alloc?.shares
+        ? alloc.shares.map((s) => ({ ...s }))
+        : [],
       costAllocationMonthOverrides: alloc?.monthOverrides
         ? alloc.monthOverrides.map((m) => ({
           yearMonth: m.yearMonth,
-          shares: [...m.shares],
+          mode: normalizeCostAllocationMode(m.mode ?? alloc?.mode),
+          shares: m.shares.map((s) => ({ ...s })),
         }))
         : [],
     });
@@ -599,6 +608,7 @@ export default function PersonnelPage() {
     const {
       socialInsurancePersonal,
       housingFundPersonal,
+      costAllocationMode,
       costAllocationShares,
       costAllocationMonthOverrides,
       ...formRest
@@ -613,34 +623,49 @@ export default function PersonnelPage() {
           performance: 0,
           positionAllowance: 0,
         }
+    const mode = normalizeCostAllocationMode(costAllocationMode)
     const shares = isInternal
-      ? normalizeCostAllocationShares(costAllocationShares)
+      ? normalizeCostAllocationShares(costAllocationShares, mode)
       : []
-    if (isInternal && shares.length > 0 && !isValidCostAllocationShares(shares)) {
-      alert('成本分摊需至少 2 个单位，且比例合计为 100%')
+    if (isInternal && shares.length > 0 && !isValidCostAllocationShares(shares, mode)) {
+      alert(
+        mode === 'fixedAmount'
+          ? '固定金额分摊需至少 2 个单位，且每行金额 > 0'
+          : '比例分摊需至少 2 个单位，且比例合计为 100%',
+      )
       return
     }
     const monthOverrides = isInternal
       ? (costAllocationMonthOverrides || [])
-        .map((m) => ({
-          yearMonth: String(m.yearMonth || '').slice(0, 7),
-          shares: normalizeCostAllocationShares(m.shares),
-        }))
-        .filter((m) => m.yearMonth && isValidCostAllocationShares(m.shares))
+        .map((m) => {
+          const mMode = normalizeCostAllocationMode(m.mode ?? mode)
+          return {
+            yearMonth: String(m.yearMonth || '').slice(0, 7),
+            mode: mMode,
+            shares: normalizeCostAllocationShares(m.shares, mMode),
+          }
+        })
+        .filter((m) => m.yearMonth && isValidCostAllocationShares(m.shares, m.mode))
       : []
     for (const m of costAllocationMonthOverrides || []) {
-      const normalized = normalizeCostAllocationShares(m.shares)
+      const mMode = normalizeCostAllocationMode(m.mode ?? mode)
+      const normalized = normalizeCostAllocationShares(m.shares, mMode)
       if (
         String(m.yearMonth || '').slice(0, 7)
         && normalized.length > 0
-        && !isValidCostAllocationShares(normalized)
+        && !isValidCostAllocationShares(normalized, mMode)
       ) {
-        alert(`月度分摊 ${m.yearMonth} 需至少 2 个单位且比例合计 100%`)
+        alert(
+          mMode === 'fixedAmount'
+            ? `月度分摊 ${m.yearMonth}：固定金额需至少 2 个单位且每行金额 > 0`
+            : `月度分摊 ${m.yearMonth}：比例需至少 2 个单位且合计 100%`,
+        )
         return
       }
     }
     const costAllocation = isInternal && (shares.length > 0 || monthOverrides.length > 0)
       ? {
+        mode,
         shares: shares.length > 0 ? shares : undefined,
         monthOverrides: monthOverrides.length > 0 ? monthOverrides : undefined,
       }
@@ -1740,6 +1765,7 @@ export default function PersonnelPage() {
                         housingFund: 0,
                         socialInsurancePersonal: 0,
                         housingFundPersonal: 0,
+                        costAllocationMode: 'ratio',
                         costAllocationShares: [],
                         costAllocationMonthOverrides: [],
                         salary: {
@@ -2038,20 +2064,25 @@ export default function PersonnelPage() {
                   </div>
                 )}
 
-                {/* 固定成本跨单位比例分摊 */}
+                {/* 固定成本跨单位分摊：按比例 / 固定金额 */}
                 {form.isInternalEmployee && (() => {
+                  const mode = normalizeCostAllocationMode(form.costAllocationMode)
+                  const isFixed = mode === 'fixedAmount'
                   const shareSum = form.costAllocationShares.reduce(
-                    (s, r) => s + (Number(r.ratio) || 0),
+                    (s, r) => s + (isFixed
+                      ? (Number(r.amount) || 0)
+                      : (Number(r.ratio) || 0)),
                     0,
                   )
                   const sharesOk =
                     form.costAllocationShares.length === 0
                     || isValidCostAllocationShares(
-                      normalizeCostAllocationShares(form.costAllocationShares),
+                      normalizeCostAllocationShares(form.costAllocationShares, mode),
+                      mode,
                     )
                   return (
                     <div className="space-y-3 rounded-lg border border-sky-200 bg-sky-50/30 p-4">
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
                         <h4 className="text-sm font-semibold">成本分摊（多单位）</h4>
                         <Badge
                           variant="outline"
@@ -2065,12 +2096,45 @@ export default function PersonnelPage() {
                         >
                           {form.costAllocationShares.length === 0
                             ? '未启用 · 按调岗天数'
-                            : `合计 ${shareSum.toFixed(1)}%`}
+                            : isFixed
+                              ? `合计 ¥${shareSum.toFixed(0)}`
+                              : `合计 ${shareSum.toFixed(1)}%`}
                         </Badge>
                       </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Label className="text-xs text-muted-foreground">分摊方式</Label>
+                        <div className="inline-flex rounded-md border bg-white p-0.5">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={mode === 'ratio' ? 'default' : 'ghost'}
+                            className="h-7 px-3 text-xs"
+                            onClick={() => setForm({
+                              ...form,
+                              costAllocationMode: 'ratio',
+                            })}
+                          >
+                            按比例
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={mode === 'fixedAmount' ? 'default' : 'ghost'}
+                            className="h-7 px-3 text-xs"
+                            onClick={() => setForm({
+                              ...form,
+                              costAllocationMode: 'fixedAmount',
+                            })}
+                          >
+                            固定金额
+                          </Button>
+                        </div>
+                      </div>
                       <p className="text-xs text-muted-foreground">
-                        底薪、保密费、绩效、岗位补贴、社保/公积金企业部分按比例计入各单位成本；
-                        提成仍跟成交单位。至少 2 个单位且合计 100% 才生效。
+                        底薪、保密费、绩效、岗位补贴、社保/公积金企业部分计入各单位成本；提成仍跟成交单位。
+                        {isFixed
+                          ? ' 固定金额：各单位按填写金额承担，合计不足实际成本时剩余归主单位，超出则按金额等比缩放。'
+                          : ' 按比例：至少 2 个单位且合计 100% 才生效。'}
                       </p>
                       <div className="space-y-2">
                         {form.costAllocationShares.map((row, idx) => (
@@ -2095,21 +2159,23 @@ export default function PersonnelPage() {
                                 </SelectContent>
                               </Select>
                             </div>
-                            <div className="w-28 space-y-1">
-                              <Label className="text-xs">比例 %</Label>
+                            <div className="w-32 space-y-1">
+                              <Label className="text-xs">
+                                {isFixed ? '金额 (¥)' : '比例 %'}
+                              </Label>
                               <Input
                                 type="number"
                                 className="h-9"
-                                value={row.ratio}
+                                value={isFixed ? (row.amount ?? '') : (row.ratio ?? '')}
                                 onChange={(e) => {
                                   const next = [...form.costAllocationShares]
-                                  next[idx] = {
-                                    ...next[idx],
-                                    ratio: Number(e.target.value),
-                                  }
+                                  const n = Number(e.target.value)
+                                  next[idx] = isFixed
+                                    ? { ...next[idx], amount: n, ratio: 0 }
+                                    : { ...next[idx], ratio: n, amount: 0 }
                                   setForm({ ...form, costAllocationShares: next })
                                 }}
-                                placeholder="50"
+                                placeholder={isFixed ? '3000' : '50'}
                               />
                             </div>
                             <Button
@@ -2143,7 +2209,8 @@ export default function PersonnelPage() {
                                   ...form.costAllocationShares,
                                   {
                                     salesUnitId: form.salesUnitId || salesUnits[0]?.id || '',
-                                    ratio: 0,
+                                    ratio: isFixed ? 0 : 0,
+                                    amount: isFixed ? 0 : 0,
                                   },
                                 ],
                               })
@@ -2178,26 +2245,41 @@ export default function PersonnelPage() {
                             className="h-7 text-xs"
                             onClick={() => {
                               const ym = new Date().toISOString().slice(0, 7)
+                              const fallbackShares: CostAllocationShare[] = isFixed
+                                ? [
+                                  {
+                                    salesUnitId: form.salesUnitId || '',
+                                    amount: 0,
+                                  },
+                                  {
+                                    salesUnitId: salesUnits.find(
+                                      (u) => u.id !== form.salesUnitId,
+                                    )?.id || '',
+                                    amount: 0,
+                                  },
+                                ]
+                                : [
+                                  {
+                                    salesUnitId: form.salesUnitId || '',
+                                    ratio: 50,
+                                  },
+                                  {
+                                    salesUnitId: salesUnits.find(
+                                      (u) => u.id !== form.salesUnitId,
+                                    )?.id || '',
+                                    ratio: 50,
+                                  },
+                                ]
                               setForm({
                                 ...form,
                                 costAllocationMonthOverrides: [
                                   ...form.costAllocationMonthOverrides,
                                   {
                                     yearMonth: ym,
+                                    mode,
                                     shares: form.costAllocationShares.length >= 2
                                       ? form.costAllocationShares.map((s) => ({ ...s }))
-                                      : [
-                                        {
-                                          salesUnitId: form.salesUnitId || '',
-                                          ratio: 50,
-                                        },
-                                        {
-                                          salesUnitId: salesUnits.find(
-                                            (u) => u.id !== form.salesUnitId,
-                                          )?.id || '',
-                                          ratio: 50,
-                                        },
-                                      ],
+                                      : fallbackShares,
                                   },
                                 ],
                               })
@@ -2206,7 +2288,10 @@ export default function PersonnelPage() {
                             + 添加月份
                           </Button>
                         </div>
-                        {form.costAllocationMonthOverrides.map((mo, mi) => (
+                        {form.costAllocationMonthOverrides.map((mo, mi) => {
+                          const moMode = normalizeCostAllocationMode(mo.mode ?? mode)
+                          const moFixed = moMode === 'fixedAmount'
+                          return (
                           <div
                             key={mi}
                             className="space-y-2 rounded-md border bg-white/80 p-3"
@@ -2230,6 +2315,40 @@ export default function PersonnelPage() {
                                     })
                                   }}
                                 />
+                              </div>
+                              <div className="inline-flex rounded-md border p-0.5">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant={moMode === 'ratio' ? 'secondary' : 'ghost'}
+                                  className="h-7 px-2 text-[11px]"
+                                  onClick={() => {
+                                    const next = [...form.costAllocationMonthOverrides]
+                                    next[mi] = { ...next[mi], mode: 'ratio' }
+                                    setForm({
+                                      ...form,
+                                      costAllocationMonthOverrides: next,
+                                    })
+                                  }}
+                                >
+                                  比例
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant={moMode === 'fixedAmount' ? 'secondary' : 'ghost'}
+                                  className="h-7 px-2 text-[11px]"
+                                  onClick={() => {
+                                    const next = [...form.costAllocationMonthOverrides]
+                                    next[mi] = { ...next[mi], mode: 'fixedAmount' }
+                                    setForm({
+                                      ...form,
+                                      costAllocationMonthOverrides: next,
+                                    })
+                                  }}
+                                >
+                                  金额
+                                </Button>
                               </div>
                               <Button
                                 type="button"
@@ -2275,15 +2394,15 @@ export default function PersonnelPage() {
                                 </Select>
                                 <Input
                                   type="number"
-                                  className="h-8 w-24"
-                                  value={row.ratio}
+                                  className="h-8 w-28"
+                                  value={moFixed ? (row.amount ?? '') : (row.ratio ?? '')}
                                   onChange={(e) => {
                                     const next = [...form.costAllocationMonthOverrides]
                                     const shares = [...next[mi].shares]
-                                    shares[si] = {
-                                      ...shares[si],
-                                      ratio: Number(e.target.value),
-                                    }
+                                    const n = Number(e.target.value)
+                                    shares[si] = moFixed
+                                      ? { ...shares[si], amount: n, ratio: 0 }
+                                      : { ...shares[si], ratio: n, amount: 0 }
                                     next[mi] = { ...next[mi], shares }
                                     setForm({
                                       ...form,
@@ -2291,11 +2410,14 @@ export default function PersonnelPage() {
                                     })
                                   }}
                                 />
-                                <span className="text-xs text-muted-foreground">%</span>
+                                <span className="text-xs text-muted-foreground">
+                                  {moFixed ? '元' : '%'}
+                                </span>
                               </div>
                             ))}
                           </div>
-                        ))}
+                          )
+                        })}
                       </div>
                     </div>
                   )

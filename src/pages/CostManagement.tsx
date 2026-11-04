@@ -1045,6 +1045,9 @@ export default function CostManagement() {
                                 const allocPct = d.costAllocationRatio != null
                                   ? Math.round(d.costAllocationRatio * 1000) / 10
                                   : null
+                                const allocMode = personMeta?.costAllocation?.mode === 'fixedAmount'
+                                  ? '金额'
+                                  : '比例'
                                 return (
                                 <div
                                   key={d.personId}
@@ -1057,9 +1060,13 @@ export default function CostManagement() {
                                         <Badge
                                           variant="outline"
                                           className="shrink-0 border-sky-300 px-1 py-0 text-[10px] text-sky-700"
-                                          title="固定成本按比例分摊到本单位"
+                                          title={
+                                            allocMode === '金额'
+                                              ? '固定成本按固定金额分摊到本单位'
+                                              : '固定成本按比例分摊到本单位'
+                                          }
                                         >
-                                          分摊 {allocPct}%
+                                          {allocMode} {allocPct}%
                                         </Badge>
                                       ) : null}
                                       {isDistributionPerson ? (
