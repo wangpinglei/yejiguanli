@@ -901,7 +901,7 @@ export default function Payroll() {
                       <TableHead className="min-w-[120px] bg-violet-50/80 text-right">
                         应纳税所得额 C
                         <div className="text-[10px] font-normal text-muted-foreground">
-                          默认同左+应发
+                          税基+本期应发
                         </div>
                       </TableHead>
                     )}
@@ -1352,27 +1352,44 @@ export default function Payroll() {
                                   <Input
                                     type="number"
                                     step="0.01"
-                                    className="ml-auto h-8 w-[100px] text-right"
-                                    title="应纳税所得额 C；空=累计扣税基数+本期应发"
-                                    placeholder={String(row.autoTaxableIncome ?? '')}
-                                    defaultValue={
-                                      entry.taxableIncomeOverride == null
-                                        ? ''
-                                        : entry.taxableIncomeOverride
+                                    className="ml-auto h-8 w-[110px] text-right tabular-nums"
+                                    title="应纳税所得额 C = 累计扣税基数 + 本期应发；可改"
+                                    value={
+                                      entry.taxableIncomeOverride != null
+                                        ? entry.taxableIncomeOverride
+                                        : (row.autoTaxableIncome
+                                          ?? row.cumulativeTaxable
+                                          ?? 0)
                                     }
-                                    key={`taxable-${row.personnelId}-${entry.taxableIncomeOverride ?? 'auto'}-${row.autoTaxableIncome ?? 0}`}
+                                    onChange={(e) => {
+                                      const raw = e.target.value.trim()
+                                      updateEntry(row.personnelId, {
+                                        taxableIncomeOverride:
+                                          raw === '' ? null : Number(raw) || 0,
+                                      })
+                                    }}
                                     onBlur={(e) => {
                                       const raw = e.target.value.trim()
-                                      const next =
-                                        raw === '' ? null : Number(raw) || 0
-                                      if (next === (entry.taxableIncomeOverride ?? null)) return
-                                      updateEntry(row.personnelId, {
-                                        taxableIncomeOverride: next,
-                                      })
+                                      const auto =
+                                        Number(row.autoTaxableIncome) || 0
+                                      if (raw === '') {
+                                        updateEntry(row.personnelId, {
+                                          taxableIncomeOverride: null,
+                                        })
+                                        return
+                                      }
+                                      const v = Number(raw) || 0
+                                      // 与自动值相同则清回自动，避免多余覆盖
+                                      if (Math.abs(v - auto) < 0.005) {
+                                        updateEntry(row.personnelId, {
+                                          taxableIncomeOverride: null,
+                                        })
+                                      }
                                     }}
                                   />
                                   <div className="mt-1 text-right text-[10px] text-muted-foreground tabular-nums">
-                                    C={money(row.cumulativeTaxable || 0)}
+                                    {money(row.cumulativeTaxBase || 0)}+
+                                    {money(row.payableForTax ?? row.payable ?? 0)}
                                   </div>
                                 </TableCell>
                               </>
