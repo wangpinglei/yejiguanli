@@ -98,7 +98,8 @@ function showPayrollCol(
     return col === 'core' || col === 'insurance' || col === 'salary'
   }
   if (mode === 'otherDeduct') {
-    return col === 'core' || col === 'salary' || col === 'special'
+    // 提成查阅 → 加/减项明细 → 应发 → 专项附加
+    return col === 'core' || col === 'salary' || col === 'adjust' || col === 'special'
   }
   // tax
   return col === 'core' || col === 'special' || col === 'tax' || col === 'salary'
@@ -109,7 +110,8 @@ function payrollColSpan(mode: PayrollEntryMode): number {
   if (mode === 'attendance') return 2 + 1 + 1 + 2 + 1 // 标准底薪 + 实际/缺勤/应出勤 + 实发底薪
   if (mode === 'score') return 2 + 1 + 1 + 1 // 标准绩效 + 分数 + 实发绩效
   if (mode === 'insurance') return 2 + 1 + 4 + 1 // 应发 + 企业/个人四列 + 操作
-  if (mode === 'otherDeduct') return 2 + 1 + 1 + 1 // 应发 + 专项附加 + 操作
+  // 提成 + 加项 + 减项 + 应发 + 专项附加 + 操作
+  if (mode === 'otherDeduct') return 2 + 1 + 1 + 1 + 1 + 1 + 1
   // 应发 + 专项 + 期初三列 + 个税/实发（期初列仅 10 月起展示，colSpan 取上限）
   if (mode === 'tax') return 2 + 1 + 1 + 3 + 2
   return 18 // 最终表含企业/个人四列、专项、不含出勤三列
@@ -655,7 +657,8 @@ export default function Payroll() {
           )}
           {calcPhase === 'wizard' && entryMode === 'otherDeduct' && (
             <p className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-900">
-              步骤 4/5 其他预扣项目 — 专项附加按个税档案固定展示；不对时点「去调整」或「批量调整」写入档案（有修改记录）。
+              步骤 4/5 其他预扣项目 — 先核对业绩提成（可点进明细修正），再录入加项/减项明细与金额；
+              专项附加按个税档案展示，不对时点「去调整」或「批量调整」。
             </p>
           )}
           {calcPhase === 'wizard' && entryMode === 'tax' && (() => {
@@ -767,7 +770,9 @@ export default function Payroll() {
                   <TableRow>
                     <TableHead className="min-w-[120px]">单位</TableHead>
                     <TableHead className="min-w-[88px]">姓名</TableHead>
-                    {showPayrollCol(entryMode, 'salary') && entryMode !== 'score' && (
+                    {showPayrollCol(entryMode, 'salary') &&
+                      entryMode !== 'score' &&
+                      entryMode !== 'otherDeduct' && (
                       <TableHead className="text-right">标准底薪</TableHead>
                     )}
                     {showPayrollCol(entryMode, 'salary') && entryMode === 'all' && (
@@ -780,8 +785,11 @@ export default function Payroll() {
                       (entryMode === 'all' || entryMode === 'score') && (
                       <TableHead className="text-right">标准绩效</TableHead>
                     )}
-                    {showPayrollCol(entryMode, 'salary') && entryMode === 'all' && (
-                      <TableHead className="text-right">业绩提成</TableHead>
+                    {showPayrollCol(entryMode, 'salary') &&
+                      (entryMode === 'all' || entryMode === 'otherDeduct') && (
+                      <TableHead className="text-right min-w-[100px] bg-violet-50/80">
+                        业绩提成
+                      </TableHead>
                     )}
                     {showPayrollCol(entryMode, 'attendance') && (
                       <TableHead className="w-[100px] min-w-[100px] bg-sky-50/80 text-right">
@@ -810,10 +818,26 @@ export default function Payroll() {
                       <TableHead className="text-right">实发绩效</TableHead>
                     )}
                     {showPayrollCol(entryMode, 'adjust') && (
-                      <TableHead className="min-w-[148px]">加项 / 明细</TableHead>
+                      <TableHead
+                        className={
+                          entryMode === 'otherDeduct'
+                            ? 'min-w-[148px] bg-orange-50/80'
+                            : 'min-w-[148px]'
+                        }
+                      >
+                        加项 / 明细
+                      </TableHead>
                     )}
                     {showPayrollCol(entryMode, 'adjust') && (
-                      <TableHead className="min-w-[148px]">减项 / 明细</TableHead>
+                      <TableHead
+                        className={
+                          entryMode === 'otherDeduct'
+                            ? 'min-w-[148px] bg-orange-50/80'
+                            : 'min-w-[148px]'
+                        }
+                      >
+                        减项 / 明细
+                      </TableHead>
                     )}
                     {showPayrollCol(entryMode, 'salary') &&
                       (entryMode === 'all' ||
@@ -913,7 +937,9 @@ export default function Payroll() {
                             )}
                           </div>
                         </TableCell>
-                        {showPayrollCol(entryMode, 'salary') && entryMode !== 'score' && (
+                        {showPayrollCol(entryMode, 'salary') &&
+                          entryMode !== 'score' &&
+                          entryMode !== 'otherDeduct' && (
                         <TableCell className="text-right tabular-nums text-muted-foreground">
                           {onlyCommission ? (
                             '—'
@@ -974,8 +1000,15 @@ export default function Payroll() {
                           )}
                         </TableCell>
                         )}
-                        {showPayrollCol(entryMode, 'salary') && entryMode === 'all' && (
-                        <TableCell className="text-right tabular-nums">
+                        {showPayrollCol(entryMode, 'salary') &&
+                          (entryMode === 'all' || entryMode === 'otherDeduct') && (
+                        <TableCell
+                          className={
+                            entryMode === 'otherDeduct'
+                              ? 'bg-violet-50/40 text-right tabular-nums'
+                              : 'text-right tabular-nums'
+                          }
+                        >
                           <Link
                             to={`/payroll/commission-detail?personnelId=${encodeURIComponent(row.personnelId)}&unitId=${encodeURIComponent(row.unitId)}&yearMonth=${encodeURIComponent(yearMonth)}`}
                             className="font-medium text-violet-700 underline-offset-2 hover:underline"
@@ -1094,7 +1127,9 @@ export default function Payroll() {
                         </TableCell>
                         )}
                         {showPayrollCol(entryMode, 'adjust') && (
-                        <TableCell>
+                        <TableCell
+                          className={entryMode === 'otherDeduct' ? 'bg-orange-50/40' : undefined}
+                        >
                           <MPayrollAdjCell
                             kind="bonus"
                             amount={entry.otherBonus || 0}
@@ -1111,7 +1146,9 @@ export default function Payroll() {
                         </TableCell>
                         )}
                         {showPayrollCol(entryMode, 'adjust') && (
-                        <TableCell>
+                        <TableCell
+                          className={entryMode === 'otherDeduct' ? 'bg-orange-50/40' : undefined}
+                        >
                           <MPayrollAdjCell
                             kind="deduction"
                             amount={entry.otherDeduction || 0}
