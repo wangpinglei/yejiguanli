@@ -101,9 +101,11 @@ export function parsePersonnelCostAllocation(
         (m) => m.yearMonth && isValidCostAllocationShares(m.shares, m.mode),
       )
     : []
+  const effectiveFrom = String(data.effectiveFrom || '').slice(0, 7)
   if (shares.length === 0 && monthOverrides.length === 0) return undefined
   return {
     mode,
+    effectiveFrom: /^\d{4}-\d{2}$/.test(effectiveFrom) ? effectiveFrom : undefined,
     shares: shares.length > 0 ? shares : undefined,
     monthOverrides: monthOverrides.length > 0 ? monthOverrides : undefined,
   }
@@ -130,6 +132,7 @@ export function resolveCostAllocation(
   const cfg = person.costAllocation
   if (!cfg) return null
   const defaultMode = normalizeCostAllocationMode(cfg.mode)
+  // 月度覆盖：指定月直接用覆盖配置（可早于生效月）
   if (yearMonth && Array.isArray(cfg.monthOverrides)) {
     const hit = cfg.monthOverrides.find((m) => m.yearMonth === yearMonth)
     if (hit) {
@@ -145,6 +148,15 @@ export function resolveCostAllocation(
   }
   const shares = normalizeCostAllocationShares(cfg.shares, defaultMode)
   if (!isValidCostAllocationShares(shares, defaultMode)) return null
+  // 默认分摊：未到生效月则不启用（走调岗按天）
+  const effectiveFrom = String(cfg.effectiveFrom || '').slice(0, 7)
+  if (
+    yearMonth
+    && /^\d{4}-\d{2}$/.test(effectiveFrom)
+    && yearMonth < effectiveFrom
+  ) {
+    return null
+  }
   return {
     mode: defaultMode,
     shares,

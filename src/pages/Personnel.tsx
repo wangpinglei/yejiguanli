@@ -123,6 +123,8 @@ const DEFAULT_FORM = {
   isInternalEmployee: true,
   /** 分摊模式：按比例 / 固定金额 */
   costAllocationMode: 'ratio' as CostAllocationMode,
+  /** 默认分摊生效起始月 YYYY-MM */
+  costAllocationEffectiveFrom: '',
   /** 固定成本默认分摊（单位+比例%或金额） */
   costAllocationShares: [] as CostAllocationShare[],
   /** 月度覆盖 */
@@ -525,6 +527,7 @@ export default function PersonnelPage() {
       socialInsurancePersonal: 0,
       housingFundPersonal: 0,
       costAllocationMode: 'ratio',
+      costAllocationEffectiveFrom: new Date().toISOString().slice(0, 7),
       costAllocationShares: [],
       costAllocationMonthOverrides: [],
       salesUnitId: salesUnits[0]?.id || "",
@@ -571,6 +574,11 @@ export default function PersonnelPage() {
       status: person.status,
       isInternalEmployee: internal,
       costAllocationMode: normalizeCostAllocationMode(alloc?.mode),
+      costAllocationEffectiveFrom:
+        alloc?.effectiveFrom
+        || (alloc?.shares?.length
+          ? new Date().toISOString().slice(0, 7)
+          : ''),
       costAllocationShares: alloc?.shares
         ? alloc.shares.map((s) => ({ ...s }))
         : [],
@@ -609,6 +617,7 @@ export default function PersonnelPage() {
       socialInsurancePersonal,
       housingFundPersonal,
       costAllocationMode,
+      costAllocationEffectiveFrom,
       costAllocationShares,
       costAllocationMonthOverrides,
       ...formRest
@@ -627,12 +636,17 @@ export default function PersonnelPage() {
     const shares = isInternal
       ? normalizeCostAllocationShares(costAllocationShares, mode)
       : []
+    const effectiveFrom = String(costAllocationEffectiveFrom || '').slice(0, 7)
     if (isInternal && shares.length > 0 && !isValidCostAllocationShares(shares, mode)) {
       alert(
         mode === 'fixedAmount'
           ? '固定金额分摊需至少 2 个单位，且每行金额 > 0'
           : '比例分摊需至少 2 个单位，且比例合计为 100%',
       )
+      return
+    }
+    if (isInternal && shares.length > 0 && !/^\d{4}-\d{2}$/.test(effectiveFrom)) {
+      alert('请填写成本分摊的生效月份')
       return
     }
     const monthOverrides = isInternal
@@ -666,6 +680,7 @@ export default function PersonnelPage() {
     const costAllocation = isInternal && (shares.length > 0 || monthOverrides.length > 0)
       ? {
         mode,
+        effectiveFrom: shares.length > 0 ? effectiveFrom : undefined,
         shares: shares.length > 0 ? shares : undefined,
         monthOverrides: monthOverrides.length > 0 ? monthOverrides : undefined,
       }
@@ -1766,6 +1781,7 @@ export default function PersonnelPage() {
                         socialInsurancePersonal: 0,
                         housingFundPersonal: 0,
                         costAllocationMode: 'ratio',
+                        costAllocationEffectiveFrom: '',
                         costAllocationShares: [],
                         costAllocationMonthOverrides: [],
                         salary: {
@@ -2101,40 +2117,56 @@ export default function PersonnelPage() {
                               : `合计 ${shareSum.toFixed(1)}%`}
                         </Badge>
                       </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Label className="text-xs text-muted-foreground">分摊方式</Label>
-                        <div className="inline-flex rounded-md border bg-white p-0.5">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant={mode === 'ratio' ? 'default' : 'ghost'}
-                            className="h-7 px-3 text-xs"
-                            onClick={() => setForm({
+                      <div className="flex flex-wrap items-end gap-3">
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">分摊方式</Label>
+                          <div className="inline-flex rounded-md border bg-white p-0.5">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant={mode === 'ratio' ? 'default' : 'ghost'}
+                              className="h-8 px-3 text-xs"
+                              onClick={() => setForm({
+                                ...form,
+                                costAllocationMode: 'ratio',
+                              })}
+                            >
+                              按比例
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant={mode === 'fixedAmount' ? 'default' : 'ghost'}
+                              className="h-8 px-3 text-xs"
+                              onClick={() => setForm({
+                                ...form,
+                                costAllocationMode: 'fixedAmount',
+                              })}
+                            >
+                              固定金额
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">生效月份 *</Label>
+                          <Input
+                            type="month"
+                            className="h-8 w-40"
+                            value={form.costAllocationEffectiveFrom}
+                            onChange={(e) => setForm({
                               ...form,
-                              costAllocationMode: 'ratio',
+                              costAllocationEffectiveFrom: e.target.value,
                             })}
-                          >
-                            按比例
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant={mode === 'fixedAmount' ? 'default' : 'ghost'}
-                            className="h-7 px-3 text-xs"
-                            onClick={() => setForm({
-                              ...form,
-                              costAllocationMode: 'fixedAmount',
-                            })}
-                          >
-                            固定金额
-                          </Button>
+                          />
                         </div>
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        底薪、保密费、绩效、岗位补贴、社保/公积金企业部分计入各单位成本；提成仍跟成交单位。
+                        从生效月份（含）起按下方规则分摊；更早月份仍按调岗天数。
+                        底薪、保密费、绩效、岗位补贴、社保/公积金企业部分计入各单位；提成仍跟成交单位。
                         {isFixed
-                          ? ' 固定金额：各单位按填写金额承担，合计不足实际成本时剩余归主单位，超出则按金额等比缩放。'
-                          : ' 按比例：至少 2 个单位且合计 100% 才生效。'}
+                          ? ' 固定金额：合计不足时剩余归主单位，超出则等比缩放。'
+                          : ' 按比例：至少 2 个单位且合计 100%。'}
+                        「月度覆盖」可单独改某一个月。
                       </p>
                       <div className="space-y-2">
                         {form.costAllocationShares.map((row, idx) => (

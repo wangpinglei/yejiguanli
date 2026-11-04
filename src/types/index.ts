@@ -136,9 +136,14 @@ export interface CostAllocationMonthOverride {
 export interface PersonnelCostAllocation {
   /** 默认模式，缺省 ratio */
   mode?: CostAllocationMode;
+  /**
+   * 默认分摊生效起始月（YYYY-MM，含当月）。
+   * 该月之前仍按调岗天数；空=不限（兼容旧数据）。
+   */
+  effectiveFrom?: string;
   /** 默认分摊 */
   shares?: CostAllocationShare[];
-  /** 按月覆盖 */
+  /** 按月覆盖（仅覆盖指定月，不受 effectiveFrom 限制） */
   monthOverrides?: CostAllocationMonthOverride[];
 }
 
