@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Receipt } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -18,12 +19,13 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
+import { useData } from '@/context/DataContext'
 import { formatCurrency } from '@/lib/format'
 import {
   calcSpecialAdditionalMonthly,
+  clearLocalTaxProfile,
   createEmptySpecialAdditional,
   loadTaxProfile,
-  saveTaxProfile,
   SPECIAL_ADDITIONAL_STANDARDS as S,
   type ContinuingEduMode,
   type PersonnelTaxProfile,
@@ -38,19 +40,29 @@ type Props = {
 }
 
 export default function MTaxProfileDialog({ person, open, onOpenChange }: Props) {
+  const { updatePersonnel } = useData()
   const [special, setSpecial] = useState<SpecialAdditionalDeduction>(createEmptySpecialAdditional())
   const [socialPersonal, setSocialPersonal] = useState(0)
   const [housingPersonal, setHousingPersonal] = useState(0)
+  const [socialEmployer, setSocialEmployer] = useState(0)
+  const [housingEmployer, setHousingEmployer] = useState(0)
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (!open || !person) return
-    const profile = loadTaxProfile(person.id, {
-      socialInsurance: person.socialInsurance,
-      housingFund: person.housingFund,
-    })
+    const profile = loadTaxProfile(
+      person.id,
+      {
+        socialInsurance: person.socialInsurance,
+        housingFund: person.housingFund,
+      },
+      person.taxProfile as Partial<PersonnelTaxProfile> | undefined,
+    )
     setSpecial({ ...createEmptySpecialAdditional(), ...profile.special })
     setSocialPersonal(profile.socialInsurancePersonal)
     setHousingPersonal(profile.housingFundPersonal)
+    setSocialEmployer(Number(person.socialInsurance) || 0)
+    setHousingEmployer(Number(person.housingFund) || 0)
   }, [open, person])
 
   const monthlySpecial = useMemo(() => calcSpecialAdditionalMonthly(special), [special])
@@ -65,7 +77,7 @@ export default function MTaxProfileDialog({ person, open, onOpenChange }: Props)
     })
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!person) return
     const profile: PersonnelTaxProfile = {
       personnelId: person.id,
@@ -74,8 +86,21 @@ export default function MTaxProfileDialog({ person, open, onOpenChange }: Props)
       housingFundPersonal: Number(housingPersonal) || 0,
       updatedAt: new Date().toISOString(),
     }
-    saveTaxProfile(profile)
-    onOpenChange(false)
+    setSaving(true)
+    try {
+      await updatePersonnel(person.id, {
+        taxProfile: profile,
+        socialInsurance: Number(socialEmployer) || 0,
+        housingFund: Number(housingEmployer) || 0,
+      })
+      clearLocalTaxProfile(person.id)
+      toast.success('个税扣除档案已保存')
+      onOpenChange(false)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '保存失败')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -91,8 +116,7 @@ export default function MTaxProfileDialog({ person, open, onOpenChange }: Props)
         {person && (
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
             <p className="text-sm text-muted-foreground">
-              专项附加按固定标准勾选；社保/公积金个人默认用于工资表代扣（一期用档案金额预填，可改）。
-              数据暂存本机，未上线同步服务器。
+              专项附加按固定标准勾选；个人缴纳默认用于工资代扣，档案社保/公积金作单位成本参考，均可编辑并保存到人员档案。
             </p>
 
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -113,18 +137,26 @@ export default function MTaxProfileDialog({ person, open, onOpenChange }: Props)
                 />
               </div>
               <div className="space-y-1">
-                <Label className="text-muted-foreground">档案社保（单位成本参考）</Label>
-                <Input type="number" value={person.socialInsurance || 0} disabled />
+                <Label>档案社保（单位成本参考）</Label>
+                <Input
+                  type="number"
+                  value={socialEmployer}
+                  onChange={(e) => setSocialEmployer(Number(e.target.value) || 0)}
+                />
               </div>
               <div className="space-y-1">
-                <Label className="text-muted-foreground">档案公积金（单位成本参考）</Label>
-                <Input type="number" value={person.housingFund || 0} disabled />
+                <Label>档案公积金（单位成本参考）</Label>
+                <Input
+                  type="number"
+                  value={housingEmployer}
+                  onChange={(e) => setHousingEmployer(Number(e.target.value) || 0)}
+                />
               </div>
             </div>
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label className="text-base font-medium">专项附加扣除</Label>
+                <Label className="text-base">专项附加扣除</Label>
                 <span className="text-sm font-medium text-emerald-700">
                   本月合计 {formatCurrency(monthlySpecial)}
                 </span>
@@ -133,9 +165,9 @@ export default function MTaxProfileDialog({ person, open, onOpenChange }: Props)
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-14">启用</TableHead>
+                      <TableHead className="w-[88px]">启用</TableHead>
                       <TableHead>项目</TableHead>
-                      <TableHead>录入</TableHead>
+                      <TableHead className="min-w-[160px]">人数/方式</TableHead>
                       <TableHead className="text-right">标准</TableHead>
                       <TableHead className="text-right">本月</TableHead>
                     </TableRow>
@@ -152,23 +184,21 @@ export default function MTaxProfileDialog({ person, open, onOpenChange }: Props)
                       </TableCell>
                       <TableCell>子女教育</TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-muted-foreground">子女数</span>
-                          <Input
-                            type="number"
-                            min={0}
-                            className="h-8 w-20"
-                            value={special.childEducationCount}
-                            onChange={(e) =>
-                              patchSpecial({
-                                childEducationCount: Number(e.target.value) || 0,
-                              })
-                            }
-                          />
-                        </div>
+                        <Input
+                          type="number"
+                          min={0}
+                          className="h-8 w-20"
+                          disabled={!special.childEducationEnabled}
+                          value={special.childEducationCount}
+                          onChange={(e) =>
+                            patchSpecial({
+                              childEducationCount: Number(e.target.value) || 0,
+                            })
+                          }
+                        />
                       </TableCell>
                       <TableCell className="text-right text-muted-foreground">
-                        {formatCurrency(S.childEducationPerChild)}×人
+                        {formatCurrency(S.childEducationPerChild)} × 人
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {formatCurrency(
@@ -178,7 +208,6 @@ export default function MTaxProfileDialog({ person, open, onOpenChange }: Props)
                         )}
                       </TableCell>
                     </TableRow>
-
                     <TableRow>
                       <TableCell>
                         <Checkbox
@@ -190,23 +219,21 @@ export default function MTaxProfileDialog({ person, open, onOpenChange }: Props)
                       </TableCell>
                       <TableCell>3岁以下婴幼儿照护</TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-muted-foreground">人数</span>
-                          <Input
-                            type="number"
-                            min={0}
-                            className="h-8 w-20"
-                            value={special.infantCareCount}
-                            onChange={(e) =>
-                              patchSpecial({
-                                infantCareCount: Number(e.target.value) || 0,
-                              })
-                            }
-                          />
-                        </div>
+                        <Input
+                          type="number"
+                          min={0}
+                          className="h-8 w-20"
+                          disabled={!special.infantCareEnabled}
+                          value={special.infantCareCount}
+                          onChange={(e) =>
+                            patchSpecial({
+                              infantCareCount: Number(e.target.value) || 0,
+                            })
+                          }
+                        />
                       </TableCell>
                       <TableCell className="text-right text-muted-foreground">
-                        {formatCurrency(S.infantCarePerChild)}×人
+                        {formatCurrency(S.infantCarePerChild)} × 人
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {formatCurrency(
@@ -216,7 +243,6 @@ export default function MTaxProfileDialog({ person, open, onOpenChange }: Props)
                         )}
                       </TableCell>
                     </TableRow>
-
                     <TableRow>
                       <TableCell>
                         <Checkbox
@@ -228,21 +254,23 @@ export default function MTaxProfileDialog({ person, open, onOpenChange }: Props)
                       </TableCell>
                       <TableCell>赡养老人</TableCell>
                       <TableCell>
-                        <div className="flex flex-wrap items-center gap-3">
-                          <label className="flex items-center gap-1.5 text-sm">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <label className="flex items-center gap-1 text-xs">
                             <Checkbox
                               checked={special.elderIsOnlyChild}
+                              disabled={!special.elderSupportEnabled}
                               onCheckedChange={(v) =>
                                 patchSpecial({ elderIsOnlyChild: Boolean(v) })
                               }
                             />
-                            独生子女
+                            独生
                           </label>
                           {!special.elderIsOnlyChild && (
                             <Input
                               type="number"
-                              className="h-8 w-28"
-                              placeholder="本人分摊"
+                              className="h-8 w-24"
+                              disabled={!special.elderSupportEnabled}
+                              placeholder={`≤${S.elderNonOnlyChildMax}`}
                               value={special.elderSupportAmount || ''}
                               onChange={(e) =>
                                 patchSpecial({
@@ -253,8 +281,8 @@ export default function MTaxProfileDialog({ person, open, onOpenChange }: Props)
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="text-right text-muted-foreground text-xs">
-                        独生 {formatCurrency(S.elderOnlyChild)} / 非独生 ≤
+                      <TableCell className="text-right text-muted-foreground">
+                        独生 {formatCurrency(S.elderOnlyChild)} / 非独生≤
                         {formatCurrency(S.elderNonOnlyChildMax)}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
@@ -262,12 +290,14 @@ export default function MTaxProfileDialog({ person, open, onOpenChange }: Props)
                           special.elderSupportEnabled
                             ? (special.elderIsOnlyChild
                               ? S.elderOnlyChild
-                              : Math.min(S.elderNonOnlyChildMax, special.elderSupportAmount || 0))
+                              : Math.min(
+                                S.elderNonOnlyChildMax,
+                                Math.max(0, special.elderSupportAmount || 0),
+                              ))
                             : 0,
                         )}
                       </TableCell>
                     </TableRow>
-
                     <TableRow>
                       <TableCell>
                         <Checkbox
@@ -278,7 +308,7 @@ export default function MTaxProfileDialog({ person, open, onOpenChange }: Props)
                         />
                       </TableCell>
                       <TableCell>住房贷款利息</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">与租金互斥</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">与房租互斥</TableCell>
                       <TableCell className="text-right text-muted-foreground">
                         {formatCurrency(S.housingLoanInterest)}
                       </TableCell>
@@ -286,7 +316,6 @@ export default function MTaxProfileDialog({ person, open, onOpenChange }: Props)
                         {formatCurrency(special.housingLoanEnabled ? S.housingLoanInterest : 0)}
                       </TableCell>
                     </TableRow>
-
                     <TableRow>
                       <TableCell>
                         <Checkbox
@@ -305,19 +334,8 @@ export default function MTaxProfileDialog({ person, open, onOpenChange }: Props)
                         {formatCurrency(special.housingRentEnabled ? S.housingRent : 0)}
                       </TableCell>
                     </TableRow>
-
                     <TableRow>
-                      <TableCell>
-                        <Checkbox
-                          checked={special.continuingEduMode !== 'none'}
-                          onCheckedChange={(v) =>
-                            patchSpecial({
-                              continuingEduMode: v ? 'degree' : 'none',
-                            })
-                          }
-                        />
-                      </TableCell>
-                      <TableCell>继续教育</TableCell>
+                      <TableCell colSpan={2}>继续教育</TableCell>
                       <TableCell>
                         <Select
                           value={special.continuingEduMode}
@@ -325,19 +343,19 @@ export default function MTaxProfileDialog({ person, open, onOpenChange }: Props)
                             patchSpecial({ continuingEduMode: v as ContinuingEduMode })
                           }
                         >
-                          <SelectTrigger className="h-8 w-[200px]">
+                          <SelectTrigger className="h-8 w-[140px]">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="none">未启用</SelectItem>
-                            <SelectItem value="degree">学历教育 400/月</SelectItem>
-                            <SelectItem value="qualification">职业资格 3600/年÷12</SelectItem>
+                            <SelectItem value="degree">学历教育</SelectItem>
+                            <SelectItem value="qualification">职业资格</SelectItem>
                           </SelectContent>
                         </Select>
                       </TableCell>
                       <TableCell className="text-right text-muted-foreground text-xs">
-                        {formatCurrency(S.continuingEduDegree)} 或年
-                        {formatCurrency(S.continuingEduQualificationYear)}
+                        学历 {formatCurrency(S.continuingEduDegree)}/月；资格{' '}
+                        {formatCurrency(S.continuingEduQualificationYear)}/年
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {formatCurrency(
@@ -349,23 +367,13 @@ export default function MTaxProfileDialog({ person, open, onOpenChange }: Props)
                         )}
                       </TableCell>
                     </TableRow>
-
                     <TableRow>
-                      <TableCell>
-                        <Checkbox
-                          checked={(special.seriousIllnessMonthly || 0) > 0}
-                          onCheckedChange={(v) =>
-                            patchSpecial({
-                              seriousIllnessMonthly: v ? special.seriousIllnessMonthly || 0 : 0,
-                            })
-                          }
-                        />
-                      </TableCell>
-                      <TableCell>大病医疗（手工月摊）</TableCell>
+                      <TableCell colSpan={2}>大病医疗</TableCell>
                       <TableCell>
                         <Input
                           type="number"
                           className="h-8 w-28"
+                          placeholder="本月摊销"
                           value={special.seriousIllnessMonthly || ''}
                           onChange={(e) =>
                             patchSpecial({
@@ -387,8 +395,12 @@ export default function MTaxProfileDialog({ person, open, onOpenChange }: Props)
         )}
 
         <DialogFooter className="shrink-0 border-t pt-3">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
-          <Button onClick={handleSave}>保存到本机</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            取消
+          </Button>
+          <Button onClick={() => void handleSave()} disabled={saving || !person}>
+            {saving ? '保存中…' : '保存'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

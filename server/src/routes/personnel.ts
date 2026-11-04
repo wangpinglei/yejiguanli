@@ -175,13 +175,17 @@ function insertOpenPayPlan(
   housingFund: number,
   remark = "",
   operator?: { name: string; id: string },
+  socialInsurancePersonal = 0,
+  housingFundPersonal = 0,
 ) {
   db.prepare(`
     INSERT INTO personnel_pay_plans (
       id, personnel_id, start_date, end_date, salary,
-      social_insurance, housing_fund, remark, created_at,
+      social_insurance, housing_fund,
+      social_insurance_personal, housing_fund_personal,
+      remark, created_at,
       operator, operator_id
-    ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, datetime('now'), ?, ?)
+    ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?)
   `).run(
     generateId("ppp"),
     personnelId,
@@ -189,6 +193,8 @@ function insertOpenPayPlan(
     salaryJson,
     socialInsurance || 0,
     housingFund || 0,
+    socialInsurancePersonal || 0,
+    housingFundPersonal || 0,
     remark,
     operator?.name || "",
     operator?.id || "",
@@ -427,6 +433,7 @@ router.post("/", requireEditPermission, (req, res) => {
     name, salesUnitId, position, phone, email, salary,
     socialInsurance, housingFund, hireDate, resignDate, status,
     highCommissionFrom, regularCompensation, isInternalEmployee,
+    taxProfile,
   } = req.body;
   if (!name || !salesUnitId) {
     return res.status(400).json({ error: "姓名和销售单位不能为空" });
@@ -443,14 +450,33 @@ router.post("/", requireEditPermission, (req, res) => {
     : (isInternalEmployee === true
       ? 1
       : (String(position || "").includes("分销") ? 0 : 1));
+  const personalSocial = taxProfile
+    ? Number(taxProfile.socialInsurancePersonal) || 0
+    : 0;
+  const personalHousing = taxProfile
+    ? Number(taxProfile.housingFundPersonal) || 0
+    : 0;
+  const taxProfileJson = taxProfile
+    ? JSON.stringify({
+      ...taxProfile,
+      personnelId: id,
+      socialInsurancePersonal: personalSocial,
+      housingFundPersonal: personalHousing,
+      special: taxProfile.special && typeof taxProfile.special === "object"
+        ? taxProfile.special
+        : {},
+      updatedAt: taxProfile.updatedAt || new Date().toISOString(),
+    })
+    : "";
   runInTransaction(() => {
     db.prepare(`
       INSERT INTO personnel (
         id, name, sales_unit_id, position, phone, email, salary,
         social_insurance, housing_fund, hire_date, resign_date, status,
-        high_commission_from, regular_compensation, is_internal_employee
+        high_commission_from, regular_compensation, is_internal_employee,
+        tax_profile_json
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       name,
@@ -467,6 +493,7 @@ router.post("/", requireEditPermission, (req, res) => {
       highCommissionFrom || "",
       regularJson,
       internalFlag,
+      taxProfileJson,
     );
     insertOpenAssignment(db, id, salesUnitId, startDate, "入职建档", getOperator(req));
     insertOpenPayPlan(
@@ -478,6 +505,8 @@ router.post("/", requireEditPermission, (req, res) => {
       housingFund || 0,
       "入职建档",
       getOperator(req),
+      personalSocial,
+      personalHousing,
     );
   });
 
@@ -843,6 +872,24 @@ router.post("/:id/adjust-pay", requireEditPermission, (req, res) => {
     ? Number(req.body.housingFund) || 0
     : (existing.housing_fund || 0);
 
+  let prevPersonalSocial = 0;
+  let prevPersonalHousing = 0;
+  try {
+    const prevTax = existing.tax_profile_json
+      ? JSON.parse(existing.tax_profile_json || "{}")
+      : {};
+    prevPersonalSocial = Number(prevTax?.socialInsurancePersonal) || 0;
+    prevPersonalHousing = Number(prevTax?.housingFundPersonal) || 0;
+  } catch {
+    /* ignore */
+  }
+  const nextSocialPersonal = req.body?.socialInsurancePersonal !== undefined
+    ? Number(req.body.socialInsurancePersonal) || 0
+    : prevPersonalSocial;
+  const nextHousingPersonal = req.body?.housingFundPersonal !== undefined
+    ? Number(req.body.housingFundPersonal) || 0
+    : prevPersonalHousing;
+
   const openRows = listOpenPayPlans(db, id);
   const allPlanCount = (
     db.prepare(
@@ -867,8 +914,10 @@ router.post("/:id/adjust-pay", requireEditPermission, (req, res) => {
       db.prepare(`
         INSERT INTO personnel_pay_plans (
           id, personnel_id, start_date, end_date, salary,
-          social_insurance, housing_fund, remark, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, '调薪前补录', datetime('now'))
+          social_insurance, housing_fund,
+          social_insurance_personal, housing_fund_personal,
+          remark, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '调薪前补录', datetime('now'))
       `).run(
         generateId("ppp"),
         id,
@@ -877,6 +926,8 @@ router.post("/:id/adjust-pay", requireEditPermission, (req, res) => {
         existing.salary || "{}",
         existing.social_insurance || 0,
         existing.housing_fund || 0,
+        prevPersonalSocial,
+        prevPersonalHousing,
       );
     }
 
@@ -889,11 +940,37 @@ router.post("/:id/adjust-pay", requireEditPermission, (req, res) => {
       nextHousing,
       remark || (latestStart && effectiveDate < latestStart ? "调薪（修正生效日）" : "调薪"),
       getOperator(req),
+      nextSocialPersonal,
+      nextHousingPersonal,
     );
+
+    let nextTaxJson = existing.tax_profile_json || "";
+    try {
+      const taxObj = nextTaxJson ? JSON.parse(nextTaxJson) : {};
+      taxObj.personnelId = id;
+      taxObj.socialInsurancePersonal = nextSocialPersonal;
+      taxObj.housingFundPersonal = nextHousingPersonal;
+      taxObj.updatedAt = new Date().toISOString();
+      if (!taxObj.special || typeof taxObj.special !== "object") {
+        taxObj.special = {};
+      }
+      nextTaxJson = JSON.stringify(taxObj);
+    } catch {
+      nextTaxJson = JSON.stringify({
+        personnelId: id,
+        socialInsurancePersonal: nextSocialPersonal,
+        housingFundPersonal: nextHousingPersonal,
+        special: {},
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
     db.prepare(`
-      UPDATE personnel SET salary = ?, social_insurance = ?, housing_fund = ?
+      UPDATE personnel SET
+        salary = ?, social_insurance = ?, housing_fund = ?,
+        tax_profile_json = ?
       WHERE id = ?
-    `).run(salaryJson, nextSocial, nextHousing, id);
+    `).run(salaryJson, nextSocial, nextHousing, nextTaxJson, id);
   });
 
   const personnel = loadPersonnelWithAssignments(db, id);
@@ -1220,6 +1297,7 @@ router.put("/:id", requireEditPermission, (req, res) => {
     name, salesUnitId, position, phone, email, salary,
     socialInsurance, housingFund, hireDate, resignDate, status,
     highCommissionFrom, regularCompensation, isInternalEmployee,
+    taxProfile,
   } = req.body;
   const salaryJson = salary ? JSON.stringify(salary) : existing.salary;
   const regularJson =
@@ -1238,6 +1316,10 @@ router.put("/:id", requireEditPermission, (req, res) => {
         : (existing.is_internal_employee === undefined || existing.is_internal_employee === null
           ? (String(position ?? existing.position ?? "").includes("分销") ? 0 : 1)
           : Number(existing.is_internal_employee) !== 0 ? 1 : 0);
+  const taxProfileJson =
+    taxProfile !== undefined
+      ? (taxProfile ? JSON.stringify(taxProfile) : "")
+      : (existing.tax_profile_json || "");
 
   const nextUnitId = salesUnitId ?? existing.sales_unit_id;
   const unitChanged =
@@ -1251,7 +1333,7 @@ router.put("/:id", requireEditPermission, (req, res) => {
         salary = ?, social_insurance = ?, housing_fund = ?,
         hire_date = ?, resign_date = ?, status = ?,
         high_commission_from = ?, regular_compensation = ?,
-        is_internal_employee = ?
+        is_internal_employee = ?, tax_profile_json = ?
       WHERE id = ?
     `).run(
       name ?? existing.name,
@@ -1268,6 +1350,7 @@ router.put("/:id", requireEditPermission, (req, res) => {
       highFrom,
       regularJson,
       nextInternal,
+      taxProfileJson,
       id,
     );
 
@@ -1285,6 +1368,21 @@ router.put("/:id", requireEditPermission, (req, res) => {
           housingFund ?? existing.housing_fund,
           latest.id,
         );
+      }
+    }
+
+    // 个税档案里的个人代扣同步到当前开放薪酬段
+    if (taxProfile !== undefined && taxProfile) {
+      const openPay = listOpenPayPlans(db, id);
+      const latest = openPay[openPay.length - 1];
+      if (latest) {
+        const personalSocial = Number(taxProfile.socialInsurancePersonal) || 0;
+        const personalHousing = Number(taxProfile.housingFundPersonal) || 0;
+        db.prepare(`
+          UPDATE personnel_pay_plans
+          SET social_insurance_personal = ?, housing_fund_personal = ?
+          WHERE id = ?
+        `).run(personalSocial, personalHousing, latest.id);
       }
     }
 

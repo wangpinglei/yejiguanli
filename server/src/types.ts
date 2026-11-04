@@ -82,6 +82,8 @@ export interface Personnel {
   status: "active" | "inactive";
   /** false = 非内部员工，不计底薪/社保，只核算提成 */
   isInternalEmployee?: boolean;
+  /** 个税扣除档案（专项附加 + 个人代扣默认） */
+  taxProfile?: Record<string, unknown>;
 }
 
 export interface Product {

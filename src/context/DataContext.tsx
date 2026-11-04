@@ -147,6 +147,8 @@ interface DataContextType {
       salary?: Partial<import("@/types").SalaryStructure>
       socialInsurance?: number
       housingFund?: number
+      socialInsurancePersonal?: number
+      housingFundPersonal?: number
       remark?: string
     },
   ) => Promise<Personnel>;
@@ -441,6 +443,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
         salary?: Partial<import("@/types").SalaryStructure>
         socialInsurance?: number
         housingFund?: number
+        socialInsurancePersonal?: number
+        housingFundPersonal?: number
         remark?: string
       },
     ) => {

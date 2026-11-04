@@ -30,8 +30,14 @@ const EMPTY_SALARY: SalaryStructure = {
 
 export type ResolvedPay = {
   salary: SalaryStructure
+  /** 社保企业承担 */
   socialInsurance: number
+  /** 公积金企业承担 */
   housingFund: number
+  /** 社保个人代扣 */
+  socialInsurancePersonal: number
+  /** 公积金个人代扣 */
+  housingFundPersonal: number
   /** 当前日期是否落在分销段 */
   isDistribution: boolean
 }
@@ -122,13 +128,27 @@ export function resolvePayPlanAt(
  * - 有薪酬时间轴：用当天生效段（含底薪/绩效/补贴/社保公积金）
  * - 分销前无时间轴：优先用 regularCompensation 快照，否则用当前值
  */
+function getProfilePersonal(person: Personnel): {
+  socialInsurancePersonal: number
+  housingFundPersonal: number
+} {
+  const tax = person.taxProfile
+  return {
+    socialInsurancePersonal: Number(tax?.socialInsurancePersonal) || 0,
+    housingFundPersonal: Number(tax?.housingFundPersonal) || 0,
+  }
+}
+
 export function resolvePayForDate(person: Personnel, day: string): ResolvedPay {
   const d = toDateOnly(day) || day
+  const fromProfile = getProfilePersonal(person)
   if (isDistributionDay(person, d)) {
     return {
       salary: person.salary || EMPTY_SALARY,
       socialInsurance: person.socialInsurance || 0,
       housingFund: person.housingFund || 0,
+      socialInsurancePersonal: fromProfile.socialInsurancePersonal,
+      housingFundPersonal: fromProfile.housingFundPersonal,
       isDistribution: true,
     }
   }
@@ -138,6 +158,8 @@ export function resolvePayForDate(person: Personnel, day: string): ResolvedPay {
       salary: plan.salary || EMPTY_SALARY,
       socialInsurance: plan.socialInsurance || 0,
       housingFund: plan.housingFund || 0,
+      socialInsurancePersonal: Number(plan.socialInsurancePersonal) || 0,
+      housingFundPersonal: Number(plan.housingFundPersonal) || 0,
       isDistribution: false,
     }
   }
@@ -147,6 +169,8 @@ export function resolvePayForDate(person: Personnel, day: string): ResolvedPay {
       salary: snap.salary,
       socialInsurance: snap.socialInsurance || 0,
       housingFund: snap.housingFund || 0,
+      socialInsurancePersonal: fromProfile.socialInsurancePersonal,
+      housingFundPersonal: fromProfile.housingFundPersonal,
       isDistribution: false,
     }
   }
@@ -154,6 +178,8 @@ export function resolvePayForDate(person: Personnel, day: string): ResolvedPay {
     salary: person.salary || EMPTY_SALARY,
     socialInsurance: person.socialInsurance || 0,
     housingFund: person.housingFund || 0,
+    socialInsurancePersonal: fromProfile.socialInsurancePersonal,
+    housingFundPersonal: fromProfile.housingFundPersonal,
     isDistribution: false,
   }
 }

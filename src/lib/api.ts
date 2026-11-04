@@ -169,6 +169,8 @@ export const personnelApi = {
       salary?: Partial<import("@/types").SalaryStructure>
       socialInsurance?: number
       housingFund?: number
+      socialInsurancePersonal?: number
+      housingFundPersonal?: number
       remark?: string
     },
   ) =>

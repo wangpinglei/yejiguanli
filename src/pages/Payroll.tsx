@@ -423,7 +423,7 @@ export default function Payroll() {
             应发 = 提成 + 实发底薪 + 保密费 + 岗位补贴 + 实发绩效 + 其他加项 − 其他减项；月出勤系数{' '}
             21.75 × 7.5 = {PAYROLL_STANDARD_HOURS} 小时；未填缺勤按满勤（缺勤=0），未填考核分按 100 分。
             加项/减项可点「明细」录入多行说明与金额；黄列为人社代扣与累计个税（可改），实发=应发−社保个人−公积金个人−本期个税。
-            专项附加与个人代扣默认在人员列表「个税扣除」维护（本机）。人员关闭「内部员工」后只核算提成。
+            专项附加在人员「个税扣除」维护；社保/公积金个人代扣优先取薪酬方案（调整薪酬），其次取个税档案。人员关闭「内部员工」后只核算提成。
           </CardDescription>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground space-y-1">
@@ -550,7 +550,7 @@ export default function Payroll() {
           )}
           {calcPhase === 'wizard' && entryMode === 'insurance' && (
             <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              步骤 3/4 社保公积金录入 — 填写个人代扣；默认来自人员「个税扣除」档案。
+              步骤 3/4 社保公积金录入 — 个人代扣默认来自「调整薪酬」方案（其次个税档案）；特殊期间可改。
             </p>
           )}
           {calcPhase === 'wizard' && entryMode === 'tax' && (
@@ -931,6 +931,7 @@ export default function Payroll() {
                           <Input
                             type="number"
                             className="h-8 w-[92px]"
+                            title="默认来自薪酬方案个人代扣；特殊期间可改"
                             value={entry.socialInsurancePersonal ?? row.socialInsurancePersonal ?? 0}
                             onChange={(e) =>
                               updateEntry(row.personnelId, {
@@ -945,6 +946,7 @@ export default function Payroll() {
                           <Input
                             type="number"
                             className="h-8 w-[92px]"
+                            title="默认来自薪酬方案个人代扣；特殊期间可改"
                             value={entry.housingFundPersonal ?? row.housingFundPersonal ?? 0}
                             onChange={(e) =>
                               updateEntry(row.personnelId, {

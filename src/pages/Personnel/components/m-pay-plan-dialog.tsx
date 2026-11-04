@@ -36,6 +36,8 @@ type PayForm = {
   salary: SalaryStructure
   socialInsurance: number
   housingFund: number
+  socialInsurancePersonal: number
+  housingFundPersonal: number
 }
 
 function sortPayPlans(list: PersonnelPayPlan[]): PersonnelPayPlan[] {
@@ -44,16 +46,33 @@ function sortPayPlans(list: PersonnelPayPlan[]): PersonnelPayPlan[] {
   )
 }
 
+function getLatestOpenPlan(person: Personnel | null): PersonnelPayPlan | null {
+  const open = (person?.payPlans || []).filter((p) => !p.endDate)
+  if (open.length === 0) return null
+  open.sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''))
+  return open[open.length - 1] || null
+}
+
 function getDefaultForm(person: Personnel | null): PayForm {
   // 默认当月 1 日（转正/调薪常用）；需要可再改早或改晚
   const now = new Date()
   const suggested = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+  const latest = getLatestOpenPlan(person)
+  const tax = person?.taxProfile
   return {
     effectiveDate: suggested,
     remark: '转正',
     salary: { ...EMPTY_SALARY, ...(person?.salary || {}) },
     socialInsurance: person?.socialInsurance || 0,
     housingFund: person?.housingFund || 0,
+    socialInsurancePersonal:
+      Number(latest?.socialInsurancePersonal)
+      || Number(tax?.socialInsurancePersonal)
+      || 0,
+    housingFundPersonal:
+      Number(latest?.housingFundPersonal)
+      || Number(tax?.housingFundPersonal)
+      || 0,
   }
 }
 
@@ -110,9 +129,9 @@ export default function MPayPlanDialog({
   }
 
   const latestOpenStart = useMemo(() => {
-    const open = planRows.filter((p) => !p.endDate)
-    if (open.length === 0) return ''
-    return open
+    const openPlans = planRows.filter((p) => !p.endDate)
+    if (openPlans.length === 0) return ''
+    return openPlans
       .map((p) => (p.startDate || '').slice(0, 10))
       .filter(Boolean)
       .sort()
@@ -134,7 +153,7 @@ export default function MPayPlanDialog({
         + '此前月份仍按更早段落计算；提成仍按成交当月配置。'
       : `确认「${person.name}」自 ${form.effectiveDate} 起使用新薪酬？\n\n`
         + '生效日前（含试用期月份）仍按旧底薪/社保公积金计算；'
-        + '从生效日起按新标准。提成仍按成交当月配置。'
+        + '从生效日起按新标准。个人代扣会同步到个税扣除档案与工资核算。'
     if (!confirm(confirmText)) {
       return
     }
@@ -145,6 +164,8 @@ export default function MPayPlanDialog({
         salary: form.salary,
         socialInsurance: form.socialInsurance,
         housingFund: form.housingFund,
+        socialInsurancePersonal: form.socialInsurancePersonal,
+        housingFundPersonal: form.housingFundPersonal,
         remark: form.remark.trim() || '调薪',
       })
       onOpenChange(false)
@@ -157,6 +178,14 @@ export default function MPayPlanDialog({
 
   const currentFixed = getFixedSalary(person?.salary || EMPTY_SALARY)
   const nextFixed = getFixedSalary(form.salary)
+  const currentPersonalSocial =
+    Number(getLatestOpenPlan(person)?.socialInsurancePersonal)
+    || Number(person?.taxProfile?.socialInsurancePersonal)
+    || 0
+  const currentPersonalHousing =
+    Number(getLatestOpenPlan(person)?.housingFundPersonal)
+    || Number(person?.taxProfile?.housingFundPersonal)
+    || 0
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -174,13 +203,21 @@ export default function MPayPlanDialog({
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto py-1 pr-1">
             <p className="text-sm text-muted-foreground">
               与调岗、分销一样按生效日分段。试用转正请把生效日设为转正月 1 日，
-              并改底薪、社保、公积金；更早月份不会被新标准覆盖。
-              若之前误填了过晚的生效日，可把生效日改早，系统会覆盖该日及之后的薪酬段。
+              并改底薪、社保、公积金（企业/个人）；更早月份不会被新标准覆盖。
+              个人代扣会覆盖个税扣除档案默认值，并用于工资核算。
             </p>
-            <div className="rounded-md border bg-muted/30 px-4 py-3 text-sm">
-              当前固定月薪 {formatCurrency(currentFixed)}
-              ，社保 {formatCurrency(person.socialInsurance || 0)}
-              ，公积金 {formatCurrency(person.housingFund || 0)}
+            <div className="rounded-md border bg-muted/30 px-4 py-3 text-sm space-y-1">
+              <div>
+                当前固定月薪 {formatCurrency(currentFixed)}
+              </div>
+              <div>
+                社保 企业 {formatCurrency(person.socialInsurance || 0)}
+                {' / '}
+                个人 {formatCurrency(currentPersonalSocial)}
+                ，公积金 企业 {formatCurrency(person.housingFund || 0)}
+                {' / '}
+                个人 {formatCurrency(currentPersonalHousing)}
+              </div>
             </div>
 
             {planRows.length > 0 && (
@@ -193,8 +230,10 @@ export default function MPayPlanDialog({
                         <TableHead>开始日</TableHead>
                         <TableHead>结束日</TableHead>
                         <TableHead className="text-right">固定月薪</TableHead>
-                        <TableHead className="text-right">社保</TableHead>
-                        <TableHead className="text-right">公积金</TableHead>
+                        <TableHead className="text-right">社保企业</TableHead>
+                        <TableHead className="text-right">社保个人</TableHead>
+                        <TableHead className="text-right">公积金企业</TableHead>
+                        <TableHead className="text-right">公积金个人</TableHead>
                         <TableHead>说明</TableHead>
                         <TableHead>操作人</TableHead>
                         <TableHead>记录时间</TableHead>
@@ -214,7 +253,13 @@ export default function MPayPlanDialog({
                             {formatCurrency(row.socialInsurance)}
                           </TableCell>
                           <TableCell className="text-right">
+                            {formatCurrency(row.socialInsurancePersonal || 0)}
+                          </TableCell>
+                          <TableCell className="text-right">
                             {formatCurrency(row.housingFund)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {formatCurrency(row.housingFundPersonal || 0)}
                           </TableCell>
                           <TableCell className="max-w-[140px] truncate">
                             {row.remark || '—'}
@@ -318,7 +363,7 @@ export default function MPayPlanDialog({
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label>社保 (¥/月)</Label>
+                    <Label>社保 · 企业 (¥/月)</Label>
                     <Input
                       type="number"
                       value={form.socialInsurance}
@@ -329,13 +374,35 @@ export default function MPayPlanDialog({
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label>公积金 (¥/月)</Label>
+                    <Label>社保 · 个人 (¥/月)</Label>
+                    <Input
+                      type="number"
+                      value={form.socialInsurancePersonal}
+                      onChange={(e) => setForm({
+                        ...form,
+                        socialInsurancePersonal: Number(e.target.value),
+                      })}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>公积金 · 企业 (¥/月)</Label>
                     <Input
                       type="number"
                       value={form.housingFund}
                       onChange={(e) => setForm({
                         ...form,
                         housingFund: Number(e.target.value),
+                      })}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>公积金 · 个人 (¥/月)</Label>
+                    <Input
+                      type="number"
+                      value={form.housingFundPersonal}
+                      onChange={(e) => setForm({
+                        ...form,
+                        housingFundPersonal: Number(e.target.value),
                       })}
                     />
                   </div>

@@ -11,6 +11,7 @@ import {
   loadTaxProfile,
   MONTHLY_BASIC_DEDUCTION,
 } from '@/lib/payrollTax'
+import { resolvePayForDate } from '@/lib/compensation'
 import type { Personnel } from '@/types'
 
 export type PayrollTaxResolved = {
@@ -74,21 +75,32 @@ export function resolvePayrollTax(options: {
   entry: PayrollMonthEntry
 }): PayrollTaxResolved {
   const { person, yearMonth, payable, entry } = options
-  const profile = loadTaxProfile(person.id, {
-    socialInsurance: person.socialInsurance,
-    housingFund: person.housingFund,
-  })
+  // 个人代扣：本月录入 > 当月生效薪酬方案 > 个税扣除档案
+  const profile = loadTaxProfile(
+    person.id,
+    {
+      socialInsurance: person.socialInsurance,
+      housingFund: person.housingFund,
+    },
+    person.taxProfile || null,
+  )
   const profileSpecial = calcSpecialAdditionalMonthly(profile.special)
+  const payAtMid = resolvePayForDate(person, `${yearMonth}-15`)
+  // 方案个人代扣优先；旧方案为 0 时回退档案（兼容未拆分前的数据）
+  const defaultSocialPersonal =
+    Number(payAtMid.socialInsurancePersonal) || profile.socialInsurancePersonal
+  const defaultHousingPersonal =
+    Number(payAtMid.housingFundPersonal) || profile.housingFundPersonal
 
   const socialInsurancePersonal = roundMoney(
     entry.socialInsurancePersonal != null
       ? Number(entry.socialInsurancePersonal) || 0
-      : profile.socialInsurancePersonal,
+      : defaultSocialPersonal,
   )
   const housingFundPersonal = roundMoney(
     entry.housingFundPersonal != null
       ? Number(entry.housingFundPersonal) || 0
-      : profile.housingFundPersonal,
+      : defaultHousingPersonal,
   )
   const specialAdditional = roundMoney(
     entry.specialAdditional != null

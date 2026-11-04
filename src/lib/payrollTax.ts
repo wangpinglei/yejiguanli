@@ -1,5 +1,6 @@
 /**
- * 工资个税：专项附加扣除档案 + 累计预扣预缴（本地原型，存 localStorage）
+ * 工资个税：专项附加扣除档案 + 累计预扣预缴
+ * 档案主存人员 taxProfile（服务器）；本机 localStorage 仅作迁移兜底。
  */
 
 import { roundMoney } from '@/lib/format'
@@ -135,26 +136,56 @@ export function loadAllTaxProfiles(): Record<string, PersonnelTaxProfile> {
 export function loadTaxProfile(
   personnelId: string,
   defaults?: { socialInsurance?: number; housingFund?: number },
+  serverProfile?: Partial<PersonnelTaxProfile> | null,
 ): PersonnelTaxProfile {
+  const empty = createEmptyTaxProfile(personnelId, defaults)
+  if (serverProfile && typeof serverProfile === 'object') {
+    return {
+      ...empty,
+      ...serverProfile,
+      special: {
+        ...createEmptySpecialAdditional(),
+        ...(serverProfile.special || {}),
+      },
+      personnelId,
+      socialInsurancePersonal:
+        serverProfile.socialInsurancePersonal != null
+          ? Number(serverProfile.socialInsurancePersonal) || 0
+          : empty.socialInsurancePersonal,
+      housingFundPersonal:
+        serverProfile.housingFundPersonal != null
+          ? Number(serverProfile.housingFundPersonal) || 0
+          : empty.housingFundPersonal,
+    }
+  }
+  // 兼容：尚未同步服务器时读本机缓存
   const all = loadAllTaxProfiles()
   const hit = all[personnelId]
   if (hit) {
     return {
-      ...createEmptyTaxProfile(personnelId, defaults),
+      ...empty,
       ...hit,
       special: { ...createEmptySpecialAdditional(), ...(hit.special || {}) },
       personnelId,
     }
   }
-  return createEmptyTaxProfile(personnelId, defaults)
+  return empty
 }
 
+/** @deprecated 请走人员 updatePersonnel({ taxProfile }) 写服务器 */
 export function saveTaxProfile(profile: PersonnelTaxProfile): void {
   const all = loadAllTaxProfiles()
   all[profile.personnelId] = {
     ...profile,
     updatedAt: new Date().toISOString(),
   }
+  localStorage.setItem(PAYROLL_TAX_PROFILE_KEY, JSON.stringify(all))
+}
+
+export function clearLocalTaxProfile(personnelId: string): void {
+  const all = loadAllTaxProfiles()
+  if (!(personnelId in all)) return
+  delete all[personnelId]
   localStorage.setItem(PAYROLL_TAX_PROFILE_KEY, JSON.stringify(all))
 }
 

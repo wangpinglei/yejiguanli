@@ -90,6 +90,12 @@ export interface Personnel {
    */
   isInternalEmployee?: boolean;
   /**
+   * 个税扣除档案：专项附加 + 社保/公积金个人代扣默认（存服务器）。
+   * 工资表代扣优先用这里的个人缴纳默认。
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  taxProfile?: any
+  /**
    * 分销/高提成生效日（含当天）。成交日 ≥ 此日用当前提成；此前用 regularCompensation 快照。
    * 空 = 未启用分销分段。
    */
@@ -109,8 +115,14 @@ export interface PersonnelPayPlan {
   startDate: string;
   endDate?: string;
   salary: SalaryStructure;
+  /** 社保企业承担 */
   socialInsurance: number;
+  /** 公积金企业承担 */
   housingFund: number;
+  /** 社保个人代扣（工资核算） */
+  socialInsurancePersonal?: number;
+  /** 公积金个人代扣（工资核算） */
+  housingFundPersonal?: number;
   remark?: string;
   createdAt?: string;
   operator?: string;

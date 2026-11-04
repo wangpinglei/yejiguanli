@@ -98,6 +98,10 @@ const DEFAULT_FORM = {
   salary: { ...EMPTY_SALARY },
   socialInsurance: 0,
   housingFund: 0,
+  /** 社保个人代扣（工资核算，同步个税档案） */
+  socialInsurancePersonal: 0,
+  /** 公积金个人代扣 */
+  housingFundPersonal: 0,
   hireDate: "",
   resignDate: "",
   status: "active" as Personnel["status"],
@@ -483,6 +487,8 @@ export default function PersonnelPage() {
       salary: { ...EMPTY_SALARY },
       socialInsurance: 0,
       housingFund: 0,
+      socialInsurancePersonal: 0,
+      housingFundPersonal: 0,
       salesUnitId: salesUnits[0]?.id || "",
       hireDate: new Date().toISOString().slice(0, 10),
     });
@@ -497,6 +503,13 @@ export default function PersonnelPage() {
         : person.isInternalEmployee === true
           ? true
           : !(person.position || '').includes('分销');
+    const openPlans = (person.payPlans || []).filter((p) => !p.endDate)
+    const latestPlan = openPlans.length > 0
+      ? [...openPlans].sort((a, b) =>
+        (a.startDate || '').localeCompare(b.startDate || ''),
+      ).pop()
+      : null
+    const tax = person.taxProfile
     setForm({
       name: person.name,
       salesUnitId: person.salesUnitId,
@@ -506,6 +519,14 @@ export default function PersonnelPage() {
       salary: { ...EMPTY_SALARY, ...person.salary },
       socialInsurance: person.socialInsurance || 0,
       housingFund: person.housingFund || 0,
+      socialInsurancePersonal:
+        Number(latestPlan?.socialInsurancePersonal)
+        || Number(tax?.socialInsurancePersonal)
+        || 0,
+      housingFundPersonal:
+        Number(latestPlan?.housingFundPersonal)
+        || Number(tax?.housingFundPersonal)
+        || 0,
       hireDate: person.hireDate,
       resignDate: person.resignDate || "",
       status: person.status,
@@ -533,15 +554,34 @@ export default function PersonnelPage() {
     if (!form.name.trim() || !form.salesUnitId) return;
     const resignDate = form.resignDate.trim();
     const status = getFormDutyStatus(resignDate);
+    const {
+      socialInsurancePersonal,
+      housingFundPersonal,
+      ...formRest
+    } = form
+    const prevSpecial = editingPerson?.taxProfile?.special
+    const taxProfile = {
+      personnelId: editingPerson?.id || '',
+      special: prevSpecial && typeof prevSpecial === 'object' ? prevSpecial : {},
+      socialInsurancePersonal: Number(socialInsurancePersonal) || 0,
+      housingFundPersonal: Number(housingFundPersonal) || 0,
+      updatedAt: new Date().toISOString(),
+    }
     // 显式传 null，服务端才能清空离职日（undefined 会被 JSON 省略并保留旧值）
-    const data = { ...form, resignDate: resignDate ? resignDate : null, status } as typeof form & {
-      resignDate: string | null;
-    };
+    const data = {
+      ...formRest,
+      resignDate: resignDate ? resignDate : null,
+      status,
+      taxProfile,
+    } as typeof formRest & {
+      resignDate: string | null
+      taxProfile: typeof taxProfile
+    }
     try {
       if (editingPerson) {
         await updatePersonnel(editingPerson.id, data);
       } else {
-        await addPersonnel(data);
+        await addPersonnel(data as Omit<Personnel, 'id'>);
       }
       setDialogOpen(false);
     } catch (error: any) {
@@ -1721,36 +1761,102 @@ export default function PersonnelPage() {
 
                 </div>
 
-                {/* 社保公积金 */}
+                {/* 社保公积金：企业成本 + 个人代扣 */}
                 <div className="space-y-3 rounded-lg border p-4">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-semibold">社保公积金（企业承担部分）</h4>
+                    <h4 className="text-sm font-semibold">社保公积金</h4>
                     <Badge variant="secondary">
-                      月度合计：{formatCurrency((form.socialInsurance || 0) + (form.housingFund || 0))}
+                      企业合计：
+                      {formatCurrency((form.socialInsurance || 0) + (form.housingFund || 0))}
+                      {' · '}
+                      个人合计：
+                      {formatCurrency(
+                        (form.socialInsurancePersonal || 0) + (form.housingFundPersonal || 0),
+                      )}
                     </Badge>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    社保和公积金将自动计入成本管理，无需手动录入
+                    企业部分计入成本管理；个人部分用于工资代扣，并同步到个税扣除档案与薪酬方案
                   </p>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2 rounded-md bg-red-50/50 p-3">
                       <div className="flex items-center gap-2">
-                        <Badge className="bg-red-100 text-red-700">社保</Badge>
+                        <Badge className="bg-red-100 text-red-700">社保 · 企业</Badge>
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-xs">社保金额 (¥/月)</Label>
-                        <Input type="number" value={form.socialInsurance} onChange={(e) => setForm({ ...form, socialInsurance: Number(e.target.value) })} placeholder="0" />
-                        <p className="text-[10px] text-muted-foreground">养老、医疗、失业、工伤、生育（企业承担部分）</p>
+                        <Label className="text-xs">企业承担 (¥/月)</Label>
+                        <Input
+                          type="number"
+                          value={form.socialInsurance}
+                          onChange={(e) => setForm({
+                            ...form,
+                            socialInsurance: Number(e.target.value),
+                          })}
+                          placeholder="0"
+                        />
+                        <p className="text-[10px] text-muted-foreground">
+                          养老、医疗、失业、工伤、生育（企业）
+                        </p>
+                      </div>
+                    </div>
+                    <div className="space-y-2 rounded-md bg-rose-50/50 p-3">
+                      <div className="flex items-center gap-2">
+                        <Badge className="bg-rose-100 text-rose-700">社保 · 个人</Badge>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">个人代扣 (¥/月)</Label>
+                        <Input
+                          type="number"
+                          value={form.socialInsurancePersonal}
+                          onChange={(e) => setForm({
+                            ...form,
+                            socialInsurancePersonal: Number(e.target.value),
+                          })}
+                          placeholder="0"
+                        />
+                        <p className="text-[10px] text-muted-foreground">
+                          工资核算代扣，默认进个税累计
+                        </p>
                       </div>
                     </div>
                     <div className="space-y-2 rounded-md bg-cyan-50/50 p-3">
                       <div className="flex items-center gap-2">
-                        <Badge className="bg-cyan-100 text-cyan-700">公积金</Badge>
+                        <Badge className="bg-cyan-100 text-cyan-700">公积金 · 企业</Badge>
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-xs">公积金金额 (¥/月)</Label>
-                        <Input type="number" value={form.housingFund} onChange={(e) => setForm({ ...form, housingFund: Number(e.target.value) })} placeholder="0" />
-                        <p className="text-[10px] text-muted-foreground">住房公积金（企业承担部分）</p>
+                        <Label className="text-xs">企业承担 (¥/月)</Label>
+                        <Input
+                          type="number"
+                          value={form.housingFund}
+                          onChange={(e) => setForm({
+                            ...form,
+                            housingFund: Number(e.target.value),
+                          })}
+                          placeholder="0"
+                        />
+                        <p className="text-[10px] text-muted-foreground">
+                          住房公积金（企业）
+                        </p>
+                      </div>
+                    </div>
+                    <div className="space-y-2 rounded-md bg-sky-50/50 p-3">
+                      <div className="flex items-center gap-2">
+                        <Badge className="bg-sky-100 text-sky-700">公积金 · 个人</Badge>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">个人代扣 (¥/月)</Label>
+                        <Input
+                          type="number"
+                          value={form.housingFundPersonal}
+                          onChange={(e) => setForm({
+                            ...form,
+                            housingFundPersonal: Number(e.target.value),
+                          })}
+                          placeholder="0"
+                        />
+                        <p className="text-[10px] text-muted-foreground">
+                          工资核算代扣，默认进个税累计
+                        </p>
                       </div>
                     </div>
                   </div>

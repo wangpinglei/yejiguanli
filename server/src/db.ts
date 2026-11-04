@@ -424,6 +424,8 @@ function initSchema() {
       salary TEXT NOT NULL DEFAULT '{}',
       social_insurance REAL DEFAULT 0,
       housing_fund REAL DEFAULT 0,
+      social_insurance_personal REAL DEFAULT 0,
+      housing_fund_personal REAL DEFAULT 0,
       remark TEXT DEFAULT '',
       created_at TEXT DEFAULT (datetime('now')),
       operator TEXT DEFAULT '',
@@ -497,6 +499,8 @@ function initSchema() {
       { name: "high_commission_from", ddl: "high_commission_from TEXT DEFAULT ''" },
       { name: "regular_compensation", ddl: "regular_compensation TEXT DEFAULT ''" },
       { name: "is_internal_employee", ddl: "is_internal_employee INTEGER DEFAULT 1" },
+      // 个税扣除档案：专项附加 + 社保/公积金个人代扣默认（JSON）
+      { name: "tax_profile_json", ddl: "tax_profile_json TEXT DEFAULT ''" },
     ]);
     // 首次加列：岗位含「分销」的默认标为非内部员工（仅提成）
     if (!hadInternal) {
@@ -509,6 +513,13 @@ function initSchema() {
   }
 
   ensureColumns("personnel_unit_assignments", [
+    { name: "operator", ddl: "operator TEXT DEFAULT ''" },
+    { name: "operator_id", ddl: "operator_id TEXT DEFAULT ''" },
+  ]);
+
+  ensureColumns("personnel_pay_plans", [
+    { name: "social_insurance_personal", ddl: "social_insurance_personal REAL DEFAULT 0" },
+    { name: "housing_fund_personal", ddl: "housing_fund_personal REAL DEFAULT 0" },
     { name: "operator", ddl: "operator TEXT DEFAULT ''" },
     { name: "operator_id", ddl: "operator_id TEXT DEFAULT ''" },
   ]);
@@ -2014,6 +2025,8 @@ export function rowToPersonnelPayPlan(row: any) {
     salary: parseJsonField(row.salary, {}),
     socialInsurance: row.social_insurance || 0,
     housingFund: row.housing_fund || 0,
+    socialInsurancePersonal: row.social_insurance_personal || 0,
+    housingFundPersonal: row.housing_fund_personal || 0,
     remark: row.remark || "",
     createdAt: row.created_at || "",
     operator: row.operator || undefined,
@@ -2054,6 +2067,16 @@ export function rowToPersonnel(row: any, assignments?: any[], payPlans?: any[]) 
       regularCompensation = undefined;
     }
   }
+  let taxProfile: any = undefined;
+  const rawTax = row.tax_profile_json;
+  if (rawTax) {
+    try {
+      taxProfile =
+        typeof rawTax === "string" ? JSON.parse(rawTax || "null") : rawTax;
+    } catch {
+      taxProfile = undefined;
+    }
+  }
   return {
     id: row.id,
     name: row.name,
@@ -2072,6 +2095,7 @@ export function rowToPersonnel(row: any, assignments?: any[], payPlans?: any[]) 
       : Number(row.is_internal_employee) !== 0,
     highCommissionFrom: row.high_commission_from || undefined,
     regularCompensation: regularCompensation || undefined,
+    taxProfile: taxProfile || undefined,
     unitAssignments: Array.isArray(assignments)
       ? assignments.map(rowToPersonnelUnitAssignment)
       : undefined,
