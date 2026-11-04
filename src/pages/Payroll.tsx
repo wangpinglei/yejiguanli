@@ -673,13 +673,14 @@ export default function Payroll() {
                   {cycle.startYm}～{cycle.endYm}
                 </strong>
                 （本月为第 {n} 月，减除费用 {MONTHLY_BASIC_DEDUCTION}×{n}）。
-                C = 累计扣税基数(截至上月) + 本期应发；
-                本月应扣 = max(f(C)−B, 0)；
-                f(C)=ROUND(MAX(C×{'{3,10,20,25,30,35,45}%'}−速算扣除数, 0), 2)。
+                C=应纳税所得额（默认可=累计扣税基数+本期应发）；
+                B=已预缴个税；
+                A=ROUND(MAX(C×{'{3,10,20,25,30,35,45}%'}−速算扣除数, 0), 2)；
+                本期个税=max(A−B, 0)。
                 {useOpening && (
                   <>
                     {' '}
-                    请填写截至 {IIT_SEED_THROUGH_YM} 的期初：已预扣个税、累计扣税基数（应纳税所得额可空）。
+                    请填写截至 {IIT_SEED_THROUGH_YM} 的已预扣个税、累计扣税基数；应纳税所得额可改。
                   </>
                 )}
                 {' '}完成后点「生成工资表」。
@@ -882,9 +883,9 @@ export default function Payroll() {
                     )}
                     {showPayrollCol(entryMode, 'tax') && shouldUseIitCycleOpening(yearMonth) && (
                       <TableHead className="min-w-[110px] bg-violet-50/80 text-right">
-                        已预扣个税
+                        已预缴个税 B
                         <div className="text-[10px] font-normal text-muted-foreground">
-                          截至{IIT_SEED_THROUGH_YM}
+                          期初截至{IIT_SEED_THROUGH_YM}
                         </div>
                       </TableHead>
                     )}
@@ -892,23 +893,23 @@ export default function Payroll() {
                       <TableHead className="min-w-[120px] bg-violet-50/80 text-right">
                         累计扣税基数
                         <div className="text-[10px] font-normal text-muted-foreground">
-                          截至上月/{IIT_SEED_THROUGH_YM}
+                          截至上月
                         </div>
                       </TableHead>
                     )}
                     {showPayrollCol(entryMode, 'tax') && shouldUseIitCycleOpening(yearMonth) && (
-                      <TableHead className="min-w-[110px] bg-violet-50/80 text-right">
-                        应纳税所得额
+                      <TableHead className="min-w-[120px] bg-violet-50/80 text-right">
+                        应纳税所得额 C
                         <div className="text-[10px] font-normal text-muted-foreground">
-                          截至{IIT_SEED_THROUGH_YM}·可空
+                          默认同左+应发
                         </div>
                       </TableHead>
                     )}
                     {showPayrollCol(entryMode, 'tax') && (
-                      <TableHead className="min-w-[200px] bg-amber-50/80">
+                      <TableHead className="min-w-[220px] bg-amber-50/80">
                         本期个税
                         <div className="text-[10px] font-normal text-muted-foreground whitespace-normal">
-                          max(f(C)−B, 0)
+                          max(A−B, 0)
                         </div>
                       </TableHead>
                     )}
@@ -1316,7 +1317,7 @@ export default function Payroll() {
                                     type="number"
                                     step="0.01"
                                     className="ml-auto h-8 w-[100px] text-right"
-                                    title="截至 2026-09 已预扣个税 B"
+                                    title="已预缴个税 B（期初截至 2026-09，其后月份自动累加）"
                                     defaultValue={row.iitOpeningTaxPaid ?? 0}
                                     key={`paid-${person.id}-${row.iitOpeningTaxPaid ?? 0}`}
                                     onBlur={(e) => {
@@ -1325,13 +1326,16 @@ export default function Payroll() {
                                       void handleSaveIitOpening(person, { taxPaid: v })
                                     }}
                                   />
+                                  <div className="mt-1 text-right text-[10px] text-muted-foreground tabular-nums">
+                                    参与计算 B={money(row.taxPaidBeforeThisMonth || 0)}
+                                  </div>
                                 </TableCell>
                                 <TableCell className="bg-violet-50/40">
                                   <Input
                                     type="number"
                                     step="0.01"
                                     className="ml-auto h-8 w-[100px] text-right"
-                                    title="截至 2026-09 累计扣税基数"
+                                    title="累计扣税基数期初（截至 2026-09）"
                                     defaultValue={row.iitOpeningTaxBase ?? 0}
                                     key={`base-${person.id}-${row.iitOpeningTaxBase ?? 0}`}
                                     onBlur={(e) => {
@@ -1340,28 +1344,36 @@ export default function Payroll() {
                                       void handleSaveIitOpening(person, { taxBase: v })
                                     }}
                                   />
+                                  <div className="mt-1 text-right text-[10px] text-muted-foreground tabular-nums">
+                                    截至上月 {money(row.cumulativeTaxBase || 0)}
+                                  </div>
                                 </TableCell>
                                 <TableCell className="bg-violet-50/40">
                                   <Input
                                     type="number"
                                     step="0.01"
                                     className="ml-auto h-8 w-[100px] text-right"
-                                    title="截至 2026-09 应纳税所得额 C，空=自动推算"
-                                    placeholder="自动"
+                                    title="应纳税所得额 C；空=累计扣税基数+本期应发"
+                                    placeholder={String(row.autoTaxableIncome ?? '')}
                                     defaultValue={
-                                      row.iitOpeningTaxable == null
+                                      entry.taxableIncomeOverride == null
                                         ? ''
-                                        : row.iitOpeningTaxable
+                                        : entry.taxableIncomeOverride
                                     }
-                                    key={`taxable-${person.id}-${row.iitOpeningTaxable ?? 'auto'}`}
+                                    key={`taxable-${row.personnelId}-${entry.taxableIncomeOverride ?? 'auto'}-${row.autoTaxableIncome ?? 0}`}
                                     onBlur={(e) => {
                                       const raw = e.target.value.trim()
                                       const next =
                                         raw === '' ? null : Number(raw) || 0
-                                      if (next === (row.iitOpeningTaxable ?? null)) return
-                                      void handleSaveIitOpening(person, { taxable: next })
+                                      if (next === (entry.taxableIncomeOverride ?? null)) return
+                                      updateEntry(row.personnelId, {
+                                        taxableIncomeOverride: next,
+                                      })
                                     }}
                                   />
+                                  <div className="mt-1 text-right text-[10px] text-muted-foreground tabular-nums">
+                                    C={money(row.cumulativeTaxable || 0)}
+                                  </div>
                                 </TableCell>
                               </>
                             )
@@ -1369,19 +1381,21 @@ export default function Payroll() {
                         {showPayrollCol(entryMode, 'tax') && (() => {
                           const taxBase = Number(row.cumulativeTaxBase) || 0
                           const pay = Number(row.payableForTax ?? row.payable) || 0
+                          const autoC = Number(row.autoTaxableIncome) || 0
                           const cVal = Number(row.cumulativeTaxable) || 0
                           const bVal = Number(row.taxPaidBeforeThisMonth) || 0
                           const bracket = resolveIitBracket(cVal)
-                          const fC = Number(row.cumulativeTaxDue) || bracket.tax
+                          const aVal = Number(row.cumulativeTaxDue) || bracket.tax
                           const systemTax = Number(row.systemIncomeTax ?? row.incomeTax) || 0
                           const ratePct = `${(bracket.rate * 100).toFixed(0)}%`
+                          const cIsOverride = entry.taxableIncomeOverride != null
                           return (
                         <TableCell className="bg-amber-50/40 align-top">
-                          <div className="space-y-1.5 min-w-[210px]">
+                          <div className="space-y-1.5 min-w-[220px]">
                             <Input
                               type="number"
                               className="h-8 w-[96px]"
-                              title="可手工覆盖系统累计预扣结果"
+                              title="可手工覆盖本期个税"
                               value={
                                 entry.incomeTaxOverride != null
                                   ? entry.incomeTaxOverride
@@ -1396,25 +1410,23 @@ export default function Payroll() {
                             />
                             {entryMode === 'tax' && (
                               <div className="rounded border border-amber-200/80 bg-white/80 px-2 py-1.5 text-[10px] leading-relaxed text-amber-950 tabular-nums">
-                                <div className="font-medium text-amber-900">
-                                  C = 累计扣税基数 + 本期应发
-                                </div>
                                 <div>
-                                  C = {money(taxBase)} + {money(pay)} = {money(cVal)}
-                                  {cVal > 0 ? (
-                                    <>
-                                      {' '}
-                                      → {ratePct} / 速算 {money(bracket.quick)}
-                                    </>
+                                  C(应纳税所得额) ={' '}
+                                  {cIsOverride ? (
+                                    <>手工 {money(cVal)}</>
                                   ) : (
-                                    <>（≤0 则 f(C)=0）</>
+                                    <>
+                                      {money(taxBase)}+{money(pay)}={money(autoC)}
+                                    </>
                                   )}
                                 </div>
                                 <div>
-                                  f(C) = ROUND(MAX(C×{ratePct}−速算, 0), 2) = {money(fC)}
+                                  A = ROUND(MAX(C×{ratePct}−{money(bracket.quick)}, 0), 2) ={' '}
+                                  {money(aVal)}
                                 </div>
-                                <div className="font-medium">
-                                  本月 = max(f(C)−B, 0) = max({money(fC)}−{money(bVal)}, 0) ={' '}
+                                <div>B(已预缴个税) = {money(bVal)}</div>
+                                <div className="font-medium text-amber-900">
+                                  本期个税 = max(A−B, 0) = max({money(aVal)}−{money(bVal)}, 0) ={' '}
                                   {money(systemTax)}
                                 </div>
                               </div>

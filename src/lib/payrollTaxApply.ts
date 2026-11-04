@@ -38,11 +38,13 @@ export type PayrollTaxResolved = {
   cycleEndYm: string
   /** 截至上月累计扣税基数 */
   cumulativeTaxBase: number
-  /** 本期应发（参与 C 计算） */
+  /** 本期应发（参与自动 C） */
   payableForTax: number
-  /** C = 累计扣税基数 + 本期应发 */
+  /** 自动 C = 累计扣税基数 + 本期应发 */
+  autoTaxable: number
+  /** C：应纳税所得额（手工覆盖优先） */
   taxable: number
-  /** f(C) 累计应扣税 */
+  /** A = ROUND(MAX(C×税率−速算,0),2) */
   cumulativeTaxDue: number
   /** 是否使用了 2025-12 周期期初 */
   usedCycleOpening: boolean
@@ -167,15 +169,23 @@ export function resolvePayrollTax(options: {
   const priorTaxBase = opening
     ? roundMoney(opening.taxBase + prior.cumulativeIncome - prior.cumulativeSpecialDeduction)
     : roundMoney(prior.cumulativeIncome - prior.cumulativeSpecialDeduction)
-  // 口径：应纳税所得额 C = 累计扣税基数(截至上月) + 本期应发工资
   const cumulativeTaxBase = priorTaxBase
-  const taxable = roundMoney(priorTaxBase + payable)
+  // 自动 C = 累计扣税基数 + 本期应发；列「应纳税所得额」可手工覆盖为 C
+  const autoTaxable = roundMoney(priorTaxBase + payable)
+  const taxable =
+    entry.taxableIncomeOverride != null
+    && Number.isFinite(Number(entry.taxableIncomeOverride))
+      ? roundMoney(Number(entry.taxableIncomeOverride) || 0)
+      : autoTaxable
 
+  // B = 已预缴个税
   const priorTaxPaid = opening
     ? roundMoney(opening.taxPaid + prior.taxPaidBeforeThisMonth)
     : prior.taxPaidBeforeThisMonth
 
+  // A = ROUND(MAX(C×税率−速算扣除数, 0), 2)
   const cumulativeTaxDue = calcTaxOnCumulativeTaxable(taxable)
+  // 本期个税 = max(A − B, 0)
   const incomeTax = roundMoney(Math.max(0, cumulativeTaxDue - priorTaxPaid))
 
   const effectiveTax = getEffectiveIncomeTax({
@@ -204,6 +214,7 @@ export function resolvePayrollTax(options: {
     cycleEndYm: cycle.endYm,
     cumulativeTaxBase,
     payableForTax: roundMoney(payable),
+    autoTaxable,
     taxable,
     cumulativeTaxDue,
     usedCycleOpening: Boolean(opening),
@@ -237,6 +248,7 @@ export function enrichPayrollRowWithTax(
     iitCycleEndYm: tax.cycleEndYm,
     cumulativeTaxBase: tax.cumulativeTaxBase,
     payableForTax: tax.payableForTax,
+    autoTaxableIncome: tax.autoTaxable,
     cumulativeTaxable: tax.taxable,
     cumulativeTaxDue: tax.cumulativeTaxDue,
     taxPaidBeforeThisMonth: tax.cumulativeTaxPaidBefore,

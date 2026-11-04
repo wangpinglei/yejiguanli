@@ -57,6 +57,11 @@ export interface PayrollMonthEntry {
   incomeTax: number
   /** 手工覆盖本期个税；null=用系统值 */
   incomeTaxOverride: number | null
+  /**
+   * 本期应纳税所得额 C 手工覆盖；
+   * null=用「累计扣税基数(截至上月)+本期应发」
+   */
+  taxableIncomeOverride: number | null
   /** 保存时应发快照，供本年累计个税使用 */
   payableSnapshot?: number
 }
@@ -108,9 +113,11 @@ export interface PayrollRowResult extends PayrollRowInput {
   cumulativeTaxBase?: number
   /** 本期应发（C 计算用） */
   payableForTax?: number
-  /** C = 累计扣税基数 + 本期应发 */
+  /** 自动 C（税基+应发），未手工覆盖时 */
+  autoTaxableIncome?: number
+  /** C 应纳税所得额（取值列/覆盖后） */
   cumulativeTaxable?: number
-  /** A 累计应扣税 */
+  /** A = f(C) */
   cumulativeTaxDue?: number
   /** B 已预缴 */
   taxPaidBeforeThisMonth?: number
@@ -229,6 +236,10 @@ export function normalizePayrollEntry(
     raw.incomeTaxOverride === undefined || raw.incomeTaxOverride === null
       ? null
       : Number(raw.incomeTaxOverride)
+  const taxableIncomeOverride =
+    raw.taxableIncomeOverride === undefined || raw.taxableIncomeOverride === null
+      ? null
+      : Number(raw.taxableIncomeOverride)
 
   let absenceHours: number | null =
     raw.absenceHours === undefined || raw.absenceHours === null
@@ -275,6 +286,10 @@ export function normalizePayrollEntry(
     incomeTaxOverride: incomeTaxOverride != null && Number.isFinite(incomeTaxOverride)
       ? incomeTaxOverride
       : null,
+    taxableIncomeOverride:
+      taxableIncomeOverride != null && Number.isFinite(taxableIncomeOverride)
+        ? taxableIncomeOverride
+        : null,
     payableSnapshot: raw.payableSnapshot === undefined || raw.payableSnapshot === null
       ? undefined
       : Number(raw.payableSnapshot) || 0,
@@ -334,6 +349,7 @@ export function createEmptyPayrollEntry(personnelId: string): PayrollMonthEntry 
     specialAdditional: null,
     incomeTax: 0,
     incomeTaxOverride: null,
+    taxableIncomeOverride: null,
   }
 }
 
