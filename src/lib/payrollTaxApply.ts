@@ -4,9 +4,11 @@ import { roundMoney } from '@/lib/format'
 import type { PayrollMonthEntry, PayrollRowResult } from '@/lib/payrollCalc'
 import { loadPayrollEntries } from '@/lib/payrollCalc'
 import {
-  calcCurrentMonthIit,
+  calcIitDetail,
   getEffectiveIncomeTax,
-  listPriorMonthsInYear,
+  getIitCycleBounds,
+  getIitCycleMonthIndex,
+  listPriorMonthsInIitCycle,
   loadTaxProfile,
   MONTHLY_BASIC_DEDUCTION,
   resolveSpecialAdditionalMonthly,
@@ -26,11 +28,20 @@ export type PayrollTaxResolved = {
   netPay: number
   cumulativeIncome: number
   cumulativeTaxPaidBefore: number
+  /** 周期内第 N 月（12月=1 … 11月=12） */
   monthsInYear: number
+  cycleStartYm: string
+  cycleEndYm: string
+  /** 累计扣税基数 */
+  cumulativeTaxBase: number
+  /** C */
+  taxable: number
+  /** A */
+  cumulativeTaxDue: number
 }
 
 function sumPriorFromSnapshots(personnelId: string, yearMonth: string) {
-  const priors = listPriorMonthsInYear(yearMonth)
+  const priors = listPriorMonthsInIitCycle(yearMonth)
   let monthsCounted = 0
   let cumulativeIncome = 0
   let cumulativeSpecialDeduction = 0
@@ -113,19 +124,23 @@ export function resolvePayrollTax(options: {
   const specialAdditional = roundMoney(profileSpecial)
 
   const prior = sumPriorFromSnapshots(person.id, yearMonth)
-  const monthsInYear = prior.monthsCounted + 1
+  const cycle = getIitCycleBounds(yearMonth)
+  const monthsInYear = getIitCycleMonthIndex(yearMonth)
   const cumulativeIncome = roundMoney(prior.cumulativeIncome + payable)
-  const incomeTax = calcCurrentMonthIit({
+  const cumulativeSpecialDeduction = roundMoney(
+    prior.cumulativeSpecialDeduction + socialInsurancePersonal + housingFundPersonal,
+  )
+  const cumulativeSpecialAdditional = roundMoney(
+    prior.cumulativeSpecialAdditional + specialAdditional,
+  )
+  const detail = calcIitDetail({
     cumulativeIncome,
-    cumulativeSpecialDeduction: roundMoney(
-      prior.cumulativeSpecialDeduction + socialInsurancePersonal + housingFundPersonal,
-    ),
-    cumulativeSpecialAdditional: roundMoney(
-      prior.cumulativeSpecialAdditional + specialAdditional,
-    ),
+    cumulativeSpecialDeduction,
+    cumulativeSpecialAdditional,
     cumulativeBasicDeduction: MONTHLY_BASIC_DEDUCTION * monthsInYear,
     taxPaidBeforeThisMonth: prior.taxPaidBeforeThisMonth,
   })
+  const incomeTax = detail.currentMonthTax
 
   const effectiveTax = getEffectiveIncomeTax({
     incomeTax,
@@ -145,6 +160,11 @@ export function resolvePayrollTax(options: {
     cumulativeIncome,
     cumulativeTaxPaidBefore: prior.taxPaidBeforeThisMonth,
     monthsInYear,
+    cycleStartYm: cycle.startYm,
+    cycleEndYm: cycle.endYm,
+    cumulativeTaxBase: detail.cumulativeTaxBase,
+    taxable: detail.taxable,
+    cumulativeTaxDue: detail.cumulativeTaxDue,
   }
 }
 
@@ -167,5 +187,13 @@ export function enrichPayrollRowWithTax(
     specialAdditional: tax.specialAdditional,
     incomeTax: tax.effectiveTax,
     netPay: tax.netPay,
+    iitCycleMonthIndex: tax.monthsInYear,
+    iitCycleStartYm: tax.cycleStartYm,
+    iitCycleEndYm: tax.cycleEndYm,
+    cumulativeTaxBase: tax.cumulativeTaxBase,
+    cumulativeTaxable: tax.taxable,
+    cumulativeTaxDue: tax.cumulativeTaxDue,
+    taxPaidBeforeThisMonth: tax.cumulativeTaxPaidBefore,
+    systemIncomeTax: tax.incomeTax,
   }
 }

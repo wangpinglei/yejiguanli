@@ -100,6 +100,20 @@ export interface PayrollRowResult extends PayrollRowInput {
   specialAdditional?: number
   incomeTax?: number
   netPay?: number
+  /** 个税周期第 N 月（12月=1 … 11月=12） */
+  iitCycleMonthIndex?: number
+  iitCycleStartYm?: string
+  iitCycleEndYm?: string
+  /** 累计扣税基数 */
+  cumulativeTaxBase?: number
+  /** C 累计预缴应纳税所得额 */
+  cumulativeTaxable?: number
+  /** A 累计应扣税 */
+  cumulativeTaxDue?: number
+  /** B 已预缴 */
+  taxPaidBeforeThisMonth?: number
+  /** 系统算得本期个税（未手工覆盖） */
+  systemIncomeTax?: number
 }
 
 export function isLikelyOpsCenterName(name: string): boolean {

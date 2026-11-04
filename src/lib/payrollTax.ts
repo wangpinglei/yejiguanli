@@ -229,10 +229,70 @@ export function calcTaxOnCumulativeTaxable(taxable: number): number {
   const t = Math.max(0, Number(taxable) || 0)
   if (t <= 0) return 0
   for (const b of IIT_BRACKETS) {
-    if (t <= b.upTo) return roundMoney(t * b.rate - b.quick)
+    if (t <= b.upTo) return roundMoney(Math.max(0, t * b.rate - b.quick))
   }
   const last = IIT_BRACKETS[IIT_BRACKETS.length - 1]
-  return roundMoney(t * last.rate - last.quick)
+  return roundMoney(Math.max(0, t * last.rate - last.quick))
+}
+
+/**
+ * 个税累计周期：应发所属月的「上年12月 → 本年11月」。
+ * 例：2026-03 → 2025-12～2026-11；2026-12 → 2026-12～2027-11。
+ */
+export function getIitCycleBounds(yearMonth: string): {
+  startYm: string
+  endYm: string
+} {
+  if (!/^\d{4}-\d{2}$/.test(yearMonth)) {
+    return { startYm: yearMonth, endYm: yearMonth }
+  }
+  const year = Number(yearMonth.slice(0, 4))
+  const month = Number(yearMonth.slice(5, 7))
+  if (month === 12) {
+    return {
+      startYm: `${year}-12`,
+      endYm: `${year + 1}-11`,
+    }
+  }
+  return {
+    startYm: `${year - 1}-12`,
+    endYm: `${year}-11`,
+  }
+}
+
+/** 本工资月在周期内的序号：12月=1 … 11月=12 */
+export function getIitCycleMonthIndex(yearMonth: string): number {
+  if (!/^\d{4}-\d{2}$/.test(yearMonth)) return 1
+  const month = Number(yearMonth.slice(5, 7))
+  if (month === 12) return 1
+  return month + 1
+}
+
+function shiftYearMonth(yearMonth: string, deltaMonths: number): string {
+  const year = Number(yearMonth.slice(0, 4))
+  const month = Number(yearMonth.slice(5, 7))
+  const total = year * 12 + (month - 1) + deltaMonths
+  const y = Math.floor(total / 12)
+  const m = (total % 12) + 1
+  return `${y}-${String(m).padStart(2, '0')}`
+}
+
+/** 本周期内、早于当前工资月的 yearMonth 列表 */
+export function listPriorMonthsInIitCycle(yearMonth: string): string[] {
+  if (!/^\d{4}-\d{2}$/.test(yearMonth)) return []
+  const { startYm } = getIitCycleBounds(yearMonth)
+  const list: string[] = []
+  let cursor = startYm
+  while (cursor < yearMonth) {
+    list.push(cursor)
+    cursor = shiftYearMonth(cursor, 1)
+  }
+  return list
+}
+
+/** @deprecated 请用 listPriorMonthsInIitCycle（12月–次年11月周期） */
+export function listPriorMonthsInYear(yearMonth: string): string[] {
+  return listPriorMonthsInIitCycle(yearMonth)
 }
 
 export type CumulativeTaxInput = {
@@ -242,33 +302,48 @@ export type CumulativeTaxInput = {
   cumulativeSpecialDeduction: number
   /** 累计专项附加扣除 */
   cumulativeSpecialAdditional: number
-  /** 累计减除费用：5000 × 月数 */
+  /** 累计减除费用：5000 × 周期内月序号 */
   cumulativeBasicDeduction: number
-  /** 本年截至上月已预扣个税 */
+  /** 本周期截至上月已预扣个税 B */
   taxPaidBeforeThisMonth: number
 }
 
-export function calcCurrentMonthIit(input: CumulativeTaxInput): number {
-  const taxable = roundMoney(
-    input.cumulativeIncome
-    - input.cumulativeBasicDeduction
-    - input.cumulativeSpecialDeduction
-    - input.cumulativeSpecialAdditional,
-  )
-  const cumulativeTax = calcTaxOnCumulativeTaxable(taxable)
-  return roundMoney(Math.max(0, cumulativeTax - (input.taxPaidBeforeThisMonth || 0)))
+export type IitCalcDetail = {
+  /** 累计扣税基数 = Σ(应发 − 个人社保 − 个人公积金) */
+  cumulativeTaxBase: number
+  /** C 累计预缴应纳税所得额 */
+  taxable: number
+  /** A 累计应扣税金额 */
+  cumulativeTaxDue: number
+  /** B 已预缴 */
+  taxPaidBefore: number
+  /** 本月应扣 = max(A−B, 0) */
+  currentMonthTax: number
 }
 
-/** 列出同年、早于当前月的 yearMonth */
-export function listPriorMonthsInYear(yearMonth: string): string[] {
-  if (!/^\d{4}-\d{2}$/.test(yearMonth)) return []
-  const year = yearMonth.slice(0, 4)
-  const month = Number(yearMonth.slice(5, 7))
-  const list: string[] = []
-  for (let m = 1; m < month; m++) {
-    list.push(`${year}-${String(m).padStart(2, '0')}`)
+export function calcIitDetail(input: CumulativeTaxInput): IitCalcDetail {
+  const cumulativeTaxBase = roundMoney(
+    input.cumulativeIncome - input.cumulativeSpecialDeduction,
+  )
+  const taxable = roundMoney(
+    cumulativeTaxBase
+    - input.cumulativeSpecialAdditional
+    - input.cumulativeBasicDeduction,
+  )
+  const cumulativeTaxDue = calcTaxOnCumulativeTaxable(taxable)
+  const taxPaidBefore = roundMoney(input.taxPaidBeforeThisMonth || 0)
+  const currentMonthTax = roundMoney(Math.max(0, cumulativeTaxDue - taxPaidBefore))
+  return {
+    cumulativeTaxBase,
+    taxable,
+    cumulativeTaxDue,
+    taxPaidBefore,
+    currentMonthTax,
   }
-  return list
+}
+
+export function calcCurrentMonthIit(input: CumulativeTaxInput): number {
+  return calcIitDetail(input).currentMonthTax
 }
 
 export type MonthTaxSnapshot = {
@@ -294,7 +369,7 @@ export function sumPriorYearTaxBase(
   cumulativeSpecialAdditional: number
   taxPaidBeforeThisMonth: number
 } {
-  const priors = listPriorMonthsInYear(yearMonth)
+  const priors = listPriorMonthsInIitCycle(yearMonth)
   let monthsCounted = 0
   let cumulativeIncome = 0
   let cumulativeSpecialDeduction = 0

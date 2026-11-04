@@ -51,7 +51,10 @@ import MSpecialAdditionalDialog from '@/pages/Payroll/components/m-special-addit
 import MPayPlanDialog from '@/pages/Personnel/components/m-pay-plan-dialog'
 import { enrichPayrollRowWithTax, resolvePayrollTax } from '@/lib/payrollTaxApply'
 import {
+  getIitCycleBounds,
+  getIitCycleMonthIndex,
   loadTaxProfile,
+  MONTHLY_BASIC_DEDUCTION,
   resolveSpecialAdditionalMonthly,
   type PersonnelTaxProfile,
 } from '@/lib/payrollTax'
@@ -625,11 +628,20 @@ export default function Payroll() {
               步骤 4/5 其他预扣项目 — 专项附加按个税档案固定展示；不对时点「去调整」或「批量调整」写入档案（有修改记录）。
             </p>
           )}
-          {calcPhase === 'wizard' && entryMode === 'tax' && (
-            <p className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
-              步骤 5/5 个税扣除预报 — 专项附加来自上一档档案；本期个税可自动算或手工改。完成后点「生成工资表」。
-            </p>
-          )}
+          {calcPhase === 'wizard' && entryMode === 'tax' && (() => {
+            const cycle = getIitCycleBounds(yearMonth)
+            const n = getIitCycleMonthIndex(yearMonth)
+            return (
+              <p className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
+                步骤 5/5 个税扣除预报 — 累计周期{' '}
+                <strong>
+                  {cycle.startYm}～{cycle.endYm}
+                </strong>
+                （本月为第 {n} 月，减除费用 {MONTHLY_BASIC_DEDUCTION}×{n}）。
+                本月应扣 = max(A−B, 0)；A 按预扣率表由 C 计算；可手工改。完成后点「生成工资表」。
+              </p>
+            )
+          })()}
         </CardHeader>
         <CardContent className="space-y-4">
           {calcPhase === 'idle' ? (
@@ -1179,22 +1191,40 @@ export default function Payroll() {
                         })()}
                         {showPayrollCol(entryMode, 'tax') && (
                         <TableCell className="bg-amber-50/40">
-                          <Input
-                            type="number"
-                            className="h-8 w-[96px]"
-                            title="可手工覆盖系统累计预扣结果"
-                            value={
-                              entry.incomeTaxOverride != null
-                                ? entry.incomeTaxOverride
-                                : (row.incomeTax || 0)
-                            }
-                            onChange={(e) =>
-                              updateEntry(row.personnelId, {
-                                incomeTaxOverride:
-                                  e.target.value === '' ? null : Number(e.target.value) || 0,
-                              })
-                            }
-                          />
+                          <div className="space-y-1">
+                            <Input
+                              type="number"
+                              className="h-8 w-[96px]"
+                              title={[
+                                `周期 ${row.iitCycleStartYm || ''}～${row.iitCycleEndYm || ''} 第${row.iitCycleMonthIndex ?? '-'}月`,
+                                `扣税基数 ${money(row.cumulativeTaxBase || 0)}`,
+                                `C(应纳税所得) ${money(row.cumulativeTaxable || 0)}`,
+                                `A(累计应扣) ${money(row.cumulativeTaxDue || 0)}`,
+                                `B(已预缴) ${money(row.taxPaidBeforeThisMonth || 0)}`,
+                                `系统本月 ${money(row.systemIncomeTax ?? row.incomeTax ?? 0)}`,
+                                '可手工覆盖',
+                              ].join('\n')}
+                              value={
+                                entry.incomeTaxOverride != null
+                                  ? entry.incomeTaxOverride
+                                  : (row.incomeTax || 0)
+                              }
+                              onChange={(e) =>
+                                updateEntry(row.personnelId, {
+                                  incomeTaxOverride:
+                                    e.target.value === '' ? null : Number(e.target.value) || 0,
+                                })
+                              }
+                            />
+                            {entryMode === 'tax' && (
+                              <div className="max-w-[140px] text-[10px] leading-snug text-muted-foreground">
+                                C {money(row.cumulativeTaxable || 0)}
+                                <br />
+                                A {money(row.cumulativeTaxDue || 0)} − B{' '}
+                                {money(row.taxPaidBeforeThisMonth || 0)}
+                              </div>
+                            )}
+                          </div>
                         </TableCell>
                         )}
                         {showPayrollCol(entryMode, 'tax') && (
