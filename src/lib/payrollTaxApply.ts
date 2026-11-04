@@ -12,7 +12,6 @@ import {
   IIT_SEED_THROUGH_YM,
   listPriorMonthsInIitCycle,
   loadTaxProfile,
-  MONTHLY_BASIC_DEDUCTION,
   resolveSpecialAdditionalMonthly,
   shouldUseIitCycleOpening,
   type IitCycleOpening,
@@ -41,13 +40,9 @@ export type PayrollTaxResolved = {
   cumulativeTaxBase: number
   /** 本期应发（参与自动 C） */
   payableForTax: number
-  /** 累计专项附加扣除合计（含本月） */
-  cumulativeSpecialAdditional: number
-  /** 累计减除费用 5000×N */
-  cumulativeBasicDeduction: number
   /**
    * 自动 C = 累计扣税基数 + 本月应发 − 个人社保 − 个人公积金
-   * − 累计专项附加 − 累计减除费用
+   * − 本月专项附加合计
    */
   autoTaxable: number
   /** C：应纳税所得额（手工覆盖优先） */
@@ -179,28 +174,13 @@ export function resolvePayrollTax(options: {
     : roundMoney(prior.cumulativeIncome - prior.cumulativeSpecialDeduction)
   const cumulativeTaxBase = priorTaxBase
 
-  // 累计专项附加：有录入月累加 + 本月档案月额；
-  // 期初覆盖月无快照时，按档案月额 × 期初截止月序号补齐
-  const openingSpecialPad =
-    opening && throughYm
-      ? roundMoney(specialAdditional * getIitCycleMonthIndex(throughYm))
-      : 0
-  const cumulativeSpecialAdditional = roundMoney(
-    openingSpecialPad + prior.cumulativeSpecialAdditional + specialAdditional,
-  )
-  const cumulativeBasicDeduction = roundMoney(
-    MONTHLY_BASIC_DEDUCTION * monthsInYear,
-  )
-
-  // C = 累计扣税基数 + 本月应发 − 个人社保 − 个人公积金
-  //     − 累计专项附加合计 − 累计减除费用(5000×N)
+  // C = 累计扣税基数 + 本月应发 − 个人社保 − 个人公积金 − 本月专项附加合计
   const autoTaxable = roundMoney(
     priorTaxBase
     + payable
     - socialInsurancePersonal
     - housingFundPersonal
-    - cumulativeSpecialAdditional
-    - cumulativeBasicDeduction,
+    - specialAdditional,
   )
   const taxable =
     entry.taxableIncomeOverride != null
@@ -244,8 +224,6 @@ export function resolvePayrollTax(options: {
     cycleEndYm: cycle.endYm,
     cumulativeTaxBase,
     payableForTax: roundMoney(payable),
-    cumulativeSpecialAdditional,
-    cumulativeBasicDeduction,
     autoTaxable,
     taxable,
     cumulativeTaxDue,
@@ -280,8 +258,6 @@ export function enrichPayrollRowWithTax(
     iitCycleEndYm: tax.cycleEndYm,
     cumulativeTaxBase: tax.cumulativeTaxBase,
     payableForTax: tax.payableForTax,
-    cumulativeSpecialAdditionalTotal: tax.cumulativeSpecialAdditional,
-    cumulativeBasicDeduction: tax.cumulativeBasicDeduction,
     autoTaxableIncome: tax.autoTaxable,
     cumulativeTaxable: tax.taxable,
     cumulativeTaxDue: tax.cumulativeTaxDue,
