@@ -47,8 +47,14 @@ import MPayrollEntryLinks, {
   type PayrollCalcPhase,
   type PayrollEntryMode,
 } from '@/pages/Payroll/components/m-payroll-entry-links'
+import MSpecialAdditionalDialog from '@/pages/Payroll/components/m-special-additional-dialog'
 import MPayPlanDialog from '@/pages/Personnel/components/m-pay-plan-dialog'
 import { enrichPayrollRowWithTax, resolvePayrollTax } from '@/lib/payrollTaxApply'
+import {
+  loadTaxProfile,
+  resolveSpecialAdditionalMonthly,
+  type PersonnelTaxProfile,
+} from '@/lib/payrollTax'
 import type { Personnel } from '@/types'
 import {
   calculateMonthlySalary,
@@ -71,6 +77,7 @@ function showPayrollCol(
     | 'score'
     | 'adjust'
     | 'insurance'
+    | 'special'
     | 'tax',
 ): boolean {
   // 最终工资表不展示出勤三列（仅在考勤录入步骤显示）
@@ -84,8 +91,11 @@ function showPayrollCol(
   if (mode === 'insurance') {
     return col === 'core' || col === 'insurance' || col === 'salary'
   }
+  if (mode === 'otherDeduct') {
+    return col === 'core' || col === 'salary' || col === 'special'
+  }
   // tax
-  return col === 'core' || col === 'insurance' || col === 'tax' || col === 'salary'
+  return col === 'core' || col === 'special' || col === 'tax' || col === 'salary'
 }
 
 function payrollColSpan(mode: PayrollEntryMode): number {
@@ -93,8 +103,21 @@ function payrollColSpan(mode: PayrollEntryMode): number {
   if (mode === 'attendance') return 2 + 1 + 1 + 2 + 1 // 标准底薪 + 实际/缺勤/应出勤 + 实发底薪
   if (mode === 'score') return 2 + 1 + 1 + 1 // 标准绩效 + 分数 + 实发绩效
   if (mode === 'insurance') return 2 + 1 + 4 + 1 // 应发 + 企业/个人四列 + 操作
-  if (mode === 'tax') return 2 + 1 + 4 + 3 // 应发 + 企业/个人四列 + 专项/个税/实发
-  return 18 // 最终表含企业/个人四列、不含出勤三列
+  if (mode === 'otherDeduct') return 2 + 1 + 1 + 1 // 应发 + 专项附加 + 操作
+  if (mode === 'tax') return 2 + 1 + 1 + 2 // 应发 + 专项 + 个税/实发
+  return 18 // 最终表含企业/个人四列、专项、不含出勤三列
+}
+
+function getArchiveSpecialAdditional(person: Personnel): number {
+  const profile = loadTaxProfile(
+    person.id,
+    {
+      socialInsurance: person.socialInsurance,
+      housingFund: person.housingFund,
+    },
+    person.taxProfile as Partial<PersonnelTaxProfile> | undefined,
+  )
+  return resolveSpecialAdditionalMonthly(profile)
 }
 
 /** 档案社保公积金（方案优先；个人其次个税档案） */
@@ -157,6 +180,10 @@ export default function Payroll() {
     person: Personnel | null
   } | null>(null)
   const [historyPerson, setHistoryPerson] = useState<Personnel | null>(null)
+  const [specialAdjust, setSpecialAdjust] = useState<{
+    mode: 'single' | 'batch' | 'history'
+    person: Personnel | null
+  } | null>(null)
 
   const teamMgmtContext = useMemo(
     () => ({
@@ -280,11 +307,12 @@ export default function Payroll() {
           (calc.managementCommission || 0)
 
         const rawEntry = entries[person.id] || createEmptyPayrollEntry(person.id)
-        // 个人代扣只认人员档案/薪酬方案，不认本月录入覆盖
+        // 个人代扣/专项附加只认人员档案，不认本月录入覆盖
         const entry: PayrollMonthEntry = {
           ...rawEntry,
           socialInsurancePersonal: null,
           housingFundPersonal: null,
+          specialAdditional: null,
         }
         const baseRow = calcPayrollRow({
           personnelId: person.id,
@@ -588,30 +616,35 @@ export default function Payroll() {
           </CardDescription>
           {calcPhase === 'wizard' && entryMode === 'attendance' && (
             <p className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
-              步骤 1/4 考勤录入 — 应出勤固定 {PAYROLL_STANDARD_HOURS} 小时；填写缺勤后，
+              步骤 1/5 考勤录入 — 应出勤固定 {PAYROLL_STANDARD_HOURS} 小时；填写缺勤后，
               实际出勤 = 应出勤 − 缺勤。
             </p>
           )}
           {calcPhase === 'wizard' && entryMode === 'score' && (
             <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-              步骤 2/4 绩效分数录入 — 请填写考核分（0–100）。
+              步骤 2/5 绩效分数录入 — 请填写考核分（0–100）。
             </p>
           )}
           {calcPhase === 'wizard' && entryMode === 'insurance' && (
             <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              步骤 3/4 社保公积金录入 — 企业/个人按人员档案固定展示；不对时点「去调整」或「批量调整」写入薪酬方案/个税档案（有修改记录）。
+              步骤 3/5 社保公积金录入 — 企业/个人按人员档案固定展示；不对时点「去调整」或「批量调整」写入薪酬方案/个税档案（有修改记录）。
+            </p>
+          )}
+          {calcPhase === 'wizard' && entryMode === 'otherDeduct' && (
+            <p className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-900">
+              步骤 4/5 其他预扣项目 — 专项附加按个税档案固定展示；不对时点「去调整」或「批量调整」写入档案（有修改记录）。
             </p>
           )}
           {calcPhase === 'wizard' && entryMode === 'tax' && (
             <p className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
-              步骤 4/4 个税扣除预报 — 专项附加来自人员档案；本期个税可自动算或手工改。完成后点「生成工资表」。
+              步骤 5/5 个税扣除预报 — 专项附加来自上一档档案；本期个税可自动算或手工改。完成后点「生成工资表」。
             </p>
           )}
         </CardHeader>
         <CardContent className="space-y-4">
           {calcPhase === 'idle' ? (
             <div className="rounded-lg border border-dashed bg-muted/20 px-4 py-10 text-center text-sm text-muted-foreground">
-              尚未开始核算。请点击右上角「去核算工资」，按考勤 → 绩效分数 → 社保公积金 → 个税依次录入后生成工资表。
+              尚未开始核算。请点击右上角「去核算工资」，按考勤 → 绩效分数 → 社保公积金 → 其他预扣 → 个税依次录入后生成工资表。
             </div>
           ) : (
           <>
@@ -659,6 +692,17 @@ export default function Payroll() {
               >
                 <Pencil className="mr-1.5 h-3.5 w-3.5" />
                 批量调整社保公积金
+              </Button>
+            )}
+            {entryMode === 'otherDeduct' && canEditPersonnel && (
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={rows.length === 0}
+                onClick={() => setSpecialAdjust({ mode: 'batch', person: null })}
+              >
+                <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                批量调整专项附加
               </Button>
             )}
             <Badge variant="secondary" className="h-8 px-3">
@@ -722,6 +766,7 @@ export default function Payroll() {
                     {showPayrollCol(entryMode, 'salary') &&
                       (entryMode === 'all' ||
                         entryMode === 'insurance' ||
+                        entryMode === 'otherDeduct' ||
                         entryMode === 'tax') && (
                       <TableHead className="text-right font-semibold">应发</TableHead>
                     )}
@@ -748,8 +793,13 @@ export default function Payroll() {
                     {entryMode === 'insurance' && (
                       <TableHead className="min-w-[140px] bg-amber-50/80">操作</TableHead>
                     )}
-                    {showPayrollCol(entryMode, 'tax') && (
-                      <TableHead className="text-right min-w-[96px] bg-amber-50/80">专项附加</TableHead>
+                    {showPayrollCol(entryMode, 'special') && (
+                      <TableHead className="text-right min-w-[96px] bg-orange-50/80">
+                        专项附加
+                      </TableHead>
+                    )}
+                    {entryMode === 'otherDeduct' && (
+                      <TableHead className="min-w-[140px] bg-orange-50/80">操作</TableHead>
                     )}
                     {showPayrollCol(entryMode, 'tax') && (
                       <TableHead className="min-w-[100px] bg-amber-50/80">本期个税</TableHead>
@@ -998,6 +1048,7 @@ export default function Payroll() {
                         {showPayrollCol(entryMode, 'salary') &&
                           (entryMode === 'all' ||
                             entryMode === 'insurance' ||
+                            entryMode === 'otherDeduct' ||
                             entryMode === 'tax') && (
                         <TableCell className="text-right tabular-nums font-semibold text-emerald-700">
                           {money(row.payable)}
@@ -1063,11 +1114,57 @@ export default function Payroll() {
                             </>
                           )
                         })()}
-                        {showPayrollCol(entryMode, 'tax') && (
-                        <TableCell className="text-right tabular-nums bg-amber-50/40">
-                          {money(row.specialAdditional || 0)}
-                        </TableCell>
-                        )}
+                        {showPayrollCol(entryMode, 'special') && (() => {
+                          const person = personnel.find((p) => p.id === row.personnelId)
+                          const specialAmt = person
+                            ? getArchiveSpecialAdditional(person)
+                            : (row.specialAdditional || 0)
+                          return (
+                            <>
+                              <TableCell className="bg-orange-50/40 text-right tabular-nums">
+                                {money(specialAmt)}
+                              </TableCell>
+                              {entryMode === 'otherDeduct' && (
+                                <TableCell className="bg-orange-50/40">
+                                  <div className="flex flex-wrap items-center gap-1">
+                                    {canEditPersonnel && person && (
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 px-2 text-xs"
+                                        onClick={() =>
+                                          setSpecialAdjust({
+                                            mode: 'single',
+                                            person,
+                                          })
+                                        }
+                                      >
+                                        去调整
+                                      </Button>
+                                    )}
+                                    {person && (
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 px-2 text-xs text-muted-foreground"
+                                        onClick={() =>
+                                          setSpecialAdjust({
+                                            mode: 'history',
+                                            person,
+                                          })
+                                        }
+                                      >
+                                        记录
+                                      </Button>
+                                    )}
+                                  </div>
+                                </TableCell>
+                              )}
+                            </>
+                          )
+                        })()}
                         {showPayrollCol(entryMode, 'tax') && (
                         <TableCell className="bg-amber-50/40">
                           <Input
@@ -1197,6 +1294,33 @@ export default function Payroll() {
           if (!open) setHistoryPerson(null)
         }}
         canEdit={false}
+      />
+
+      <MSpecialAdditionalDialog
+        open={Boolean(specialAdjust)}
+        onOpenChange={(open) => {
+          if (!open) setSpecialAdjust(null)
+        }}
+        mode={specialAdjust?.mode || 'single'}
+        person={specialAdjust?.person || null}
+        people={rows
+          .map((r) => personnel.find((p) => p.id === r.personnelId))
+          .filter((p): p is Personnel => Boolean(p))}
+        onAdjusted={(ids) => {
+          setEntries((prev) => {
+            const next = { ...prev }
+            for (const id of ids) {
+              const cur = next[id] || createEmptyPayrollEntry(id)
+              next[id] = {
+                ...cur,
+                specialAdditional: null,
+              }
+            }
+            return next
+          })
+          setSavedTip(`已更新 ${ids.length} 人专项附加档案`)
+          window.setTimeout(() => setSavedTip(''), 2500)
+        }}
       />
     </div>
   )

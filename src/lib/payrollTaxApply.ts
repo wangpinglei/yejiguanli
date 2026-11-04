@@ -5,11 +5,11 @@ import type { PayrollMonthEntry, PayrollRowResult } from '@/lib/payrollCalc'
 import { loadPayrollEntries } from '@/lib/payrollCalc'
 import {
   calcCurrentMonthIit,
-  calcSpecialAdditionalMonthly,
   getEffectiveIncomeTax,
   listPriorMonthsInYear,
   loadTaxProfile,
   MONTHLY_BASIC_DEDUCTION,
+  resolveSpecialAdditionalMonthly,
 } from '@/lib/payrollTax'
 import { resolvePayForDate } from '@/lib/compensation'
 import type { Personnel } from '@/types'
@@ -84,7 +84,7 @@ export function resolvePayrollTax(options: {
     },
     person.taxProfile || null,
   )
-  const profileSpecial = calcSpecialAdditionalMonthly(profile.special)
+  const profileSpecial = resolveSpecialAdditionalMonthly(profile)
   const payAtMid = resolvePayForDate(person, `${yearMonth}-15`)
   // 方案个人代扣优先；旧方案为 0 时回退档案（兼容未拆分前的数据）
   const defaultSocialPersonal =
@@ -102,11 +102,8 @@ export function resolvePayrollTax(options: {
       ? Number(entry.housingFundPersonal) || 0
       : defaultHousingPersonal,
   )
-  const specialAdditional = roundMoney(
-    entry.specialAdditional != null
-      ? Number(entry.specialAdditional) || 0
-      : profileSpecial,
-  )
+  // 专项附加只认人员档案（覆盖额或勾选项合计），不认本月录入覆盖
+  const specialAdditional = roundMoney(profileSpecial)
 
   const prior = sumPriorFromSnapshots(person.id, yearMonth)
   const monthsInYear = prior.monthsCounted + 1

@@ -5,6 +5,7 @@ export type PayrollEntryMode =
   | 'attendance'
   | 'score'
   | 'insurance'
+  | 'otherDeduct'
   | 'tax'
 
 export type PayrollCalcPhase = 'idle' | 'wizard' | 'result'
@@ -16,6 +17,7 @@ export const PAYROLL_ENTRY_STEPS: Array<{
   { key: 'attendance', label: '考勤录入' },
   { key: 'score', label: '绩效分数录入' },
   { key: 'insurance', label: '社保公积金录入' },
+  { key: 'otherDeduct', label: '其他预扣项目' },
   { key: 'tax', label: '个税扣除预报' },
 ]
 

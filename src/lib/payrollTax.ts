@@ -38,6 +38,15 @@ export interface SpecialAdditionalDeduction {
   seriousIllnessMonthly: number
 }
 
+export type TaxProfileChangeLog = {
+  at: string
+  operator: string
+  operatorId?: string
+  /** 调整后专项附加月额 */
+  amount: number
+  remark?: string
+}
+
 export interface PersonnelTaxProfile {
   personnelId: string
   special: SpecialAdditionalDeduction
@@ -45,6 +54,13 @@ export interface PersonnelTaxProfile {
   socialInsurancePersonal: number
   /** 公积金个人缴纳默认 */
   housingFundPersonal: number
+  /**
+   * 专项附加月额覆盖。有值（含 0）时优先于勾选项合计，用于一键/批量调整。
+   * null/undefined = 按 special 勾选项计算。
+   */
+  specialAdditionalOverride?: number | null
+  /** 专项附加一键调整记录 */
+  specialAdditionalLogs?: TaxProfileChangeLog[]
   updatedAt: string
 }
 
@@ -122,6 +138,19 @@ export function calcSpecialAdditionalMonthly(special: SpecialAdditionalDeduction
   return roundMoney(total)
 }
 
+/** 档案专项附加月额：覆盖值优先，否则按勾选项合计 */
+export function resolveSpecialAdditionalMonthly(
+  profile: Pick<PersonnelTaxProfile, 'special' | 'specialAdditionalOverride'>,
+): number {
+  if (
+    profile.specialAdditionalOverride != null
+    && Number.isFinite(Number(profile.specialAdditionalOverride))
+  ) {
+    return roundMoney(Number(profile.specialAdditionalOverride) || 0)
+  }
+  return calcSpecialAdditionalMonthly(profile.special || createEmptySpecialAdditional())
+}
+
 export function loadAllTaxProfiles(): Record<string, PersonnelTaxProfile> {
   try {
     const raw = localStorage.getItem(PAYROLL_TAX_PROFILE_KEY)
@@ -156,6 +185,13 @@ export function loadTaxProfile(
         serverProfile.housingFundPersonal != null
           ? Number(serverProfile.housingFundPersonal) || 0
           : empty.housingFundPersonal,
+      specialAdditionalOverride:
+        serverProfile.specialAdditionalOverride != null
+          ? Number(serverProfile.specialAdditionalOverride)
+          : empty.specialAdditionalOverride ?? null,
+      specialAdditionalLogs: Array.isArray(serverProfile.specialAdditionalLogs)
+        ? serverProfile.specialAdditionalLogs
+        : [],
     }
   }
   // 兼容：尚未同步服务器时读本机缓存
