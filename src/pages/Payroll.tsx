@@ -673,7 +673,8 @@ export default function Payroll() {
                   {cycle.startYm}～{cycle.endYm}
                 </strong>
                 （本月为第 {n} 月，减除费用 {MONTHLY_BASIC_DEDUCTION}×{n}）。
-                C=应纳税所得额（默认可=累计扣税基数+本期应发）；
+                C=累计扣税基数+本月应发−个人社保−个人公积金−累计专项附加−减除费用(
+                {MONTHLY_BASIC_DEDUCTION}×{n})；
                 B=已预缴个税；
                 A=ROUND(MAX(C×{'{3,10,20,25,30,35,45}%'}−速算扣除数, 0), 2)；
                 本期个税=max(A−B, 0)。
@@ -1353,7 +1354,7 @@ export default function Payroll() {
                                     type="number"
                                     step="0.01"
                                     className="ml-auto h-8 w-[110px] text-right tabular-nums"
-                                    title="应纳税所得额 C = 累计扣税基数 + 本期应发；可改"
+                                    title="应纳税所得额 C = 税基+应发−社保−公积金−累计专项附加−累计减除费用；可改"
                                     value={
                                       entry.taxableIncomeOverride != null
                                         ? entry.taxableIncomeOverride
@@ -1389,7 +1390,11 @@ export default function Payroll() {
                                   />
                                   <div className="mt-1 text-right text-[10px] text-muted-foreground tabular-nums">
                                     {money(row.cumulativeTaxBase || 0)}+
-                                    {money(row.payableForTax ?? row.payable ?? 0)}
+                                    {money(row.payableForTax ?? row.payable ?? 0)}−
+                                    {money(row.socialInsurancePersonal || 0)}−
+                                    {money(row.housingFundPersonal || 0)}−
+                                    {money(row.cumulativeSpecialAdditionalTotal || 0)}−
+                                    {money(row.cumulativeBasicDeduction || 0)}
                                   </div>
                                 </TableCell>
                               </>
@@ -1398,6 +1403,12 @@ export default function Payroll() {
                         {showPayrollCol(entryMode, 'tax') && (() => {
                           const taxBase = Number(row.cumulativeTaxBase) || 0
                           const pay = Number(row.payableForTax ?? row.payable) || 0
+                          const social = Number(row.socialInsurancePersonal) || 0
+                          const housing = Number(row.housingFundPersonal) || 0
+                          const cumSpecial =
+                            Number(row.cumulativeSpecialAdditionalTotal) || 0
+                          const basicDeduct =
+                            Number(row.cumulativeBasicDeduction) || 0
                           const autoC = Number(row.autoTaxableIncome) || 0
                           const cVal = Number(row.cumulativeTaxable) || 0
                           const bVal = Number(row.taxPaidBeforeThisMonth) || 0
@@ -1433,7 +1444,9 @@ export default function Payroll() {
                                     <>手工 {money(cVal)}</>
                                   ) : (
                                     <>
-                                      {money(taxBase)}+{money(pay)}={money(autoC)}
+                                      {money(taxBase)}+{money(pay)}−{money(social)}−
+                                      {money(housing)}−{money(cumSpecial)}−
+                                      {money(basicDeduct)}={money(autoC)}
                                     </>
                                   )}
                                 </div>

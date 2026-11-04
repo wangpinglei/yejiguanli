@@ -59,7 +59,7 @@ export interface PayrollMonthEntry {
   incomeTaxOverride: number | null
   /**
    * 本期应纳税所得额 C 手工覆盖；
-   * null=用「累计扣税基数(截至上月)+本期应发」
+   * null=用「税基+应发−社保−公积金−累计专项附加−累计减除费用」
    */
   taxableIncomeOverride: number | null
   /** 保存时应发快照，供本年累计个税使用 */
@@ -113,7 +113,11 @@ export interface PayrollRowResult extends PayrollRowInput {
   cumulativeTaxBase?: number
   /** 本期应发（C 计算用） */
   payableForTax?: number
-  /** 自动 C（税基+应发），未手工覆盖时 */
+  /** 累计专项附加扣除合计（含本月） */
+  cumulativeSpecialAdditionalTotal?: number
+  /** 累计减除费用 5000×N */
+  cumulativeBasicDeduction?: number
+  /** 自动 C（完整公式），未手工覆盖时 */
   autoTaxableIncome?: number
   /** C 应纳税所得额（取值列/覆盖后） */
   cumulativeTaxable?: number
