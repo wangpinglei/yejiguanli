@@ -247,6 +247,7 @@ export default function SalesUnits() {
         costRecords,
         u.id,
         selectedMonth,
+        u,
       )
       const salaryData = getTotalSalaryCost(
         [u.id],

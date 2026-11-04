@@ -12,10 +12,12 @@ import {
   formatSaleSettlementRatioForSale,
 } from "@/lib/settlement";
 import {
+  findUnitForCost,
   getEffectiveConfirmAmount,
   getEstimatedManualCost,
   getEffectiveManualCost,
 } from "@/lib/confirmAmount";
+import { isSalesUnitOperatingInMonth } from "@/lib/salesUnitStatus";
 import {
   listRecurringYearMonths,
   matchesRecurringYearMonth,
@@ -151,8 +153,14 @@ export default function ProfitAnalysis() {
   // 按月过滤
   const monthlySales = useMemo(() => filterByMonth(salesRecords, selectedMonth), [salesRecords, selectedMonth]);
   const monthlyCosts = useMemo(
-    () => costRecords.filter((c) => matchesRecurringYearMonth(c, selectedMonth)),
-    [costRecords, selectedMonth],
+    () => costRecords.filter((c) => {
+      if (!matchesRecurringYearMonth(c, selectedMonth)) return false
+      return isSalesUnitOperatingInMonth(
+        findUnitForCost(salesUnits, c.salesUnitId),
+        selectedMonth,
+      )
+    }),
+    [costRecords, selectedMonth, salesUnits],
   );
 
   // 筛选数据
@@ -195,23 +203,19 @@ unitIds,
     ).grandSalesCommission;
   }
 
-  // 其他收入（录入侧）按月过滤，提前供盈亏汇总使用
+  // 其他收入（录入侧）按月过滤；单位停用次月起不再计入
   const monthlyIncomeRecords = useMemo(() => {
-    const targetM = parseInt(selectedMonth.slice(5, 7), 10);
     return incomeRecords
       .filter((r) => {
         if (!matchFilterUnit(r.salesUnitId)) return false;
-        if (r.isRecurring) {
-          const months = r.recurringMonths || [1,2,3,4,5,6,7,8,9,10,11,12];
-          if (!months.includes(targetM)) return false;
-          if (r.recurringStartDate && selectedMonth < r.recurringStartDate.slice(0, 7)) return false;
-          if (r.recurringEndDate && selectedMonth > r.recurringEndDate.slice(0, 7)) return false;
-          return true;
-        }
-        return getYearMonth(r.date) === selectedMonth;
+        if (!matchesRecurringYearMonth(r, selectedMonth)) return false;
+        return isSalesUnitOperatingInMonth(
+          findUnitForCost(salesUnits, r.salesUnitId),
+          selectedMonth,
+        );
       })
       .sort((a, b) => (b.createdAt || b.date).localeCompare(a.createdAt || a.date));
-  }, [incomeRecords, filterUnitIds, isAllFilterUnits, selectedMonth]);
+  }, [incomeRecords, filterUnitIds, isAllFilterUnits, selectedMonth, salesUnits]);
 
   // 汇总（按月度）
   const summary = useMemo(() => {
@@ -237,7 +241,13 @@ unitIds,
     const productProfit = totalSettlementIncome - totalCommission; // 产品利润 = 结算收入 - 提成
     const manualCost = unitIds.reduce(
       (sum, uid) =>
-        sum + getEffectiveManualCost(costSettlements, costRecords, uid, selectedMonth),
+        sum + getEffectiveManualCost(
+          costSettlements,
+          costRecords,
+          uid,
+          selectedMonth,
+          findUnitForCost(salesUnits, uid),
+        ),
       0,
     );
     const salaryPayCost = salaryData.grandSalary;
@@ -338,7 +348,13 @@ unitIds,
         );
         const manualCost = unitIds.reduce(
           (sum, uid) =>
-            sum + getEffectiveManualCost(costSettlements, costRecords, uid, month),
+            sum + getEffectiveManualCost(
+              costSettlements,
+              costRecords,
+              uid,
+              month,
+              findUnitForCost(salesUnits, uid),
+            ),
           0,
         );
         const revenue = settlementIncome + data.otherIncome
@@ -384,6 +400,7 @@ unitIds,
         costRecords,
         unit.id,
         selectedMonth,
+        unit,
       );
       const salaryCost = unitSalary.grandTotal;
       const cost = manualCost + salaryCost;
@@ -587,7 +604,12 @@ unitIds,
       ? salesUnits
       : salesUnits.filter((u) => filterUnitIds.includes(u.id));
     return unitsToShow.map((unit) => {
-      const estimatedAmount = getEstimatedManualCost(costRecords, unit.id, selectedMonth);
+      const estimatedAmount = getEstimatedManualCost(
+        costRecords,
+        unit.id,
+        selectedMonth,
+        unit,
+      );
       const settlement = costSettlements.find(
         (r) => r.salesUnitId === unit.id && r.yearMonth === selectedMonth,
       );
@@ -597,6 +619,7 @@ unitIds,
         costRecords,
         unit.id,
         selectedMonth,
+        unit,
       );
       const diff = actualAmount - estimatedAmount;
       const lines = buildCostConfirmLines(
@@ -604,6 +627,7 @@ unitIds,
         unit.id,
         selectedMonth,
         settlement?.actualAmount,
+        unit,
       );
       return {
         unit,
@@ -772,7 +796,13 @@ unitIds,
         otherIncome += monthIncomes.reduce((sum, r) => sum + r.totalAmount, 0);
         manualCost += resolvedUnitIds.reduce(
           (sum, uid) =>
-            sum + getEffectiveManualCost(costSettlements, costRecords, uid, month),
+            sum + getEffectiveManualCost(
+              costSettlements,
+              costRecords,
+              uid,
+              month,
+              findUnitForCost(salesUnits, uid),
+            ),
           0,
         );
 
@@ -1697,6 +1727,7 @@ unitIds,
         existingActual={costConfirmDialog?.existing?.actualAmount}
         existingRemark={costConfirmDialog?.existing?.remark}
         costRecords={costRecords}
+        unit={findUnitForCost(salesUnits, costConfirmDialog?.unitId || '')}
         onClose={() => setCostConfirmDialog(null)}
         onSubmit={handleCostConfirmSubmit}
       />

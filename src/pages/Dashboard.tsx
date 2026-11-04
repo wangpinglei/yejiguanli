@@ -3,7 +3,8 @@ import { useData } from "@/context/DataContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { formatCurrency, formatPercent, getYearMonth } from "@/lib/format";
 import { getTotalSalaryCost, filterByMonth } from "@/lib/salary";
-import { getEffectiveManualCost } from "@/lib/confirmAmount";
+import { findUnitForCost, getEffectiveManualCost } from "@/lib/confirmAmount";
+import { isSalesUnitOperatingInMonth } from "@/lib/salesUnitStatus";
 import {
   listRecurringYearMonths,
   matchesRecurringYearMonth,
@@ -145,8 +146,14 @@ export default function Dashboard() {
     [filteredSalesRecords, selectedMonth]
   );
   const monthlyCosts = useMemo(
-    () => filteredCostRecords.filter((c) => matchesRecurringYearMonth(c, selectedMonth)),
-    [filteredCostRecords, selectedMonth],
+    () => filteredCostRecords.filter((c) => {
+      if (!matchesRecurringYearMonth(c, selectedMonth)) return false
+      return isSalesUnitOperatingInMonth(
+        findUnitForCost(filteredUnits, c.salesUnitId),
+        selectedMonth,
+      )
+    }),
+    [filteredCostRecords, selectedMonth, filteredUnits],
   );
 
   // 计算统计（按月度）
@@ -154,7 +161,13 @@ export default function Dashboard() {
     const totalRevenue = monthlySales.reduce((sum, s) => sum + s.totalAmount, 0);
     const manualCost = filterUnitIds.reduce(
       (sum, uid) =>
-        sum + getEffectiveManualCost(costSettlements, monthlyCosts, uid, selectedMonth),
+        sum + getEffectiveManualCost(
+          costSettlements,
+          monthlyCosts,
+          uid,
+          selectedMonth,
+          findUnitForCost(filteredUnits, uid),
+        ),
       0,
     );
     const salaryData = getTotalSalaryCost(
@@ -197,7 +210,7 @@ filterUnitIds,
   }, [
     monthlySales, monthlyCosts, filterUnitIds, filteredUnits, filteredPersonnel,
     filteredSalesRecords, products, selectedMonth, monthlyAdjustments, productPersonCommissions,
-    teamMgmtContext, costSettlements,
+    teamMgmtContext, costSettlements, filteredUnits,
   ]);
 
   // 月度趋势
@@ -238,6 +251,7 @@ filterUnitIds,
               filteredCostRecords,
               uid,
               month,
+              findUnitForCost(filteredUnits, uid),
             ),
           0,
         );
@@ -265,6 +279,7 @@ filterUnitIds,
         monthlyCosts,
         unit.id,
         selectedMonth,
+        unit,
       );
       const salaryCost = getTotalSalaryCost(
 [unit.id],

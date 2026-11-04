@@ -23,7 +23,12 @@ import {
 } from "@/lib/payrollCalc";
 import { personBelongsToUnitInMonth } from "@/lib/unitAssignment";
 import { calcSaleInternalSalesCommissionPreview, calcSalePersonCommissionPreview } from "@/lib/commissionReward";
-import { getEffectiveConfirmAmount, getEffectiveManualCost } from "@/lib/confirmAmount";
+import {
+  findUnitForCost,
+  getEffectiveConfirmAmount,
+  getEffectiveManualCost,
+} from "@/lib/confirmAmount";
+import { isSalesUnitOperatingInMonth } from "@/lib/salesUnitStatus";
 import { calcSaleSettlementIncome } from "@/lib/settlement";
 import type { CostRecord, CostItem, IncomeRecord, IncomeItem } from "@/types";
 import {
@@ -269,17 +274,19 @@ export default function CostManagement() {
     };
   }, [salaryCostMode, forecastSalaryCosts, payrollPayableByUnit]);
 
-  // 按月过滤手动成本记录（含月度固定循环成本）
+  // 按月过滤手动成本记录（含月度固定循环成本；单位停用次月起不再展示）
   const filteredRecords = useMemo(() => {
     return costRecords
       .filter((c) => {
         const matchUnit = filterUnit === "all" || c.salesUnitId === filterUnit;
         if (!matchUnit) return false;
         if (!matchesRecurringYearMonth(c, selectedMonth)) return false;
+        const unit = findUnitForCost(salesUnits, c.salesUnitId);
+        if (!isSalesUnitOperatingInMonth(unit, selectedMonth)) return false;
         return c.remark.toLowerCase().includes(search.toLowerCase());
       })
       .sort((a, b) => (b.createdAt || b.date).localeCompare(a.createdAt || a.date));
-  }, [costRecords, filterUnit, selectedMonth, search]);
+  }, [costRecords, filterUnit, selectedMonth, search, salesUnits]);
 
   const manualCostTotal = useMemo(() => {
     return filteredRecords.reduce((sum, c) => sum + c.totalCost, 0);
@@ -353,29 +360,20 @@ export default function CostManagement() {
     [salaryCosts],
   );
 
-  // 按月过滤收入记录（同时匹配普通记录和月度固定记录）
+  // 按月过滤收入记录（月度固定；单位停用次月起不再展示）
   const filteredIncomeRecords = useMemo(() => {
     const targetMonth = selectedMonth; // "2026-08"
-    const targetM = parseInt(targetMonth.slice(5, 7), 10);
     return incomeRecords
       .filter((r) => {
         const matchUnit = filterUnit === "all" || r.salesUnitId === filterUnit;
         if (!matchUnit) return false;
-        // 月度固定模式：判断目标月是否在适用月份内 + 起止日期
-        if (r.isRecurring) {
-          const months = r.recurringMonths || [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-          if (!months.includes(targetM)) return false;
-          // 起始日期校验
-          if (r.date && targetMonth < r.date.slice(0, 7)) return false;
-          // 结束日期校验
-          if (r.recurringEndDate && targetMonth > r.recurringEndDate.slice(0, 7)) return false;
-          return true;
-        }
-        // 普通记录按日期月份匹配
-        return getYearMonth(r.date) === selectedMonth;
+        if (!matchesRecurringYearMonth(r, targetMonth)) return false;
+        const unit = findUnitForCost(salesUnits, r.salesUnitId);
+        if (!isSalesUnitOperatingInMonth(unit, targetMonth)) return false;
+        return true;
       })
       .sort((a, b) => (b.createdAt || b.date).localeCompare(a.createdAt || a.date));
-  }, [incomeRecords, filterUnit, selectedMonth]);
+  }, [incomeRecords, filterUnit, selectedMonth, salesUnits]);
 
   const incomeTotal = useMemo(() => {
     return filteredIncomeRecords.reduce((sum, r) => sum + r.totalAmount, 0);
@@ -387,8 +385,14 @@ export default function CostManagement() {
     ? salesUnits.map((u) => u.id)
     : [filterUnit];
   const effectiveManualCostTotal = costUnitIds.reduce(
-    (sum, uid) =>
-      sum + getEffectiveManualCost(costSettlements, costRecords, uid, selectedMonth),
+      (sum, uid) =>
+      sum + getEffectiveManualCost(
+        costSettlements,
+        costRecords,
+        uid,
+        selectedMonth,
+        findUnitForCost(salesUnits, uid),
+      ),
     0,
   );
   const grandTotal = effectiveManualCostTotal + salaryCosts.grandTotal;
@@ -1241,19 +1245,26 @@ export default function CostManagement() {
                                 <span className="mr-3 text-muted-foreground">合计</span>
                                 <span className="font-bold text-orange-600">{formatCurrency(record.totalCost)}</span>
                               </div>
-                              {record.isRecurring && (
+                              {record.isRecurring && (() => {
+                                const unit = findUnitForCost(salesUnits, record.salesUnitId)
+                                const unitClosedYm = (unit?.closedAt || '').slice(0, 7)
+                                const endHint = record.recurringEndDate
+                                  ? ` · 至 ${formatDate(record.recurringEndDate)} 止`
+                                  : unitClosedYm
+                                    ? ` · 单位停用后截止 ${unitClosedYm}`
+                                    : ' · 永久生效'
+                                return (
                                 <div className="rounded-lg bg-orange-50 px-3 py-2 text-xs text-orange-800">
                                   <Repeat className="inline mr-1 h-3 w-3" />
                                   月度固定成本
-                                  {record.recurringEndDate
-                                    ? ` · 至 ${formatDate(record.recurringEndDate)} 止`
-                                    : " · 永久生效"}
+                                  {endHint}
                                   {" · "}
                                   {record.recurringMonths?.length === 12
                                     ? "全年"
                                     : (record.recurringMonths || []).map((m) => `${m}月`).join("、")}
                                 </div>
-                              )}
+                                )
+                              })()}
                               {record.changeReason && (
                                 <div className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">
                                   <strong>最近变更原因：</strong>{record.changeReason}
@@ -1271,7 +1282,9 @@ export default function CostManagement() {
                     <TableCell colSpan={10} className="text-center py-12 text-muted-foreground">
                       {selectedMonth} 月暂无手动成本记录
                       {costRecords.some((r) => r.isRecurring) && (
-                        <div className="text-xs mt-1">（已配置月度固定成本但未选中适用月份）</div>
+                        <div className="text-xs mt-1">
+                          （月度固定成本可能因未选适用月份，或单位已停用而不再计入本月）
+                        </div>
                       )}
                     </TableCell>
                   </TableRow>

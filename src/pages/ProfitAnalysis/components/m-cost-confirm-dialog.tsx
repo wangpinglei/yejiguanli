@@ -22,8 +22,11 @@ import {
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { formatCurrency } from '@/lib/format'
-import type { CostItem, CostRecord } from '@/types'
+import type { CostItem, CostRecord, SalesUnit } from '@/types'
+import { isSalesUnitOperatingInMonth } from '@/lib/salesUnitStatus'
 import { matchesRecurringYearMonth } from '@/utils/recurringRecord'
+
+type UnitOperatingLike = Pick<SalesUnit, 'status' | 'openedAt' | 'closedAt'>
 
 export type CostConfirmLine = {
   key: string
@@ -46,6 +49,7 @@ type Props = {
   existingActual?: number
   existingRemark?: string
   costRecords: CostRecord[]
+  unit?: UnitOperatingLike | null
   onClose: () => void
   onSubmit: (payload: {
     actualAmount: number
@@ -64,7 +68,9 @@ export function buildCostConfirmLines(
   unitId: string,
   yearMonth: string,
   existingActual?: number,
+  unit?: UnitOperatingLike | null,
 ): CostConfirmLine[] {
+  if (unit && !isSalesUnitOperatingInMonth(unit, yearMonth)) return []
   const records = costRecords.filter(
     (c) =>
       c.salesUnitId === unitId && matchesRecurringYearMonth(c, yearMonth),
@@ -133,6 +139,7 @@ export default function MCostConfirmDialog({
   existingActual,
   existingRemark,
   costRecords,
+  unit,
   onClose,
   onSubmit,
 }: Props) {
@@ -143,7 +150,13 @@ export default function MCostConfirmDialog({
 
   useEffect(() => {
     if (!open) return
-    const next = buildCostConfirmLines(costRecords, unitId, yearMonth, existingActual)
+    const next = buildCostConfirmLines(
+      costRecords,
+      unitId,
+      yearMonth,
+      existingActual,
+      unit,
+    )
     setLines(next)
     setFallbackActual(
       existingActual != null && Number.isFinite(existingActual)

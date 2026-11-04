@@ -1,4 +1,11 @@
+import { isSalesUnitOperatingInMonth } from '@/lib/salesUnitStatus'
 import { matchesRecurringYearMonth, type RecurringLike } from '@/utils/recurringRecord'
+import type { SalesUnit } from '@/types'
+
+export type SalesUnitOperatingLike = Pick<
+  SalesUnit,
+  'id' | 'status' | 'openedAt' | 'closedAt'
+>
 
 /**
  * 结算收入 / 手工成本：预估 vs 确认后的有效金额
@@ -44,7 +51,9 @@ export function getEstimatedManualCost(
   costRecords: ManualCostLike[],
   salesUnitId: string,
   yearMonth: string,
+  unit?: SalesUnitOperatingLike | null,
 ): number {
+  if (unit && !isSalesUnitOperatingInMonth(unit, yearMonth)) return 0
   return costRecords
     .filter(
       (c) =>
@@ -58,11 +67,20 @@ export function getEffectiveManualCost(
   costRecords: ManualCostLike[],
   salesUnitId: string,
   yearMonth: string,
+  unit?: SalesUnitOperatingLike | null,
 ): number {
   return getEffectiveConfirmAmount(
     costSettlements,
     salesUnitId,
     yearMonth,
-    getEstimatedManualCost(costRecords, salesUnitId, yearMonth),
+    getEstimatedManualCost(costRecords, salesUnitId, yearMonth, unit),
   )
+}
+
+/** 按单位 id 查找运营状态（供合计调用） */
+export function findUnitForCost(
+  units: SalesUnitOperatingLike[],
+  salesUnitId: string,
+): SalesUnitOperatingLike | undefined {
+  return units.find((u) => u.id === salesUnitId)
 }
