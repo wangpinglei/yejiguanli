@@ -239,12 +239,24 @@ export default function Payroll() {
     })
   }
 
-  function handleSaveScope() {
+  function handleStartPayroll() {
+    if (draftScopeIds.length === 0) {
+      alert('请先选择至少一个单位')
+      return
+    }
     savePayrollScopeUnitIds(draftScopeIds)
     setScopeUnitIds(draftScopeIds)
     window.dispatchEvent(new Event('payroll-scope-changed'))
-    setSavedTip('纳入核算单位已保存（本机）')
-    window.setTimeout(() => setSavedTip(''), 2000)
+    // 默认只核算列表中的第一个单位，可在工资表里再切换
+    setFilterUnitId(draftScopeIds[0])
+    setCalcPhase('wizard')
+    setEntryMode('attendance')
+    window.setTimeout(() => {
+      document.getElementById('payroll-month-table')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+    }, 50)
   }
 
   function handleSelectSuggestedOpsCenters() {
@@ -392,7 +404,7 @@ export default function Payroll() {
 
   function handleExportCsv() {
     if (rows.length === 0) {
-      alert('当前没有可导出的工资行，请先纳入单位并确认月份')
+      alert('当前没有可导出的工资行，请先选择单位并确认月份')
       return
     }
     const header = [
@@ -476,7 +488,7 @@ export default function Payroll() {
     })
     // 文件名：单位名称 + 月份（与筛选/导出内容一致）
     const unitNames = Array.from(new Set(rows.map((r) => r.unitName).filter(Boolean)))
-    let unitLabel = '全部纳入单位'
+    let unitLabel = '全部已选单位'
     if (filterUnitId !== 'all') {
       const hit = scopedUnits.find((u) => u.id === filterUnitId)
       unitLabel = hit?.name || unitNames[0] || unitLabel
@@ -503,7 +515,7 @@ export default function Payroll() {
     <div className="space-y-6">
       <PageHeader
         title="工资核算"
-        description="本地原型：先纳入运营中心单位，再按月录入出勤与考核分，生成可导出工资表。出勤/考核暂存本机，未接后端。"
+        description="先选择单位并去核算，再按月录入出勤与考核分，生成可导出工资表。出勤/考核暂存本机。"
       />
 
       <Card className="border-amber-200/80 bg-amber-50/40">
@@ -531,10 +543,11 @@ export default function Payroll() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
             <CheckSquare className="h-5 w-5" />
-            1. 纳入核算单位
+            1. 选择单位
           </CardTitle>
           <CardDescription>
-            只有勾选并保存的单位才会进入工资表。默认建议勾选名称含「运营中心」的单位；分仓可不选。
+            勾选要核算的单位后点「去核算工资」。建议优先选名称含「运营中心」的单位；分仓可不选。
+            工资表默认先显示所选中的第一个单位。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -545,9 +558,9 @@ export default function Payroll() {
             <Button type="button" variant="outline" size="sm" onClick={() => setDraftScopeIds([])}>
               清空勾选
             </Button>
-            <Button type="button" size="sm" onClick={handleSaveScope}>
-              <Save className="mr-1.5 h-3.5 w-3.5" />
-              保存纳入名单
+            <Button type="button" size="sm" onClick={handleStartPayroll}>
+              <Calculator className="mr-1.5 h-3.5 w-3.5" />
+              去核算工资
             </Button>
             {savedTip && <span className="text-sm text-emerald-700 self-center">{savedTip}</span>}
           </div>
@@ -594,9 +607,9 @@ export default function Payroll() {
           </details>
 
           <p className="text-sm text-muted-foreground">
-            当前已生效纳入：
+            当前已选单位：
             {scopedUnits.length === 0
-              ? '无（请勾选并保存）'
+              ? '无（请勾选后点「去核算工资」）'
               : scopedUnits.map((u) => u.name).join('、')}
           </p>
         </CardContent>
@@ -618,7 +631,7 @@ export default function Payroll() {
           </div>
           <CardDescription>
             {calcPhase === 'idle' && (
-              <>默认不展示录入项与工资明细。请先点「去核算工资」，依次完成考勤、绩效分数、社保公积金、其他预扣、个税录入，再生成工资表。</>
+              <>默认不展示录入项与工资明细。请先在上方「选择单位」后点「去核算工资」，依次完成考勤、绩效分数、社保公积金、其他预扣、个税录入，再生成工资表。</>
             )}
             {calcPhase === 'wizard' && (
               <>请按步骤填写本月录入项；完成后点「生成工资表」。标准底薪/保密费/岗位补贴/绩效可点姓名跳转调整。</>
@@ -657,7 +670,7 @@ export default function Payroll() {
         <CardContent className="space-y-4">
           {calcPhase === 'idle' ? (
             <div className="rounded-lg border border-dashed bg-muted/20 px-4 py-10 text-center text-sm text-muted-foreground">
-              尚未开始核算。请点击右上角「去核算工资」，按考勤 → 绩效分数 → 社保公积金 → 其他预扣 → 个税依次录入后生成工资表。
+              尚未开始核算。请先在上方选择单位并点「去核算工资」，按考勤 → 绩效分数 → 社保公积金 → 其他预扣 → 个税依次录入后生成工资表。
             </div>
           ) : (
           <>
@@ -679,7 +692,7 @@ export default function Payroll() {
                   <SelectValue placeholder="选择单位" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">全部纳入单位</SelectItem>
+                  <SelectItem value="all">全部已选单位</SelectItem>
                   {scopedUnits.map((u) => (
                     <SelectItem key={u.id} value={u.id}>
                       {u.name}
@@ -688,7 +701,7 @@ export default function Payroll() {
                 </SelectContent>
               </Select>
               <p className="text-[11px] text-muted-foreground">
-                默认显示第一个纳入单位；可切换其他单位或「全部纳入单位」
+                默认显示所选第一个单位；可切换其他单位或「全部已选单位」
               </p>
             </div>
             <Button type="button" variant="outline" onClick={handleSaveEntries}>
@@ -728,7 +741,7 @@ export default function Payroll() {
 
           {scopedUnits.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted-foreground">
-              尚未纳入核算单位，请先在上方勾选并保存。
+              尚未选择单位，请先在上方勾选并点「去核算工资」。
             </p>
           ) : (
             <div id="payroll-month-table" className="overflow-x-auto rounded-md border">

@@ -46,12 +46,6 @@ export default function MPayrollEntryLinks({
   const stepIndex = PAYROLL_ENTRY_STEPS.findIndex((s) => s.key === mode)
   const currentStep = stepIndex >= 0 ? PAYROLL_ENTRY_STEPS[stepIndex] : null
 
-  function handleStart() {
-    onPhaseChange('wizard')
-    onModeChange('attendance')
-    scrollToPayrollTable()
-  }
-
   function handleGotoStep(key: Exclude<PayrollEntryMode, 'all'>) {
     onPhaseChange('wizard')
     onModeChange(key)
@@ -94,13 +88,9 @@ export default function MPayrollEntryLinks({
 
   if (phase === 'idle') {
     return (
-      <button
-        type="button"
-        className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700"
-        onClick={handleStart}
-      >
-        去核算工资
-      </button>
+      <span className="text-sm text-muted-foreground">
+        请先在上方选择单位并点「去核算工资」
+      </span>
     )
   }
 
