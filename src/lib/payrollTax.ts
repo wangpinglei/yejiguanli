@@ -305,14 +305,36 @@ export function clearLocalTaxProfile(personnelId: string): void {
   localStorage.setItem(PAYROLL_TAX_PROFILE_KEY, JSON.stringify(all))
 }
 
-export function calcTaxOnCumulativeTaxable(taxable: number): number {
+export type IitBracketResolved = {
+  rate: number
+  quick: number
+  /** ROUND(MAX(C×rate−quick, 0), 2) */
+  tax: number
+}
+
+/** 按累计应纳税所得额 C 命中预扣率表一档 */
+export function resolveIitBracket(taxable: number): IitBracketResolved {
   const t = Math.max(0, Number(taxable) || 0)
-  if (t <= 0) return 0
+  if (t <= 0) return { rate: 0.03, quick: 0, tax: 0 }
   for (const b of IIT_BRACKETS) {
-    if (t <= b.upTo) return roundMoney(Math.max(0, t * b.rate - b.quick))
+    if (t <= b.upTo) {
+      return {
+        rate: b.rate,
+        quick: b.quick,
+        tax: roundMoney(Math.max(0, t * b.rate - b.quick)),
+      }
+    }
   }
   const last = IIT_BRACKETS[IIT_BRACKETS.length - 1]
-  return roundMoney(Math.max(0, t * last.rate - last.quick))
+  return {
+    rate: last.rate,
+    quick: last.quick,
+    tax: roundMoney(Math.max(0, t * last.rate - last.quick)),
+  }
+}
+
+export function calcTaxOnCumulativeTaxable(taxable: number): number {
+  return resolveIitBracket(taxable).tax
 }
 
 /**

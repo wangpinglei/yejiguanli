@@ -56,6 +56,7 @@ import {
   IIT_SEED_THROUGH_YM,
   loadTaxProfile,
   MONTHLY_BASIC_DEDUCTION,
+  resolveIitBracket,
   resolveSpecialAdditionalMonthly,
   shouldUseIitCycleOpening,
   upsertIitCycleOpening,
@@ -672,7 +673,8 @@ export default function Payroll() {
                   {cycle.startYm}～{cycle.endYm}
                 </strong>
                 （本月为第 {n} 月，减除费用 {MONTHLY_BASIC_DEDUCTION}×{n}）。
-                本月应扣 = max(f(C)−B, 0)；f 为预扣率表。
+                本月应扣 = max(f(C)−B, 0)；
+                f(C)=ROUND(MAX(C×{'{3,10,20,25,30,35,45}%'}−速算扣除数, 0), 2)。
                 {useOpening && (
                   <>
                     {' '}
@@ -902,7 +904,12 @@ export default function Payroll() {
                       </TableHead>
                     )}
                     {showPayrollCol(entryMode, 'tax') && (
-                      <TableHead className="min-w-[100px] bg-amber-50/80">本期个税</TableHead>
+                      <TableHead className="min-w-[200px] bg-amber-50/80">
+                        本期个税
+                        <div className="text-[10px] font-normal text-muted-foreground whitespace-normal">
+                          max(f(C)−B, 0)
+                        </div>
+                      </TableHead>
                     )}
                     {showPayrollCol(entryMode, 'tax') && (
                       <TableHead className="text-right font-semibold min-w-[100px] bg-amber-50/80">实发</TableHead>
@@ -1358,21 +1365,20 @@ export default function Payroll() {
                               </>
                             )
                           })()}
-                        {showPayrollCol(entryMode, 'tax') && (
-                        <TableCell className="bg-amber-50/40">
-                          <div className="space-y-1">
+                        {showPayrollCol(entryMode, 'tax') && (() => {
+                          const cVal = Number(row.cumulativeTaxable) || 0
+                          const bVal = Number(row.taxPaidBeforeThisMonth) || 0
+                          const bracket = resolveIitBracket(cVal)
+                          const fC = Number(row.cumulativeTaxDue) || bracket.tax
+                          const systemTax = Number(row.systemIncomeTax ?? row.incomeTax) || 0
+                          const ratePct = `${(bracket.rate * 100).toFixed(0)}%`
+                          return (
+                        <TableCell className="bg-amber-50/40 align-top">
+                          <div className="space-y-1.5 min-w-[190px]">
                             <Input
                               type="number"
                               className="h-8 w-[96px]"
-                              title={[
-                                `周期 ${row.iitCycleStartYm || ''}～${row.iitCycleEndYm || ''} 第${row.iitCycleMonthIndex ?? '-'}月`,
-                                `本期累计税基 ${money(row.cumulativeTaxBase || 0)}`,
-                                `C(应纳税所得) ${money(row.cumulativeTaxable || 0)}`,
-                                `f(C) ${money(row.cumulativeTaxDue || 0)}`,
-                                `B(已预缴) ${money(row.taxPaidBeforeThisMonth || 0)}`,
-                                `系统本月 ${money(row.systemIncomeTax ?? row.incomeTax ?? 0)}`,
-                                '可手工覆盖',
-                              ].join('\n')}
+                              title="可手工覆盖系统累计预扣结果"
                               value={
                                 entry.incomeTaxOverride != null
                                   ? entry.incomeTaxOverride
@@ -1386,16 +1392,33 @@ export default function Payroll() {
                               }
                             />
                             {entryMode === 'tax' && (
-                              <div className="max-w-[140px] text-[10px] leading-snug text-muted-foreground">
-                                C {money(row.cumulativeTaxable || 0)}
-                                <br />
-                                f(C) {money(row.cumulativeTaxDue || 0)} − B{' '}
-                                {money(row.taxPaidBeforeThisMonth || 0)}
+                              <div className="rounded border border-amber-200/80 bg-white/80 px-2 py-1.5 text-[10px] leading-relaxed text-amber-950 tabular-nums">
+                                <div className="font-medium text-amber-900">
+                                  本月 = max(f(C) − B, 0)
+                                </div>
+                                <div>
+                                  C = {money(cVal)}
+                                  {cVal > 0 ? (
+                                    <>
+                                      {' '}
+                                      → 税率 {ratePct}，速算 {money(bracket.quick)}
+                                    </>
+                                  ) : (
+                                    <>（≤0 则 f(C)=0）</>
+                                  )}
+                                </div>
+                                <div>
+                                  f(C) = ROUND(MAX(C×{ratePct}−速算, 0), 2) = {money(fC)}
+                                </div>
+                                <div>
+                                  max({money(fC)} − {money(bVal)}, 0) = {money(systemTax)}
+                                </div>
                               </div>
                             )}
                           </div>
                         </TableCell>
-                        )}
+                          )
+                        })()}
                         {showPayrollCol(entryMode, 'tax') && (
                         <TableCell className="text-right tabular-nums font-semibold text-sky-700 bg-amber-50/40">
                           {money(row.netPay || 0)}
