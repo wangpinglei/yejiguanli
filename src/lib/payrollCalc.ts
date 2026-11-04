@@ -114,6 +114,11 @@ export interface PayrollRowResult extends PayrollRowInput {
   taxPaidBeforeThisMonth?: number
   /** 系统算得本期个税（未手工覆盖） */
   systemIncomeTax?: number
+  /** 期初（截至 2026-09） */
+  iitOpeningTaxBase?: number
+  iitOpeningTaxPaid?: number
+  iitOpeningTaxable?: number | null
+  usedIitCycleOpening?: boolean
 }
 
 export function isLikelyOpsCenterName(name: string): boolean {

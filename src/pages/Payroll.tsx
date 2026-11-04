@@ -53,9 +53,12 @@ import { enrichPayrollRowWithTax, resolvePayrollTax } from '@/lib/payrollTaxAppl
 import {
   getIitCycleBounds,
   getIitCycleMonthIndex,
+  IIT_SEED_THROUGH_YM,
   loadTaxProfile,
   MONTHLY_BASIC_DEDUCTION,
   resolveSpecialAdditionalMonthly,
+  shouldUseIitCycleOpening,
+  upsertIitCycleOpening,
   type PersonnelTaxProfile,
 } from '@/lib/payrollTax'
 import type { Personnel } from '@/types'
@@ -107,7 +110,8 @@ function payrollColSpan(mode: PayrollEntryMode): number {
   if (mode === 'score') return 2 + 1 + 1 + 1 // 标准绩效 + 分数 + 实发绩效
   if (mode === 'insurance') return 2 + 1 + 4 + 1 // 应发 + 企业/个人四列 + 操作
   if (mode === 'otherDeduct') return 2 + 1 + 1 + 1 // 应发 + 专项附加 + 操作
-  if (mode === 'tax') return 2 + 1 + 1 + 2 // 应发 + 专项 + 个税/实发
+  // 应发 + 专项 + 期初三列 + 个税/实发（期初列仅 10 月起展示，colSpan 取上限）
+  if (mode === 'tax') return 2 + 1 + 1 + 3 + 2
   return 18 // 最终表含企业/个人四列、专项、不含出勤三列
 }
 
@@ -170,6 +174,7 @@ export default function Payroll() {
     teamMgmtCommissionRules,
     performanceTargets,
     unitProductSettlements,
+    updatePersonnel,
   } = useData()
   const {
     visibleSalesUnits: salesUnits,
@@ -294,6 +299,31 @@ export default function Payroll() {
     setEntries(next)
     savePayrollEntries(yearMonth, next)
     setSavedTip(`${yearMonth} 出勤/考核/代扣个税已保存（本机）`)
+    window.setTimeout(() => setSavedTip(''), 2000)
+  }
+
+  async function handleSaveIitOpening(
+    person: Personnel,
+    patch: {
+      taxBase?: number
+      taxPaid?: number
+      taxable?: number | null
+    },
+  ) {
+    const profile = loadTaxProfile(
+      person.id,
+      {
+        socialInsurance: person.socialInsurance,
+        housingFund: person.housingFund,
+      },
+      person.taxProfile as Partial<PersonnelTaxProfile> | undefined,
+    )
+    const next = upsertIitCycleOpening(profile, {
+      ...patch,
+      throughYm: IIT_SEED_THROUGH_YM,
+    })
+    await updatePersonnel(person.id, { taxProfile: next })
+    setSavedTip(`已保存 ${formatDisplayPersonName(person.name)} 个税期初`)
     window.setTimeout(() => setSavedTip(''), 2000)
   }
 
@@ -631,6 +661,7 @@ export default function Payroll() {
           {calcPhase === 'wizard' && entryMode === 'tax' && (() => {
             const cycle = getIitCycleBounds(yearMonth)
             const n = getIitCycleMonthIndex(yearMonth)
+            const useOpening = shouldUseIitCycleOpening(yearMonth)
             return (
               <p className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
                 步骤 5/5 个税扣除预报 — 累计周期{' '}
@@ -638,7 +669,14 @@ export default function Payroll() {
                   {cycle.startYm}～{cycle.endYm}
                 </strong>
                 （本月为第 {n} 月，减除费用 {MONTHLY_BASIC_DEDUCTION}×{n}）。
-                本月应扣 = max(A−B, 0)；A 按预扣率表由 C 计算；可手工改。完成后点「生成工资表」。
+                本月应扣 = max(f(C)−B, 0)；f 为预扣率表。
+                {useOpening && (
+                  <>
+                    {' '}
+                    请填写截至 {IIT_SEED_THROUGH_YM} 的期初：已预扣个税、累计扣税基数、应纳税所得额（可空则自动算）。
+                  </>
+                )}
+                {' '}完成后点「生成工资表」。
               </p>
             )
           })()}
@@ -814,6 +852,30 @@ export default function Payroll() {
                     )}
                     {entryMode === 'otherDeduct' && (
                       <TableHead className="min-w-[140px] bg-orange-50/80">操作</TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'tax') && shouldUseIitCycleOpening(yearMonth) && (
+                      <TableHead className="min-w-[110px] bg-violet-50/80 text-right">
+                        已预扣个税
+                        <div className="text-[10px] font-normal text-muted-foreground">
+                          截至{IIT_SEED_THROUGH_YM}
+                        </div>
+                      </TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'tax') && shouldUseIitCycleOpening(yearMonth) && (
+                      <TableHead className="min-w-[120px] bg-violet-50/80 text-right">
+                        累计扣税基数
+                        <div className="text-[10px] font-normal text-muted-foreground">
+                          截至上月/{IIT_SEED_THROUGH_YM}
+                        </div>
+                      </TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'tax') && shouldUseIitCycleOpening(yearMonth) && (
+                      <TableHead className="min-w-[110px] bg-violet-50/80 text-right">
+                        应纳税所得额
+                        <div className="text-[10px] font-normal text-muted-foreground">
+                          截至{IIT_SEED_THROUGH_YM}·可空
+                        </div>
+                      </TableHead>
                     )}
                     {showPayrollCol(entryMode, 'tax') && (
                       <TableHead className="min-w-[100px] bg-amber-50/80">本期个税</TableHead>
@@ -1189,6 +1251,76 @@ export default function Payroll() {
                             </>
                           )
                         })()}
+                        {showPayrollCol(entryMode, 'tax')
+                          && shouldUseIitCycleOpening(yearMonth)
+                          && (() => {
+                            const person = personnel.find((p) => p.id === row.personnelId)
+                            if (!person) {
+                              return (
+                                <>
+                                  <TableCell className="bg-violet-50/40" />
+                                  <TableCell className="bg-violet-50/40" />
+                                  <TableCell className="bg-violet-50/40" />
+                                </>
+                              )
+                            }
+                            return (
+                              <>
+                                <TableCell className="bg-violet-50/40">
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    className="ml-auto h-8 w-[100px] text-right"
+                                    title="截至 2026-09 已预扣个税 B"
+                                    defaultValue={row.iitOpeningTaxPaid ?? 0}
+                                    key={`paid-${person.id}-${row.iitOpeningTaxPaid ?? 0}`}
+                                    onBlur={(e) => {
+                                      const v = e.target.value === '' ? 0 : Number(e.target.value) || 0
+                                      if (v === (row.iitOpeningTaxPaid ?? 0)) return
+                                      void handleSaveIitOpening(person, { taxPaid: v })
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell className="bg-violet-50/40">
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    className="ml-auto h-8 w-[100px] text-right"
+                                    title="截至 2026-09 累计扣税基数"
+                                    defaultValue={row.iitOpeningTaxBase ?? 0}
+                                    key={`base-${person.id}-${row.iitOpeningTaxBase ?? 0}`}
+                                    onBlur={(e) => {
+                                      const v = e.target.value === '' ? 0 : Number(e.target.value) || 0
+                                      if (v === (row.iitOpeningTaxBase ?? 0)) return
+                                      void handleSaveIitOpening(person, { taxBase: v })
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell className="bg-violet-50/40">
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    className="ml-auto h-8 w-[100px] text-right"
+                                    title="截至 2026-09 应纳税所得额 C，空=自动推算"
+                                    placeholder="自动"
+                                    defaultValue={
+                                      row.iitOpeningTaxable == null
+                                        ? ''
+                                        : row.iitOpeningTaxable
+                                    }
+                                    key={`taxable-${person.id}-${row.iitOpeningTaxable ?? 'auto'}`}
+                                    onBlur={(e) => {
+                                      const raw = e.target.value.trim()
+                                      const next =
+                                        raw === '' ? null : Number(raw) || 0
+                                      if (next === (row.iitOpeningTaxable ?? null)) return
+                                      void handleSaveIitOpening(person, { taxable: next })
+                                    }}
+                                  />
+                                </TableCell>
+                              </>
+                            )
+                          })()}
                         {showPayrollCol(entryMode, 'tax') && (
                         <TableCell className="bg-amber-50/40">
                           <div className="space-y-1">
@@ -1197,9 +1329,9 @@ export default function Payroll() {
                               className="h-8 w-[96px]"
                               title={[
                                 `周期 ${row.iitCycleStartYm || ''}～${row.iitCycleEndYm || ''} 第${row.iitCycleMonthIndex ?? '-'}月`,
-                                `扣税基数 ${money(row.cumulativeTaxBase || 0)}`,
+                                `本期累计税基 ${money(row.cumulativeTaxBase || 0)}`,
                                 `C(应纳税所得) ${money(row.cumulativeTaxable || 0)}`,
-                                `A(累计应扣) ${money(row.cumulativeTaxDue || 0)}`,
+                                `f(C) ${money(row.cumulativeTaxDue || 0)}`,
                                 `B(已预缴) ${money(row.taxPaidBeforeThisMonth || 0)}`,
                                 `系统本月 ${money(row.systemIncomeTax ?? row.incomeTax ?? 0)}`,
                                 '可手工覆盖',
@@ -1220,7 +1352,7 @@ export default function Payroll() {
                               <div className="max-w-[140px] text-[10px] leading-snug text-muted-foreground">
                                 C {money(row.cumulativeTaxable || 0)}
                                 <br />
-                                A {money(row.cumulativeTaxDue || 0)} − B{' '}
+                                f(C) {money(row.cumulativeTaxDue || 0)} − B{' '}
                                 {money(row.taxPaidBeforeThisMonth || 0)}
                               </div>
                             )}

@@ -47,6 +47,18 @@ export type TaxProfileChangeLog = {
   remark?: string
 }
 
+/** 个税周期期初（如 2025-12 周期截至 2026-09） */
+export type IitCycleOpening = {
+  /** 累计扣税基数 Σ(应发−个人社保−个人公积金) */
+  taxBase: number
+  /** 已预扣个税 B */
+  taxPaid: number
+  /** 应纳税所得额 C；null=不手填 */
+  taxable: number | null
+  /** 期初截止工资月 */
+  throughYm: string
+}
+
 export interface PersonnelTaxProfile {
   personnelId: string
   special: SpecialAdditionalDeduction
@@ -61,7 +73,70 @@ export interface PersonnelTaxProfile {
   specialAdditionalOverride?: number | null
   /** 专项附加一键调整记录 */
   specialAdditionalLogs?: TaxProfileChangeLog[]
+  /**
+   * 按周期起点存期初，例如 key=`2025-12` → 截至 throughYm 的税基/已扣/C
+   */
+  iitCycleOpenings?: Record<string, IitCycleOpening>
   updatedAt: string
+}
+
+/** 首期手工期初：2025-12 周期，补到 2026-09 */
+export const IIT_SEED_CYCLE_START = '2025-12'
+export const IIT_SEED_THROUGH_YM = '2026-09'
+
+export function shouldUseIitCycleOpening(yearMonth: string): boolean {
+  if (!/^\d{4}-\d{2}$/.test(yearMonth)) return false
+  const { startYm } = getIitCycleBounds(yearMonth)
+  return startYm === IIT_SEED_CYCLE_START && yearMonth > IIT_SEED_THROUGH_YM
+}
+
+export function getIitCycleOpening(
+  profile: Pick<PersonnelTaxProfile, 'iitCycleOpenings'> | null | undefined,
+  cycleStartYm: string = IIT_SEED_CYCLE_START,
+): IitCycleOpening | null {
+  const raw = profile?.iitCycleOpenings?.[cycleStartYm]
+  if (!raw || typeof raw !== 'object') return null
+  return {
+    taxBase: roundMoney(Number(raw.taxBase) || 0),
+    taxPaid: roundMoney(Number(raw.taxPaid) || 0),
+    taxable:
+      raw.taxable == null || raw.taxable === undefined
+        ? null
+        : roundMoney(Number(raw.taxable) || 0),
+    throughYm: raw.throughYm || IIT_SEED_THROUGH_YM,
+  }
+}
+
+export function upsertIitCycleOpening(
+  profile: PersonnelTaxProfile,
+  patch: Partial<IitCycleOpening>,
+  cycleStartYm: string = IIT_SEED_CYCLE_START,
+): PersonnelTaxProfile {
+  const prev = getIitCycleOpening(profile, cycleStartYm) || {
+    taxBase: 0,
+    taxPaid: 0,
+    taxable: null,
+    throughYm: IIT_SEED_THROUGH_YM,
+  }
+  const next: IitCycleOpening = {
+    taxBase: patch.taxBase != null ? roundMoney(Number(patch.taxBase) || 0) : prev.taxBase,
+    taxPaid: patch.taxPaid != null ? roundMoney(Number(patch.taxPaid) || 0) : prev.taxPaid,
+    taxable:
+      patch.taxable === undefined
+        ? prev.taxable
+        : patch.taxable == null
+          ? null
+          : roundMoney(Number(patch.taxable) || 0),
+    throughYm: patch.throughYm || prev.throughYm || IIT_SEED_THROUGH_YM,
+  }
+  return {
+    ...profile,
+    iitCycleOpenings: {
+      ...(profile.iitCycleOpenings || {}),
+      [cycleStartYm]: next,
+    },
+    updatedAt: new Date().toISOString(),
+  }
 }
 
 /** 综合所得税率表（累计预扣） */
@@ -192,6 +267,11 @@ export function loadTaxProfile(
       specialAdditionalLogs: Array.isArray(serverProfile.specialAdditionalLogs)
         ? serverProfile.specialAdditionalLogs
         : [],
+      iitCycleOpenings:
+        serverProfile.iitCycleOpenings
+        && typeof serverProfile.iitCycleOpenings === 'object'
+          ? serverProfile.iitCycleOpenings
+          : empty.iitCycleOpenings,
     }
   }
   // 兼容：尚未同步服务器时读本机缓存
