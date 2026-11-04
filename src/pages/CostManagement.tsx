@@ -1042,14 +1042,26 @@ export default function CostManagement() {
                               {unit.details.map((d) => {
                                 const personMeta = personnel.find((p) => p.id === d.personId);
                                 const isDistributionPerson = Boolean(personMeta?.highCommissionFrom);
+                                const allocPct = d.costAllocationRatio != null
+                                  ? Math.round(d.costAllocationRatio * 1000) / 10
+                                  : null
                                 return (
                                 <div
                                   key={d.personId}
                                   className="overflow-x-auto rounded-lg border bg-card px-4 py-2 text-sm"
                                 >
                                   <div className="flex min-w-[1160px] items-center gap-x-4 gap-y-1">
-                                    <div className="flex w-36 shrink-0 items-center gap-1.5">
+                                    <div className="flex w-44 shrink-0 items-center gap-1.5">
                                       <span className="truncate font-medium">{d.name}</span>
+                                      {allocPct != null ? (
+                                        <Badge
+                                          variant="outline"
+                                          className="shrink-0 border-sky-300 px-1 py-0 text-[10px] text-sky-700"
+                                          title="固定成本按比例分摊到本单位"
+                                        >
+                                          分摊 {allocPct}%
+                                        </Badge>
+                                      ) : null}
                                       {isDistributionPerson ? (
                                         <Badge
                                           variant="outline"

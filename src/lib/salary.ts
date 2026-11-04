@@ -15,6 +15,10 @@ import {
 } from "@/lib/saleCollaborators";
 import { getPersonTeamMgmtCommission } from "@/lib/teamMgmtCommission";
 import {
+  getCostAllocationRatioForUnit,
+  hasCostAllocation,
+} from "@/lib/costAllocation";
+import {
   getUnitFixedPayRatioInMonth,
   personBelongsToUnitInMonth,
   resolveUnitIdAt,
@@ -953,6 +957,8 @@ export interface UnitSalaryCost {
     housingFund: number;
     total: number; // 含社保公积金的总成本
     adjustment?: MonthlyAdjustment;
+    /** 比例分摊时本单位占比 0~1；未分摊为 undefined */
+    costAllocationRatio?: number;
   }[];
 }
 
@@ -978,13 +984,32 @@ export function getUnitSalaryCost(
 
   const memberMap = new Map<string, Personnel>();
   personnel.forEach((p) => {
+    const allocRatio = yearMonth
+      ? getCostAllocationRatioForUnit(p, unitId, yearMonth)
+      : getCostAllocationRatioForUnit(p, unitId);
+    const hasAllocShare = allocRatio != null && allocRatio > 0;
     const belongsUnit = yearMonth
       ? personBelongsToUnitInMonth(p, unitId, yearMonth)
       : p.salesUnitId === unitId;
     const hasSalesHere = salesPersonIdSet.has(p.id);
-    if (!belongsUnit && !hasSalesHere) return;
-    // 本单位成员：按月在岗；仅因有销售挂进来的：始终计入（保证提成进成本）
-    if (belongsUnit && !isPersonnelOnDutyInMonth(p, yearMonth) && !hasSalesHere) return;
+    // 比例分摊命中本单位时也纳入（即使当月无调岗归属日）
+    if (!belongsUnit && !hasSalesHere && !hasAllocShare) return;
+    // 本单位成员：按月在岗；仅因有销售/分摊挂进来的：始终计入
+    if (
+      belongsUnit
+      && !isPersonnelOnDutyInMonth(p, yearMonth)
+      && !hasSalesHere
+      && !hasAllocShare
+    ) {
+      return;
+    }
+    if (
+      hasAllocShare
+      && !isPersonnelOnDutyInMonth(p, yearMonth)
+      && !hasSalesHere
+    ) {
+      return;
+    }
     memberMap.set(p.id, p);
   });
   const activeMembers = Array.from(memberMap.values());
@@ -993,9 +1018,14 @@ export function getUnitSalaryCost(
     const adj = monthlyAdjustments.find(
       (a) => a.personnelId === p.id && a.yearMonth === yearMonth
     );
-    // 提成只认本单位成交（分业绩按 collaborators.salesUnitId）；固定成本按归属时间轴
     const unitSalesRecords = buildUnitScopedSalesRecords(salesRecords, unitId, personnel);
-    const calc = calculateMonthlySalary(
+    const allocRatio = yearMonth
+      ? getCostAllocationRatioForUnit(p, unitId, yearMonth)
+      : getCostAllocationRatioForUnit(p, unitId);
+    const useRatioSplit = allocRatio != null && hasCostAllocation(p, yearMonth);
+
+    // 提成：始终按本单位成交；固定成本：比例分摊用全月口径再乘比例，否则按归属日
+    const commissionCalc = calculateMonthlySalary(
       p,
       unitSalesRecords,
       products,
@@ -1009,29 +1039,91 @@ export function getUnitSalaryCost(
         internalSalesRecords: salesRecords,
       },
     );
-    const socialInsurance = calc.socialInsurance;
-    const housingFund = calc.housingFund;
-    const total = calc.total + socialInsurance + housingFund;
+
+    let baseSalary = commissionCalc.baseSalary;
+    let confidentialityFee = commissionCalc.confidentialityFee;
+    let performance = commissionCalc.performance;
+    let positionAllowance = commissionCalc.positionAllowance;
+    let leaveDeduction = commissionCalc.leaveDeduction;
+    let socialInsurance = commissionCalc.socialInsurance;
+    let housingFund = commissionCalc.housingFund;
+    let otherBonus = commissionCalc.otherBonus;
+    let otherDeduction = commissionCalc.otherDeduction;
+
+    if (useRatioSplit) {
+      // 全月固定成本（不按单位切天），再按比例拆
+      const fullCalc = calculateMonthlySalary(
+        p,
+        salesRecords,
+        products,
+        yearMonth,
+        adj,
+        productPersonCommissions,
+        teamMgmtContext,
+        undefined,
+        {
+          allPersonnel: personnel,
+          internalSalesRecords: salesRecords,
+        },
+      );
+      const r = allocRatio || 0;
+      baseSalary = fullCalc.baseSalary * r;
+      confidentialityFee = fullCalc.confidentialityFee * r;
+      performance = fullCalc.performance * r;
+      positionAllowance = fullCalc.positionAllowance * r;
+      leaveDeduction = fullCalc.leaveDeduction * r;
+      socialInsurance = fullCalc.socialInsurance * r;
+      housingFund = fullCalc.housingFund * r;
+      // 其他加减项只挂主单位，避免重复计入
+      const isPrimary = p.salesUnitId === unitId;
+      otherBonus = isPrimary ? fullCalc.otherBonus : 0;
+      otherDeduction = isPrimary ? fullCalc.otherDeduction : 0;
+    } else if (hasCostAllocation(p, yearMonth)) {
+      // 启用了分摊但不含本单位：固定成本为 0，只保留本单位提成
+      baseSalary = 0;
+      confidentialityFee = 0;
+      performance = 0;
+      positionAllowance = 0;
+      leaveDeduction = 0;
+      socialInsurance = 0;
+      housingFund = 0;
+      otherBonus = 0;
+      otherDeduction = 0;
+    }
+
+    const salaryTotal =
+      baseSalary +
+      confidentialityFee +
+      performance +
+      positionAllowance +
+      commissionCalc.managementCommission +
+      commissionCalc.personalCommission +
+      commissionCalc.internalSalesCommission -
+      leaveDeduction +
+      otherBonus -
+      otherDeduction;
+    const total = salaryTotal + socialInsurance + housingFund;
     return {
       personId: p.id,
       name: p.name,
       position: p.position,
-      baseSalary: calc.baseSalary,
-      confidentialityFee: calc.confidentialityFee,
-      performance: calc.performance,
-      positionAllowance: calc.positionAllowance,
-      managementCommission: calc.managementCommission,
-      personalCommission: calc.personalCommission,
-      internalSalesCommission: calc.internalSalesCommission,
-      productCommission: calc.productCommission,
-      leaveDeduction: calc.leaveDeduction,
-      otherBonus: calc.otherBonus,
-      otherDeduction: calc.otherDeduction,
-      salaryTotal: calc.total,
+      baseSalary,
+      confidentialityFee,
+      performance,
+      positionAllowance,
+      managementCommission: commissionCalc.managementCommission,
+      personalCommission: commissionCalc.personalCommission,
+      internalSalesCommission: commissionCalc.internalSalesCommission,
+      productCommission: commissionCalc.productCommission,
+      leaveDeduction,
+      otherBonus,
+      otherDeduction,
+      salaryTotal,
       socialInsurance,
       housingFund,
       total,
       adjustment: adj,
+      costAllocationRatio: useRatioSplit ? (allocRatio || 0) : undefined,
     };
   });
 

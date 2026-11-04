@@ -433,7 +433,7 @@ router.post("/", requireEditPermission, (req, res) => {
     name, salesUnitId, position, phone, email, salary,
     socialInsurance, housingFund, hireDate, resignDate, status,
     highCommissionFrom, regularCompensation, isInternalEmployee,
-    taxProfile,
+    taxProfile, costAllocation,
   } = req.body;
   if (!name || !salesUnitId) {
     return res.status(400).json({ error: "姓名和销售单位不能为空" });
@@ -468,15 +468,18 @@ router.post("/", requireEditPermission, (req, res) => {
       updatedAt: taxProfile.updatedAt || new Date().toISOString(),
     })
     : "";
+  const costAllocationJson = costAllocation
+    ? JSON.stringify(costAllocation)
+    : "";
   runInTransaction(() => {
     db.prepare(`
       INSERT INTO personnel (
         id, name, sales_unit_id, position, phone, email, salary,
         social_insurance, housing_fund, hire_date, resign_date, status,
         high_commission_from, regular_compensation, is_internal_employee,
-        tax_profile_json
+        tax_profile_json, cost_allocation_json
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       name,
@@ -494,6 +497,7 @@ router.post("/", requireEditPermission, (req, res) => {
       regularJson,
       internalFlag,
       taxProfileJson,
+      costAllocationJson,
     );
     insertOpenAssignment(db, id, salesUnitId, startDate, "入职建档", getOperator(req));
     insertOpenPayPlan(
@@ -1297,7 +1301,7 @@ router.put("/:id", requireEditPermission, (req, res) => {
     name, salesUnitId, position, phone, email, salary,
     socialInsurance, housingFund, hireDate, resignDate, status,
     highCommissionFrom, regularCompensation, isInternalEmployee,
-    taxProfile,
+    taxProfile, costAllocation,
   } = req.body;
   const salaryJson = salary ? JSON.stringify(salary) : existing.salary;
   const regularJson =
@@ -1320,6 +1324,10 @@ router.put("/:id", requireEditPermission, (req, res) => {
     taxProfile !== undefined
       ? (taxProfile ? JSON.stringify(taxProfile) : "")
       : (existing.tax_profile_json || "");
+  const costAllocationJson =
+    costAllocation !== undefined
+      ? (costAllocation ? JSON.stringify(costAllocation) : "")
+      : (existing.cost_allocation_json || "");
 
   const nextUnitId = salesUnitId ?? existing.sales_unit_id;
   const unitChanged =
@@ -1333,7 +1341,8 @@ router.put("/:id", requireEditPermission, (req, res) => {
         salary = ?, social_insurance = ?, housing_fund = ?,
         hire_date = ?, resign_date = ?, status = ?,
         high_commission_from = ?, regular_compensation = ?,
-        is_internal_employee = ?, tax_profile_json = ?
+        is_internal_employee = ?, tax_profile_json = ?,
+        cost_allocation_json = ?
       WHERE id = ?
     `).run(
       name ?? existing.name,
@@ -1351,6 +1360,7 @@ router.put("/:id", requireEditPermission, (req, res) => {
       regularJson,
       nextInternal,
       taxProfileJson,
+      costAllocationJson,
       id,
     );
 

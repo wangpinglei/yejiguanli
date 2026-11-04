@@ -17,9 +17,20 @@ import {
   isSalesBattlePosition,
   MONTHLY_STANDARD_HOURS,
 } from "@/lib/salary";
+import {
+  isValidCostAllocationShares,
+  normalizeCostAllocationShares,
+  parsePersonnelCostAllocation,
+} from "@/lib/costAllocation";
 import { loadPayrollScopeUnitIds } from "@/lib/payrollCalc";
 import { isOnDutyPerson } from "@/lib/personnelDuty";
-import type { Personnel, PersonnelUnitAssignment, SalaryStructure } from "@/types";
+import type {
+  CostAllocationMonthOverride,
+  CostAllocationShare,
+  Personnel,
+  PersonnelUnitAssignment,
+  SalaryStructure,
+} from "@/types";
 import {
   Plus,
   Search,
@@ -108,6 +119,10 @@ const DEFAULT_FORM = {
   status: "active" as Personnel["status"],
   /** 默认内部员工，核算底薪/社保；关闭后只核算提成 */
   isInternalEmployee: true,
+  /** 固定成本默认分摊（单位+比例%） */
+  costAllocationShares: [] as CostAllocationShare[],
+  /** 月度覆盖 */
+  costAllocationMonthOverrides: [] as CostAllocationMonthOverride[],
 };
 
 // 销售总额时间范围
@@ -505,6 +520,8 @@ export default function PersonnelPage() {
       housingFund: 0,
       socialInsurancePersonal: 0,
       housingFundPersonal: 0,
+      costAllocationShares: [],
+      costAllocationMonthOverrides: [],
       salesUnitId: salesUnits[0]?.id || "",
       hireDate: new Date().toISOString().slice(0, 10),
     });
@@ -526,6 +543,7 @@ export default function PersonnelPage() {
       ).pop()
       : null
     const tax = person.taxProfile
+    const alloc = parsePersonnelCostAllocation(person.costAllocation)
     setForm({
       name: person.name,
       salesUnitId: person.salesUnitId,
@@ -547,6 +565,13 @@ export default function PersonnelPage() {
       resignDate: person.resignDate || "",
       status: person.status,
       isInternalEmployee: internal,
+      costAllocationShares: alloc?.shares ? [...alloc.shares] : [],
+      costAllocationMonthOverrides: alloc?.monthOverrides
+        ? alloc.monthOverrides.map((m) => ({
+          yearMonth: m.yearMonth,
+          shares: [...m.shares],
+        }))
+        : [],
     });
     setDialogOpen(true);
   };
@@ -574,6 +599,8 @@ export default function PersonnelPage() {
     const {
       socialInsurancePersonal,
       housingFundPersonal,
+      costAllocationShares,
+      costAllocationMonthOverrides,
       ...formRest
     } = form
     // 非内部/合作方：不缴纳也不保留社保公积金与固定月薪
@@ -586,6 +613,38 @@ export default function PersonnelPage() {
           performance: 0,
           positionAllowance: 0,
         }
+    const shares = isInternal
+      ? normalizeCostAllocationShares(costAllocationShares)
+      : []
+    if (isInternal && shares.length > 0 && !isValidCostAllocationShares(shares)) {
+      alert('成本分摊需至少 2 个单位，且比例合计为 100%')
+      return
+    }
+    const monthOverrides = isInternal
+      ? (costAllocationMonthOverrides || [])
+        .map((m) => ({
+          yearMonth: String(m.yearMonth || '').slice(0, 7),
+          shares: normalizeCostAllocationShares(m.shares),
+        }))
+        .filter((m) => m.yearMonth && isValidCostAllocationShares(m.shares))
+      : []
+    for (const m of costAllocationMonthOverrides || []) {
+      const normalized = normalizeCostAllocationShares(m.shares)
+      if (
+        String(m.yearMonth || '').slice(0, 7)
+        && normalized.length > 0
+        && !isValidCostAllocationShares(normalized)
+      ) {
+        alert(`月度分摊 ${m.yearMonth} 需至少 2 个单位且比例合计 100%`)
+        return
+      }
+    }
+    const costAllocation = isInternal && (shares.length > 0 || monthOverrides.length > 0)
+      ? {
+        shares: shares.length > 0 ? shares : undefined,
+        monthOverrides: monthOverrides.length > 0 ? monthOverrides : undefined,
+      }
+      : null
     const prevSpecial = editingPerson?.taxProfile?.special
     const taxProfile = {
       personnelId: editingPerson?.id || '',
@@ -603,13 +662,19 @@ export default function PersonnelPage() {
       resignDate: resignDate ? resignDate : null,
       status,
       taxProfile,
+      costAllocation,
     } as typeof formRest & {
       resignDate: string | null
       taxProfile: typeof taxProfile
+      costAllocation: typeof costAllocation
     }
     try {
       if (editingPerson) {
-        await updatePersonnel(editingPerson.id, data);
+        // costAllocation 传 null 清空服务端 JSON（undefined 会被省略）
+        await updatePersonnel(
+          editingPerson.id,
+          data as Parameters<typeof updatePersonnel>[1],
+        );
       } else {
         await addPersonnel(data as Omit<Personnel, 'id'>);
       }
@@ -1667,7 +1732,7 @@ export default function PersonnelPage() {
                         setForm({ ...form, isInternalEmployee: true })
                         return
                       }
-                      // 关闭内部员工：清空底薪/社保等，只保留提成相关
+                      // 关闭内部员工：清空底薪/社保/分摊等，只保留提成相关
                       setForm({
                         ...form,
                         isInternalEmployee: false,
@@ -1675,6 +1740,8 @@ export default function PersonnelPage() {
                         housingFund: 0,
                         socialInsurancePersonal: 0,
                         housingFundPersonal: 0,
+                        costAllocationShares: [],
+                        costAllocationMonthOverrides: [],
                         salary: {
                           ...form.salary,
                           baseSalary: 0,
@@ -1970,6 +2037,269 @@ export default function PersonnelPage() {
                     </div>
                   </div>
                 )}
+
+                {/* 固定成本跨单位比例分摊 */}
+                {form.isInternalEmployee && (() => {
+                  const shareSum = form.costAllocationShares.reduce(
+                    (s, r) => s + (Number(r.ratio) || 0),
+                    0,
+                  )
+                  const sharesOk =
+                    form.costAllocationShares.length === 0
+                    || isValidCostAllocationShares(
+                      normalizeCostAllocationShares(form.costAllocationShares),
+                    )
+                  return (
+                    <div className="space-y-3 rounded-lg border border-sky-200 bg-sky-50/30 p-4">
+                      <div className="flex items-center justify-between gap-2">
+                        <h4 className="text-sm font-semibold">成本分摊（多单位）</h4>
+                        <Badge
+                          variant="outline"
+                          className={
+                            form.costAllocationShares.length === 0
+                              ? 'text-muted-foreground'
+                              : sharesOk
+                                ? 'border-emerald-300 text-emerald-700'
+                                : 'border-red-300 text-red-700'
+                          }
+                        >
+                          {form.costAllocationShares.length === 0
+                            ? '未启用 · 按调岗天数'
+                            : `合计 ${shareSum.toFixed(1)}%`}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        底薪、保密费、绩效、岗位补贴、社保/公积金企业部分按比例计入各单位成本；
+                        提成仍跟成交单位。至少 2 个单位且合计 100% 才生效。
+                      </p>
+                      <div className="space-y-2">
+                        {form.costAllocationShares.map((row, idx) => (
+                          <div key={idx} className="flex flex-wrap items-end gap-2">
+                            <div className="min-w-[160px] flex-1 space-y-1">
+                              <Label className="text-xs">单位</Label>
+                              <Select
+                                value={row.salesUnitId || undefined}
+                                onValueChange={(v) => {
+                                  const next = [...form.costAllocationShares]
+                                  next[idx] = { ...next[idx], salesUnitId: v }
+                                  setForm({ ...form, costAllocationShares: next })
+                                }}
+                              >
+                                <SelectTrigger className="h-9">
+                                  <SelectValue placeholder="选择单位" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {salesUnits.map((u) => (
+                                    <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="w-28 space-y-1">
+                              <Label className="text-xs">比例 %</Label>
+                              <Input
+                                type="number"
+                                className="h-9"
+                                value={row.ratio}
+                                onChange={(e) => {
+                                  const next = [...form.costAllocationShares]
+                                  next[idx] = {
+                                    ...next[idx],
+                                    ratio: Number(e.target.value),
+                                  }
+                                  setForm({ ...form, costAllocationShares: next })
+                                }}
+                                placeholder="50"
+                              />
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-9 text-red-600"
+                              onClick={() => {
+                                setForm({
+                                  ...form,
+                                  costAllocationShares: form.costAllocationShares.filter(
+                                    (_, i) => i !== idx,
+                                  ),
+                                })
+                              }}
+                            >
+                              删除
+                            </Button>
+                          </div>
+                        ))}
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8"
+                            onClick={() => {
+                              setForm({
+                                ...form,
+                                costAllocationShares: [
+                                  ...form.costAllocationShares,
+                                  {
+                                    salesUnitId: form.salesUnitId || salesUnits[0]?.id || '',
+                                    ratio: 0,
+                                  },
+                                ],
+                              })
+                            }}
+                          >
+                            + 添加单位
+                          </Button>
+                          {form.costAllocationShares.length > 0 && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 text-muted-foreground"
+                              onClick={() => setForm({
+                                ...form,
+                                costAllocationShares: [],
+                              })}
+                            >
+                              清空（改回按天）
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="space-y-2 border-t border-sky-100 pt-3">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs font-medium">月度覆盖（可选）</Label>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => {
+                              const ym = new Date().toISOString().slice(0, 7)
+                              setForm({
+                                ...form,
+                                costAllocationMonthOverrides: [
+                                  ...form.costAllocationMonthOverrides,
+                                  {
+                                    yearMonth: ym,
+                                    shares: form.costAllocationShares.length >= 2
+                                      ? form.costAllocationShares.map((s) => ({ ...s }))
+                                      : [
+                                        {
+                                          salesUnitId: form.salesUnitId || '',
+                                          ratio: 50,
+                                        },
+                                        {
+                                          salesUnitId: salesUnits.find(
+                                            (u) => u.id !== form.salesUnitId,
+                                          )?.id || '',
+                                          ratio: 50,
+                                        },
+                                      ],
+                                  },
+                                ],
+                              })
+                            }}
+                          >
+                            + 添加月份
+                          </Button>
+                        </div>
+                        {form.costAllocationMonthOverrides.map((mo, mi) => (
+                          <div
+                            key={mi}
+                            className="space-y-2 rounded-md border bg-white/80 p-3"
+                          >
+                            <div className="flex flex-wrap items-end gap-2">
+                              <div className="space-y-1">
+                                <Label className="text-xs">月份</Label>
+                                <Input
+                                  type="month"
+                                  className="h-8 w-40"
+                                  value={mo.yearMonth}
+                                  onChange={(e) => {
+                                    const next = [...form.costAllocationMonthOverrides]
+                                    next[mi] = {
+                                      ...next[mi],
+                                      yearMonth: e.target.value,
+                                    }
+                                    setForm({
+                                      ...form,
+                                      costAllocationMonthOverrides: next,
+                                    })
+                                  }}
+                                />
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 text-red-600"
+                                onClick={() => {
+                                  setForm({
+                                    ...form,
+                                    costAllocationMonthOverrides:
+                                      form.costAllocationMonthOverrides.filter(
+                                        (_, i) => i !== mi,
+                                      ),
+                                  })
+                                }}
+                              >
+                                删除本月
+                              </Button>
+                            </div>
+                            {mo.shares.map((row, si) => (
+                              <div key={si} className="flex flex-wrap items-end gap-2">
+                                <Select
+                                  value={row.salesUnitId || undefined}
+                                  onValueChange={(v) => {
+                                    const next = [...form.costAllocationMonthOverrides]
+                                    const shares = [...next[mi].shares]
+                                    shares[si] = { ...shares[si], salesUnitId: v }
+                                    next[mi] = { ...next[mi], shares }
+                                    setForm({
+                                      ...form,
+                                      costAllocationMonthOverrides: next,
+                                    })
+                                  }}
+                                >
+                                  <SelectTrigger className="h-8 w-44">
+                                    <SelectValue placeholder="单位" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {salesUnits.map((u) => (
+                                      <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                <Input
+                                  type="number"
+                                  className="h-8 w-24"
+                                  value={row.ratio}
+                                  onChange={(e) => {
+                                    const next = [...form.costAllocationMonthOverrides]
+                                    const shares = [...next[mi].shares]
+                                    shares[si] = {
+                                      ...shares[si],
+                                      ratio: Number(e.target.value),
+                                    }
+                                    next[mi] = { ...next[mi], shares }
+                                    setForm({
+                                      ...form,
+                                      costAllocationMonthOverrides: next,
+                                    })
+                                  }}
+                                />
+                                <span className="text-xs text-muted-foreground">%</span>
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })()}
               </>
             )}
           </div>

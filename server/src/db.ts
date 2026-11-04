@@ -501,6 +501,8 @@ function initSchema() {
       { name: "is_internal_employee", ddl: "is_internal_employee INTEGER DEFAULT 1" },
       // 个税扣除档案：专项附加 + 社保/公积金个人代扣默认（JSON）
       { name: "tax_profile_json", ddl: "tax_profile_json TEXT DEFAULT ''" },
+      // 固定成本跨单位比例分摊（默认 + 月度覆盖 JSON）
+      { name: "cost_allocation_json", ddl: "cost_allocation_json TEXT DEFAULT ''" },
     ]);
     // 首次加列：岗位含「分销」的默认标为非内部员工（仅提成）
     if (!hadInternal) {
@@ -2077,6 +2079,16 @@ export function rowToPersonnel(row: any, assignments?: any[], payPlans?: any[]) 
       taxProfile = undefined;
     }
   }
+  let costAllocation: any = undefined;
+  const rawAlloc = row.cost_allocation_json;
+  if (rawAlloc) {
+    try {
+      costAllocation =
+        typeof rawAlloc === "string" ? JSON.parse(rawAlloc || "null") : rawAlloc;
+    } catch {
+      costAllocation = undefined;
+    }
+  }
   return {
     id: row.id,
     name: row.name,
@@ -2096,6 +2108,7 @@ export function rowToPersonnel(row: any, assignments?: any[], payPlans?: any[]) 
     highCommissionFrom: row.high_commission_from || undefined,
     regularCompensation: regularCompensation || undefined,
     taxProfile: taxProfile || undefined,
+    costAllocation: costAllocation || undefined,
     unitAssignments: Array.isArray(assignments)
       ? assignments.map(rowToPersonnelUnitAssignment)
       : undefined,
