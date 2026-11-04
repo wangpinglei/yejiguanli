@@ -216,14 +216,14 @@ export default function Payroll() {
     [salesUnits, scopeUnitIds],
   )
 
-  // 默认只显示一个纳入单位；用户可改选「全部」；纳入变化时校正无效 id
+  // 筛选下拉仅含上方已选单位；默认第一个，不提供「全部」
   useEffect(() => {
     if (scopedUnits.length === 0) {
-      if (filterUnitId !== 'all') setFilterUnitId('all')
+      if (filterUnitId) setFilterUnitId('')
       return
     }
     const isValidUnit = scopedUnits.some((u) => u.id === filterUnitId)
-    if (!filterUnitId || (filterUnitId !== 'all' && !isValidUnit)) {
+    if (!filterUnitId || filterUnitId === 'all' || !isValidUnit) {
       setFilterUnitId(scopedUnits[0].id)
     }
   }, [scopedUnits, filterUnitId])
@@ -488,13 +488,9 @@ export default function Payroll() {
     })
     // 文件名：单位名称 + 月份（与筛选/导出内容一致）
     const unitNames = Array.from(new Set(rows.map((r) => r.unitName).filter(Boolean)))
-    let unitLabel = '全部已选单位'
-    if (filterUnitId !== 'all') {
-      const hit = scopedUnits.find((u) => u.id === filterUnitId)
-      unitLabel = hit?.name || unitNames[0] || unitLabel
-    } else if (unitNames.length === 1) {
-      unitLabel = unitNames[0]
-    } else if (unitNames.length > 1) {
+    const hit = scopedUnits.find((u) => u.id === filterUnitId)
+    let unitLabel = hit?.name || unitNames[0] || '工资表'
+    if (!hit && unitNames.length > 1) {
       unitLabel = unitNames.length <= 3
         ? unitNames.join('、')
         : `${unitNames.slice(0, 2).join('、')}等${unitNames.length}家`
@@ -686,13 +682,16 @@ export default function Payroll() {
               />
             </div>
             <div className="space-y-1">
-              <Label>筛选单位</Label>
-              <Select value={filterUnitId} onValueChange={setFilterUnitId}>
+              <Label>核算单位</Label>
+              <Select
+                value={filterUnitId || undefined}
+                onValueChange={setFilterUnitId}
+                disabled={scopedUnits.length === 0}
+              >
                 <SelectTrigger className="w-[220px]">
-                  <SelectValue placeholder="选择单位" />
+                  <SelectValue placeholder="请先在上方选择单位" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">全部已选单位</SelectItem>
                   {scopedUnits.map((u) => (
                     <SelectItem key={u.id} value={u.id}>
                       {u.name}
@@ -701,7 +700,7 @@ export default function Payroll() {
                 </SelectContent>
               </Select>
               <p className="text-[11px] text-muted-foreground">
-                默认显示所选第一个单位；可切换其他单位或「全部已选单位」
+                仅显示上方已选单位；默认第一个，可在此切换
               </p>
             </div>
             <Button type="button" variant="outline" onClick={handleSaveEntries}>
