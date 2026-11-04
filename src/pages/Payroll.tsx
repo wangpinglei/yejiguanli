@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { Calculator, CheckSquare, FileSpreadsheet, Pencil, Save } from 'lucide-react'
 
 import { PageHeader } from '@/components/PageHeader'
+import ViewerWatermark from '@/components/ViewerWatermark'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -508,7 +509,8 @@ export default function Payroll() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="relative space-y-6">
+      <ViewerWatermark />
       <PageHeader
         title="工资核算"
         description="先选择单位并去核算，再按月录入出勤与考核分，生成可导出工资表。出勤/考核暂存本机。"
