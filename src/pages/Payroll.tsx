@@ -171,7 +171,8 @@ export default function Payroll() {
   const [scopeUnitIds, setScopeUnitIds] = useState<string[]>(() => loadPayrollScopeUnitIds())
   const [draftScopeIds, setDraftScopeIds] = useState<string[]>(() => loadPayrollScopeUnitIds())
   const [entries, setEntries] = useState<Record<string, PayrollMonthEntry>>({})
-  const [filterUnitId, setFilterUnitId] = useState('all')
+  // 空串=尚未按纳入名单初始化；有纳入时默认落到第一个单位
+  const [filterUnitId, setFilterUnitId] = useState('')
   const [calcPhase, setCalcPhase] = useState<PayrollCalcPhase>('idle')
   const [entryMode, setEntryMode] = useState<PayrollEntryMode>('all')
   const [savedTip, setSavedTip] = useState('')
@@ -214,6 +215,18 @@ export default function Payroll() {
     () => salesUnits.filter((u) => scopeUnitIds.includes(u.id)),
     [salesUnits, scopeUnitIds],
   )
+
+  // 默认只显示一个纳入单位；用户可改选「全部」；纳入变化时校正无效 id
+  useEffect(() => {
+    if (scopedUnits.length === 0) {
+      if (filterUnitId !== 'all') setFilterUnitId('all')
+      return
+    }
+    const isValidUnit = scopedUnits.some((u) => u.id === filterUnitId)
+    if (!filterUnitId || (filterUnitId !== 'all' && !isValidUnit)) {
+      setFilterUnitId(scopedUnits[0].id)
+    }
+  }, [scopedUnits, filterUnitId])
 
   useEffect(() => {
     setEntries(loadPayrollEntries(yearMonth))
@@ -663,7 +676,7 @@ export default function Payroll() {
               <Label>筛选单位</Label>
               <Select value={filterUnitId} onValueChange={setFilterUnitId}>
                 <SelectTrigger className="w-[220px]">
-                  <SelectValue placeholder="全部纳入单位" />
+                  <SelectValue placeholder="选择单位" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">全部纳入单位</SelectItem>
@@ -674,6 +687,9 @@ export default function Payroll() {
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-[11px] text-muted-foreground">
+                默认显示第一个纳入单位；可切换其他单位或「全部纳入单位」
+              </p>
             </div>
             <Button type="button" variant="outline" onClick={handleSaveEntries}>
               <Save className="mr-1.5 h-3.5 w-3.5" />
