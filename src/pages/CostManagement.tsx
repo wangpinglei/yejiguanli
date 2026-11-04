@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { Fragment, useState, useMemo, useEffect } from "react";
 import { useData } from "@/context/DataContext";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -275,7 +275,10 @@ export default function CostManagement() {
   }, [salaryCostMode, forecastSalaryCosts, payrollPayableByUnit]);
 
   // 按月过滤手动成本记录（含月度固定循环成本；单位停用次月起不再展示）
+  // 同单位排在一起，便于查看
   const filteredRecords = useMemo(() => {
+    const unitName = (id: string) =>
+      salesUnits.find((u) => u.id === id)?.name || id || '-'
     return costRecords
       .filter((c) => {
         const matchUnit = filterUnit === "all" || c.salesUnitId === filterUnit;
@@ -285,8 +288,42 @@ export default function CostManagement() {
         if (!isSalesUnitOperatingInMonth(unit, selectedMonth)) return false;
         return c.remark.toLowerCase().includes(search.toLowerCase());
       })
-      .sort((a, b) => (b.createdAt || b.date).localeCompare(a.createdAt || a.date));
+      .sort((a, b) => {
+        const byUnit = unitName(a.salesUnitId).localeCompare(
+          unitName(b.salesUnitId),
+          'zh-CN',
+        )
+        if (byUnit !== 0) return byUnit
+        return (b.date || '').localeCompare(a.date || '')
+      });
   }, [costRecords, filterUnit, selectedMonth, search, salesUnits]);
+
+  /** 手动成本按销售单位分组（展示用） */
+  const costRecordsGrouped = useMemo(() => {
+    const groups: Array<{
+      unitId: string
+      unitName: string
+      records: typeof filteredRecords
+      total: number
+    }> = []
+    for (const record of filteredRecords) {
+      const last = groups[groups.length - 1]
+      if (last && last.unitId === record.salesUnitId) {
+        last.records.push(record)
+        last.total += record.totalCost
+      } else {
+        groups.push({
+          unitId: record.salesUnitId,
+          unitName: salesUnits.find((u) => u.id === record.salesUnitId)?.name
+            || record.salesUnitId
+            || '-',
+          records: [record],
+          total: record.totalCost,
+        })
+      }
+    }
+    return groups
+  }, [filteredRecords, salesUnits]);
 
   const manualCostTotal = useMemo(() => {
     return filteredRecords.reduce((sum, c) => sum + c.totalCost, 0);
@@ -360,9 +397,11 @@ export default function CostManagement() {
     [salaryCosts],
   );
 
-  // 按月过滤收入记录（月度固定；单位停用次月起不再展示）
+  // 按月过滤收入记录（月度固定；单位停用次月起不再展示；同单位排在一起）
   const filteredIncomeRecords = useMemo(() => {
     const targetMonth = selectedMonth; // "2026-08"
+    const unitName = (id: string) =>
+      salesUnits.find((u) => u.id === id)?.name || id || '-'
     return incomeRecords
       .filter((r) => {
         const matchUnit = filterUnit === "all" || r.salesUnitId === filterUnit;
@@ -372,8 +411,41 @@ export default function CostManagement() {
         if (!isSalesUnitOperatingInMonth(unit, targetMonth)) return false;
         return true;
       })
-      .sort((a, b) => (b.createdAt || b.date).localeCompare(a.createdAt || a.date));
+      .sort((a, b) => {
+        const byUnit = unitName(a.salesUnitId).localeCompare(
+          unitName(b.salesUnitId),
+          'zh-CN',
+        )
+        if (byUnit !== 0) return byUnit
+        return (b.date || '').localeCompare(a.date || '')
+      });
   }, [incomeRecords, filterUnit, selectedMonth, salesUnits]);
+
+  const incomeRecordsGrouped = useMemo(() => {
+    const groups: Array<{
+      unitId: string
+      unitName: string
+      records: typeof filteredIncomeRecords
+      total: number
+    }> = []
+    for (const record of filteredIncomeRecords) {
+      const last = groups[groups.length - 1]
+      if (last && last.unitId === record.salesUnitId) {
+        last.records.push(record)
+        last.total += record.totalAmount
+      } else {
+        groups.push({
+          unitId: record.salesUnitId,
+          unitName: salesUnits.find((u) => u.id === record.salesUnitId)?.name
+            || record.salesUnitId
+            || '-',
+          records: [record],
+          total: record.totalAmount,
+        })
+      }
+    }
+    return groups
+  }, [filteredIncomeRecords, salesUnits]);
 
   const incomeTotal = useMemo(() => {
     return filteredIncomeRecords.reduce((sum, r) => sum + r.totalAmount, 0);
@@ -1180,103 +1252,125 @@ export default function CostManagement() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredRecords.map((record) => {
-                  const isExpanded = expandedRows.has(record.id);
-                  return (
-                    <>
-                      <TableRow key={record.id} className="cursor-pointer hover:bg-accent/50" onClick={() => toggleRow(record.id)}>
-                        <TableCell>
-                          <button className="flex h-6 w-6 items-center justify-center rounded">
-                            {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                          </button>
-                        </TableCell>
-                        <TableCell>
-                          {record.isRecurring ? (
-                            <Badge className="bg-orange-100 text-orange-800 hover:bg-orange-100">
-                              <Repeat className="mr-1 h-3 w-3" />每月
-                            </Badge>
-                          ) : (
-                            <Badge variant="secondary">单次</Badge>
-                          )}
-                        </TableCell>
-                        <TableCell className="font-medium">
-                          {getYearMonth(record.date)}
-                        </TableCell>
-                        <TableCell><Badge variant="outline">{getUnitName(record.salesUnitId)}</Badge></TableCell>
-                        <TableCell className="text-right">{record.items.length}</TableCell>
-                        <TableCell className="text-right font-bold text-orange-600">{formatCurrency(record.totalCost)}</TableCell>
-                        <TableCell>
-                          {record.createdAt ? (
-                            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                              <Clock className="h-3 w-3" />
-                              {formatDateTime(record.createdAt)}
-                            </span>
-                          ) : "-"}
-                        </TableCell>
-                        <TableCell className="text-sm">{record.createdBy || "-"}</TableCell>
-                        <TableCell className="text-muted-foreground">{record.remark || "-"}</TableCell>
-                        <TableCell className="text-right">
-                          {canEditCost && !isReadOnly ? (
-                            <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                              <Button variant="ghost" size="icon" onClick={() => openEdit(record)}>
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button variant="ghost" size="icon" onClick={() => { setDeleteId(record.id); setDeleteReason(""); }}>
-                                <Trash2 className="h-4 w-4 text-destructive" />
-                              </Button>
-                            </div>
-                          ) : (
-                            <span className="text-xs text-muted-foreground" onClick={(e) => e.stopPropagation()}>仅查看</span>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                      {isExpanded && (
-                        <TableRow key={record.id + "-detail"} className="bg-muted/30">
-                          <TableCell colSpan={10} className="py-3">
-                            <div className="ml-8 space-y-2">
-                              {record.items.map((item) => (
-                                <div key={item.id} className="flex items-center gap-4 rounded-lg border bg-card px-4 py-2 text-sm">
-                                  <Badge variant="secondary">{item.category}</Badge>
-                                  <span className="flex-1 text-muted-foreground">{item.description || "-"}</span>
-                                  <span className="font-semibold text-orange-600">{formatCurrency(item.amount)}</span>
-                                </div>
-                              ))}
-                              <div className="flex justify-end border-t pt-2 text-sm">
-                                <span className="mr-3 text-muted-foreground">合计</span>
-                                <span className="font-bold text-orange-600">{formatCurrency(record.totalCost)}</span>
-                              </div>
-                              {record.isRecurring && (() => {
-                                const unit = findUnitForCost(salesUnits, record.salesUnitId)
-                                const unitClosedYm = (unit?.closedAt || '').slice(0, 7)
-                                const endHint = record.recurringEndDate
-                                  ? ` · 至 ${formatDate(record.recurringEndDate)} 止`
-                                  : unitClosedYm
-                                    ? ` · 单位停用后截止 ${unitClosedYm}`
-                                    : ' · 永久生效'
-                                return (
-                                <div className="rounded-lg bg-orange-50 px-3 py-2 text-xs text-orange-800">
-                                  <Repeat className="inline mr-1 h-3 w-3" />
-                                  月度固定成本
-                                  {endHint}
-                                  {" · "}
-                                  {record.recurringMonths?.length === 12
-                                    ? "全年"
-                                    : (record.recurringMonths || []).map((m) => `${m}月`).join("、")}
-                                </div>
-                                )
-                              })()}
-                              {record.changeReason && (
-                                <div className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">
-                                  <strong>最近变更原因：</strong>{record.changeReason}
-                                </div>
+                {costRecordsGrouped.map((group) => (
+                  <Fragment key={`cost-unit-${group.unitId}`}>
+                    <TableRow className="bg-orange-50/60 hover:bg-orange-50/60">
+                      <TableCell colSpan={5} className="py-2">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="border-orange-300 bg-white text-orange-900">
+                            {group.unitName}
+                          </Badge>
+                          <span className="text-xs text-muted-foreground">
+                            {group.records.length} 条
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="py-2 text-right font-semibold text-orange-700">
+                        {formatCurrency(group.total)}
+                      </TableCell>
+                      <TableCell colSpan={4} />
+                    </TableRow>
+                    {group.records.map((record) => {
+                      const isExpanded = expandedRows.has(record.id);
+                      return (
+                        <Fragment key={record.id}>
+                          <TableRow className="cursor-pointer hover:bg-accent/50" onClick={() => toggleRow(record.id)}>
+                            <TableCell>
+                              <button className="flex h-6 w-6 items-center justify-center rounded">
+                                {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                              </button>
+                            </TableCell>
+                            <TableCell>
+                              {record.isRecurring ? (
+                                <Badge className="bg-orange-100 text-orange-800 hover:bg-orange-100">
+                                  <Repeat className="mr-1 h-3 w-3" />每月
+                                </Badge>
+                              ) : (
+                                <Badge variant="secondary">单次</Badge>
                               )}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </>
-                  );
-                })}
+                            </TableCell>
+                            <TableCell className="font-medium">
+                              {getYearMonth(record.date)}
+                            </TableCell>
+                            <TableCell className="text-muted-foreground text-xs">
+                              {getUnitName(record.salesUnitId)}
+                            </TableCell>
+                            <TableCell className="text-right">{record.items.length}</TableCell>
+                            <TableCell className="text-right font-bold text-orange-600">{formatCurrency(record.totalCost)}</TableCell>
+                            <TableCell>
+                              {record.createdAt ? (
+                                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                                  <Clock className="h-3 w-3" />
+                                  {formatDateTime(record.createdAt)}
+                                </span>
+                              ) : "-"}
+                            </TableCell>
+                            <TableCell className="text-sm">{record.createdBy || "-"}</TableCell>
+                            <TableCell className="text-muted-foreground">{record.remark || "-"}</TableCell>
+                            <TableCell className="text-right">
+                              {canEditCost && !isReadOnly ? (
+                                <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                                  <Button variant="ghost" size="icon" onClick={() => openEdit(record)}>
+                                    <Pencil className="h-4 w-4" />
+                                  </Button>
+                                  <Button variant="ghost" size="icon" onClick={() => { setDeleteId(record.id); setDeleteReason(""); }}>
+                                    <Trash2 className="h-4 w-4 text-destructive" />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <span className="text-xs text-muted-foreground" onClick={(e) => e.stopPropagation()}>仅查看</span>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                          {isExpanded && (
+                            <TableRow className="bg-muted/30">
+                              <TableCell colSpan={10} className="py-3">
+                                <div className="ml-8 space-y-2">
+                                  {record.items.map((item) => (
+                                    <div key={item.id} className="flex items-center gap-4 rounded-lg border bg-card px-4 py-2 text-sm">
+                                      <Badge variant="secondary">{item.category}</Badge>
+                                      <span className="flex-1 text-muted-foreground">{item.description || "-"}</span>
+                                      <span className="font-semibold text-orange-600">{formatCurrency(item.amount)}</span>
+                                    </div>
+                                  ))}
+                                  <div className="flex justify-end border-t pt-2 text-sm">
+                                    <span className="mr-3 text-muted-foreground">合计</span>
+                                    <span className="font-bold text-orange-600">{formatCurrency(record.totalCost)}</span>
+                                  </div>
+                                  {record.isRecurring && (() => {
+                                    const unit = findUnitForCost(salesUnits, record.salesUnitId)
+                                    const unitClosedYm = (unit?.closedAt || '').slice(0, 7)
+                                    const endHint = record.recurringEndDate
+                                      ? ` · 至 ${formatDate(record.recurringEndDate)} 止`
+                                      : unitClosedYm
+                                        ? ` · 单位停用后截止 ${unitClosedYm}`
+                                        : ' · 永久生效'
+                                    return (
+                                    <div className="rounded-lg bg-orange-50 px-3 py-2 text-xs text-orange-800">
+                                      <Repeat className="inline mr-1 h-3 w-3" />
+                                      月度固定成本
+                                      {endHint}
+                                      {" · "}
+                                      {record.recurringMonths?.length === 12
+                                        ? "全年"
+                                        : (record.recurringMonths || []).map((m) => `${m}月`).join("、")}
+                                    </div>
+                                    )
+                                  })()}
+                                  {record.changeReason && (
+                                    <div className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">
+                                      <strong>最近变更原因：</strong>{record.changeReason}
+                                    </div>
+                                  )}
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </Fragment>
+                ))}
                 {filteredRecords.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={10} className="text-center py-12 text-muted-foreground">
@@ -1321,105 +1415,127 @@ export default function CostManagement() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredIncomeRecords.map((record) => {
-                  const isExp = expandedRows.has(record.id);
-                  const monthCount = record.recurringMonths?.length || 0;
-                  return (
-                    <>
-                      <TableRow key={record.id} className="cursor-pointer hover:bg-accent/50" onClick={() => toggleRow(record.id)}>
-                        <TableCell>
-                          <button className="flex h-6 w-6 items-center justify-center rounded">
-                            {isExp ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                          </button>
-                        </TableCell>
-                        <TableCell>
-                          {record.isRecurring ? (
-                            <Badge className="bg-violet-100 text-violet-700 text-xs">
-                              <Repeat className="mr-1 h-3 w-3" />每月
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-xs">单次</Badge>
-                          )}
-                        </TableCell>
-                        <TableCell className="font-medium">
-                          {record.isRecurring ? (
-                            <div>
-                              <div className="text-sm">{getYearMonth(record.date)} 起</div>
-                              {monthCount > 0 && monthCount < 12 && (
-                                <div className="text-[10px] text-violet-600 mt-0.5">
-                                  {record.recurringMonths!.map((m) => `${m}月`).join("、")}
-                                </div>
+                {incomeRecordsGrouped.map((group) => (
+                  <Fragment key={`income-unit-${group.unitId}`}>
+                    <TableRow className="bg-emerald-50/60 hover:bg-emerald-50/60">
+                      <TableCell colSpan={5} className="py-2">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="border-emerald-300 bg-white text-emerald-900">
+                            {group.unitName}
+                          </Badge>
+                          <span className="text-xs text-muted-foreground">
+                            {group.records.length} 条
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="py-2 text-right font-semibold text-emerald-700">
+                        {formatCurrency(group.total)}
+                      </TableCell>
+                      <TableCell colSpan={4} />
+                    </TableRow>
+                    {group.records.map((record) => {
+                      const isExp = expandedRows.has(record.id);
+                      const monthCount = record.recurringMonths?.length || 0;
+                      return (
+                        <Fragment key={record.id}>
+                          <TableRow className="cursor-pointer hover:bg-accent/50" onClick={() => toggleRow(record.id)}>
+                            <TableCell>
+                              <button className="flex h-6 w-6 items-center justify-center rounded">
+                                {isExp ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                              </button>
+                            </TableCell>
+                            <TableCell>
+                              {record.isRecurring ? (
+                                <Badge className="bg-violet-100 text-violet-700 text-xs">
+                                  <Repeat className="mr-1 h-3 w-3" />每月
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-xs">单次</Badge>
                               )}
-                              {monthCount === 12 && (
-                                <div className="text-[10px] text-violet-600 mt-0.5">全年</div>
-                              )}
-                            </div>
-                          ) : (
-                            getYearMonth(record.date)
-                          )}
-                        </TableCell>
-                        <TableCell><Badge variant="outline">{getUnitName(record.salesUnitId)}</Badge></TableCell>
-                        <TableCell className="text-right">{record.items.length}</TableCell>
-                        <TableCell className="text-right font-bold text-emerald-600">{formatCurrency(record.totalAmount)}</TableCell>
-                        <TableCell>
-                          {record.createdAt ? (
-                            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                              <Clock className="h-3 w-3" />
-                              {formatDateTime(record.createdAt)}
-                            </span>
-                          ) : "-"}
-                        </TableCell>
-                        <TableCell className="text-sm">{record.createdBy || "-"}</TableCell>
-                        <TableCell className="text-muted-foreground">{record.remark || "-"}</TableCell>
-                        <TableCell className="text-right">
-                          {canEditCost && !isReadOnly ? (
-                            <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                              <Button variant="ghost" size="icon" onClick={() => openEditIncome(record)}>
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button variant="ghost" size="icon" onClick={() => setIncomeDeleteId(record.id)}>
-                                <Trash2 className="h-4 w-4 text-destructive" />
-                              </Button>
-                            </div>
-                          ) : (
-                            <span className="text-xs text-muted-foreground" onClick={(e) => e.stopPropagation()}>仅查看</span>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                      {isExp && (
-                        <TableRow key={record.id + "-detail"} className="bg-emerald-50/30">
-                          <TableCell colSpan={10} className="py-3">
-                            <div className="ml-8 space-y-2">
-                              {record.isRecurring && (
-                                <div className="rounded-md bg-violet-50 px-3 py-2 text-xs text-violet-800">
-                                  <Repeat className="inline mr-1 h-3 w-3" />
-                                  <strong>月度固定收入：</strong>
-                                  自 {getYearMonth(record.date)} 起
-                                  {record.recurringEndDate ? `至 ${formatDate(record.recurringEndDate)} 止` : "永久生效"}
-                                  ，每月
-                                  {record.recurringMonths?.length === 12 ? "（全年）" :
-                                    `（${record.recurringMonths?.map((m) => `${m}月`).join("、")}）`}
-                                  自动计入
+                            </TableCell>
+                            <TableCell className="font-medium">
+                              {record.isRecurring ? (
+                                <div>
+                                  <div className="text-sm">{getYearMonth(record.date)} 起</div>
+                                  {monthCount > 0 && monthCount < 12 && (
+                                    <div className="text-[10px] text-violet-600 mt-0.5">
+                                      {record.recurringMonths!.map((m) => `${m}月`).join("、")}
+                                    </div>
+                                  )}
+                                  {monthCount === 12 && (
+                                    <div className="text-[10px] text-violet-600 mt-0.5">全年</div>
+                                  )}
                                 </div>
+                              ) : (
+                                getYearMonth(record.date)
                               )}
-                              {record.items.map((item) => (
-                                <div key={item.id} className="flex items-center gap-4 rounded-lg border bg-card px-4 py-2 text-sm">
-                                  <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">{item.category}</Badge>
-                                  <span className="flex-1 text-muted-foreground">{item.description || "-"}</span>
-                                  <span className="font-semibold text-emerald-600">{formatCurrency(item.amount)}</span>
+                            </TableCell>
+                            <TableCell className="text-muted-foreground text-xs">
+                              {getUnitName(record.salesUnitId)}
+                            </TableCell>
+                            <TableCell className="text-right">{record.items.length}</TableCell>
+                            <TableCell className="text-right font-bold text-emerald-600">{formatCurrency(record.totalAmount)}</TableCell>
+                            <TableCell>
+                              {record.createdAt ? (
+                                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                                  <Clock className="h-3 w-3" />
+                                  {formatDateTime(record.createdAt)}
+                                </span>
+                              ) : "-"}
+                            </TableCell>
+                            <TableCell className="text-sm">{record.createdBy || "-"}</TableCell>
+                            <TableCell className="text-muted-foreground">{record.remark || "-"}</TableCell>
+                            <TableCell className="text-right">
+                              {canEditCost && !isReadOnly ? (
+                                <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                                  <Button variant="ghost" size="icon" onClick={() => openEditIncome(record)}>
+                                    <Pencil className="h-4 w-4" />
+                                  </Button>
+                                  <Button variant="ghost" size="icon" onClick={() => setIncomeDeleteId(record.id)}>
+                                    <Trash2 className="h-4 w-4 text-destructive" />
+                                  </Button>
                                 </div>
-                              ))}
-                              <div className="flex justify-end border-t pt-2 text-sm">
-                                <span className="mr-3 text-muted-foreground">合计</span>
-                                <span className="font-bold text-emerald-600">{formatCurrency(record.totalAmount)}</span>
-                              </div>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </>
-                  );
-                })}
+                              ) : (
+                                <span className="text-xs text-muted-foreground" onClick={(e) => e.stopPropagation()}>仅查看</span>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                          {isExp && (
+                            <TableRow className="bg-emerald-50/30">
+                              <TableCell colSpan={10} className="py-3">
+                                <div className="ml-8 space-y-2">
+                                  {record.isRecurring && (
+                                    <div className="rounded-md bg-violet-50 px-3 py-2 text-xs text-violet-800">
+                                      <Repeat className="inline mr-1 h-3 w-3" />
+                                      <strong>月度固定收入：</strong>
+                                      自 {getYearMonth(record.date)} 起
+                                      {record.recurringEndDate ? `至 ${formatDate(record.recurringEndDate)} 止` : "永久生效"}
+                                      ，每月
+                                      {record.recurringMonths?.length === 12 ? "（全年）" :
+                                        `（${record.recurringMonths?.map((m) => `${m}月`).join("、")}）`}
+                                      自动计入
+                                    </div>
+                                  )}
+                                  {record.items.map((item) => (
+                                    <div key={item.id} className="flex items-center gap-4 rounded-lg border bg-card px-4 py-2 text-sm">
+                                      <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">{item.category}</Badge>
+                                      <span className="flex-1 text-muted-foreground">{item.description || "-"}</span>
+                                      <span className="font-semibold text-emerald-600">{formatCurrency(item.amount)}</span>
+                                    </div>
+                                  ))}
+                                  <div className="flex justify-end border-t pt-2 text-sm">
+                                    <span className="mr-3 text-muted-foreground">合计</span>
+                                    <span className="font-bold text-emerald-600">{formatCurrency(record.totalAmount)}</span>
+                                  </div>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </Fragment>
+                ))}
                 {filteredIncomeRecords.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={10} className="text-center py-12 text-muted-foreground">
