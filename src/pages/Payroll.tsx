@@ -1249,26 +1249,28 @@ export default function Payroll() {
           .map((r) => personnel.find((p) => p.id === r.personnelId))
           .filter((p): p is Personnel => Boolean(p))}
         defaultEffectiveDate={`${yearMonth}-01`}
-        defaultSocialEmployer={
-          insuranceAdjust?.mode === 'single' && insuranceAdjust.person
-            ? getArchiveInsurance(insuranceAdjust.person, yearMonth).socialEmployer
-            : 0
-        }
-        defaultHousingEmployer={
-          insuranceAdjust?.mode === 'single' && insuranceAdjust.person
-            ? getArchiveInsurance(insuranceAdjust.person, yearMonth).housingEmployer
-            : 0
-        }
-        defaultSocialPersonal={
-          insuranceAdjust?.mode === 'single' && insuranceAdjust.person
-            ? getArchiveInsurance(insuranceAdjust.person, yearMonth).socialPersonal
-            : 0
-        }
-        defaultHousingPersonal={
-          insuranceAdjust?.mode === 'single' && insuranceAdjust.person
-            ? getArchiveInsurance(insuranceAdjust.person, yearMonth).housingPersonal
-            : 0
-        }
+        {...(() => {
+          const seedPerson =
+            insuranceAdjust?.mode === 'single' && insuranceAdjust.person
+              ? insuranceAdjust.person
+              : rows
+                .map((r) => personnel.find((p) => p.id === r.personnelId))
+                .find((p): p is Personnel => Boolean(p))
+          const seed = seedPerson
+            ? getArchiveInsurance(seedPerson, yearMonth)
+            : {
+              socialEmployer: 0,
+              housingEmployer: 0,
+              socialPersonal: 0,
+              housingPersonal: 0,
+            }
+          return {
+            defaultSocialEmployer: seed.socialEmployer,
+            defaultHousingEmployer: seed.housingEmployer,
+            defaultSocialPersonal: seed.socialPersonal,
+            defaultHousingPersonal: seed.housingPersonal,
+          }
+        })()}
         onAdjusted={(ids) => {
           setEntries((prev) => {
             const next = { ...prev }

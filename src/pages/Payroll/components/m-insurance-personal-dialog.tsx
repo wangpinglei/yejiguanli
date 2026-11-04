@@ -145,6 +145,9 @@ export default function MInsurancePersonalDialog({
           <p className="text-sm text-muted-foreground">
             企业部分计入成本；个人部分用于工资代扣。保存后写入薪酬方案与个税档案，
             修改会出现在该人「调整薪酬」记录中（含操作人、时间）。
+            {mode === 'batch'
+              ? ' 表单已带入列表第一人当前档案值，可在此基础上修改后统一写入。'
+              : ' 表单已带入该人当前档案值。'}
           </p>
           <div className="space-y-1.5">
             <Label>生效日 *</Label>

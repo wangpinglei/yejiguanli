@@ -51,20 +51,23 @@ export default function MSpecialAdditionalDialog({
 
   useEffect(() => {
     if (!open) return
-    if (mode === 'single' && person) {
-      const profile = loadTaxProfile(
-        person.id,
-        {
-          socialInsurance: person.socialInsurance,
-          housingFund: person.housingFund,
-        },
-        person.taxProfile as Partial<PersonnelTaxProfile> | undefined,
-      )
-      setAmount(resolveSpecialAdditionalMonthly(profile))
-    } else if (mode === 'batch') {
+    const seed = mode === 'single'
+      ? person
+      : (people[0] || null)
+    if (!seed) {
       setAmount(0)
+      return
     }
-  }, [open, mode, person])
+    const profile = loadTaxProfile(
+      seed.id,
+      {
+        socialInsurance: seed.socialInsurance,
+        housingFund: seed.housingFund,
+      },
+      seed.taxProfile as Partial<PersonnelTaxProfile> | undefined,
+    )
+    setAmount(resolveSpecialAdditionalMonthly(profile))
+  }, [open, mode, person, people])
 
   const targets = mode === 'single'
     ? (person ? [person] : [])
@@ -188,6 +191,9 @@ export default function MSpecialAdditionalDialog({
             <p className="text-sm text-muted-foreground">
               保存后覆盖该人员个税档案中的专项附加月额（优先于勾选项合计），
               之后月份工资核算默认用新值，并写入修改记录。
+              {mode === 'batch'
+                ? ' 已带入列表第一人当前值，可在此基础上修改后统一写入。'
+                : ' 已带入该人当前档案值。'}
             </p>
             <div className="space-y-1.5">
               <Label>专项附加 (¥/月)</Label>
