@@ -26,7 +26,8 @@ type Props = {
   people: Personnel[]
   /** 默认生效日 YYYY-MM-DD */
   defaultEffectiveDate: string
-  /** 默认社保/公积金个人（单人时用当前值） */
+  defaultSocialEmployer?: number
+  defaultHousingEmployer?: number
   defaultSocialPersonal?: number
   defaultHousingPersonal?: number
   onAdjusted?: (personnelIds: string[]) => void
@@ -39,12 +40,16 @@ export default function MInsurancePersonalDialog({
   person,
   people,
   defaultEffectiveDate,
+  defaultSocialEmployer = 0,
+  defaultHousingEmployer = 0,
   defaultSocialPersonal = 0,
   defaultHousingPersonal = 0,
   onAdjusted,
 }: Props) {
   const { adjustPersonnelPay } = useData()
   const [effectiveDate, setEffectiveDate] = useState(defaultEffectiveDate)
+  const [socialEmployer, setSocialEmployer] = useState(defaultSocialEmployer)
+  const [housingEmployer, setHousingEmployer] = useState(defaultHousingEmployer)
   const [socialPersonal, setSocialPersonal] = useState(defaultSocialPersonal)
   const [housingPersonal, setHousingPersonal] = useState(defaultHousingPersonal)
   const [saving, setSaving] = useState(false)
@@ -52,11 +57,15 @@ export default function MInsurancePersonalDialog({
   useEffect(() => {
     if (!open) return
     setEffectiveDate(defaultEffectiveDate)
+    setSocialEmployer(defaultSocialEmployer)
+    setHousingEmployer(defaultHousingEmployer)
     setSocialPersonal(defaultSocialPersonal)
     setHousingPersonal(defaultHousingPersonal)
   }, [
     open,
     defaultEffectiveDate,
+    defaultSocialEmployer,
+    defaultHousingEmployer,
     defaultSocialPersonal,
     defaultHousingPersonal,
     person?.id,
@@ -68,8 +77,8 @@ export default function MInsurancePersonalDialog({
     : people
 
   const title = mode === 'single'
-    ? `调整个人代扣${person ? ` · ${person.name}` : ''}`
-    : `批量调整个人代扣（${targets.length} 人）`
+    ? `调整社保公积金${person ? ` · ${person.name}` : ''}`
+    : `批量调整社保公积金（${targets.length} 人）`
 
   async function handleSubmit() {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)) {
@@ -80,11 +89,15 @@ export default function MInsurancePersonalDialog({
       alert('没有可调整的人员')
       return
     }
+    const socialE = Number(socialEmployer) || 0
+    const housingE = Number(housingEmployer) || 0
+    const socialP = Number(socialPersonal) || 0
+    const housingP = Number(housingPersonal) || 0
     const confirmText = mode === 'single'
-      ? `确认将「${targets[0].name}」自 ${effectiveDate} 起的社保/公积金个人代扣写入薪酬方案与个税档案？`
-      : `确认对当前列表 ${targets.length} 人自 ${effectiveDate} 起统一写入个人代扣？\n`
-        + `社保个人 ${formatCurrency(Number(socialPersonal) || 0)}，`
-        + `公积金个人 ${formatCurrency(Number(housingPersonal) || 0)}\n`
+      ? `确认将「${targets[0].name}」自 ${effectiveDate} 起的社保/公积金（企业+个人）写入薪酬方案与个税档案？`
+      : `确认对当前列表 ${targets.length} 人自 ${effectiveDate} 起统一写入？\n`
+        + `社保企业 ${formatCurrency(socialE)} / 个人 ${formatCurrency(socialP)}\n`
+        + `公积金企业 ${formatCurrency(housingE)} / 个人 ${formatCurrency(housingP)}\n`
         + '将写入各人薪酬方案与个税档案，并产生修改记录。'
     if (!confirm(confirmText)) return
 
@@ -97,11 +110,11 @@ export default function MInsurancePersonalDialog({
           await adjustPersonnelPay(p.id, {
             effectiveDate,
             salary: p.salary,
-            socialInsurance: p.socialInsurance || 0,
-            housingFund: p.housingFund || 0,
-            socialInsurancePersonal: Number(socialPersonal) || 0,
-            housingFundPersonal: Number(housingPersonal) || 0,
-            remark: mode === 'batch' ? '批量调整个人代扣' : '调整个人代扣',
+            socialInsurance: socialE,
+            housingFund: housingE,
+            socialInsurancePersonal: socialP,
+            housingFundPersonal: housingP,
+            remark: mode === 'batch' ? '批量调整社保公积金' : '调整社保公积金',
           })
           ids.push(p.id)
         } catch (e: unknown) {
@@ -124,13 +137,13 @@ export default function MInsurancePersonalDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-1">
           <p className="text-sm text-muted-foreground">
-            保存后写入人员薪酬方案与个税扣除档案，之后月份工资核算默认用新值；
+            企业部分计入成本；个人部分用于工资代扣。保存后写入薪酬方案与个税档案，
             修改会出现在该人「调整薪酬」记录中（含操作人、时间）。
           </p>
           <div className="space-y-1.5">
@@ -143,11 +156,27 @@ export default function MInsurancePersonalDialog({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
+              <Label>社保 · 企业 (¥/月)</Label>
+              <Input
+                type="number"
+                value={socialEmployer}
+                onChange={(e) => setSocialEmployer(Number(e.target.value))}
+              />
+            </div>
+            <div className="space-y-1.5">
               <Label>社保 · 个人 (¥/月)</Label>
               <Input
                 type="number"
                 value={socialPersonal}
                 onChange={(e) => setSocialPersonal(Number(e.target.value))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>公积金 · 企业 (¥/月)</Label>
+              <Input
+                type="number"
+                value={housingEmployer}
+                onChange={(e) => setHousingEmployer(Number(e.target.value))}
               />
             </div>
             <div className="space-y-1.5">
@@ -159,12 +188,6 @@ export default function MInsurancePersonalDialog({
               />
             </div>
           </div>
-          {mode === 'single' && person && (
-            <p className="text-xs text-muted-foreground">
-              企业承担保持不变：社保 {formatCurrency(person.socialInsurance || 0)}
-              ，公积金 {formatCurrency(person.housingFund || 0)}
-            </p>
-          )}
         </div>
         <DialogFooter>
           <Button

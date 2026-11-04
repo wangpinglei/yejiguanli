@@ -92,20 +92,22 @@ function payrollColSpan(mode: PayrollEntryMode): number {
   // 与表头条件保持一致：单位+姓名=2
   if (mode === 'attendance') return 2 + 1 + 1 + 2 + 1 // 标准底薪 + 实际/缺勤/应出勤 + 实发底薪
   if (mode === 'score') return 2 + 1 + 1 + 1 // 标准绩效 + 分数 + 实发绩效
-  if (mode === 'insurance') return 2 + 1 + 2 + 1 // 应发 + 社保 + 公积金 + 操作
-  if (mode === 'tax') return 2 + 1 + 2 + 3 // 应发 + 社保公积金 + 专项/个税/实发
-  return 16 // 最终表不含出勤三列
+  if (mode === 'insurance') return 2 + 1 + 4 + 1 // 应发 + 企业/个人四列 + 操作
+  if (mode === 'tax') return 2 + 1 + 4 + 3 // 应发 + 企业/个人四列 + 专项/个税/实发
+  return 18 // 最终表含企业/个人四列、不含出勤三列
 }
 
-/** 档案默认个人代扣（方案优先，其次个税档案） */
-function getArchivePersonal(person: Personnel, yearMonth: string) {
+/** 档案社保公积金（方案优先；个人其次个税档案） */
+function getArchiveInsurance(person: Personnel, yearMonth: string) {
   const pay = resolvePayForDate(person, `${yearMonth}-15`)
   return {
-    social:
+    socialEmployer: Number(pay.socialInsurance) || Number(person.socialInsurance) || 0,
+    housingEmployer: Number(pay.housingFund) || Number(person.housingFund) || 0,
+    socialPersonal:
       Number(pay.socialInsurancePersonal)
       || Number(person.taxProfile?.socialInsurancePersonal)
       || 0,
-    housing:
+    housingPersonal:
       Number(pay.housingFundPersonal)
       || Number(person.taxProfile?.housingFundPersonal)
       || 0,
@@ -372,7 +374,9 @@ export default function Payroll() {
       '其他减项',
       '减项明细',
       '应发合计',
+      '社保企业',
       '社保个人',
+      '公积金企业',
       '公积金个人',
       '专项附加',
       '本期个税',
@@ -385,6 +389,15 @@ export default function Payroll() {
 
     const lines = rows.map((r) => {
       const entry = entries[r.personnelId] || createEmptyPayrollEntry(r.personnelId)
+      const person = personnel.find((p) => p.id === r.personnelId)
+      const archive = person
+        ? getArchiveInsurance(person, yearMonth)
+        : {
+          socialEmployer: 0,
+          housingEmployer: 0,
+          socialPersonal: r.socialInsurancePersonal || 0,
+          housingPersonal: r.housingFundPersonal || 0,
+        }
       return [
         monthLabel,
         r.unitName,
@@ -405,8 +418,10 @@ export default function Payroll() {
         (entry.otherDeduction || 0).toFixed(2),
         entry.otherDeductionNote || '',
         r.payable.toFixed(2),
-        (r.socialInsurancePersonal || 0).toFixed(2),
-        (r.housingFundPersonal || 0).toFixed(2),
+        archive.socialEmployer.toFixed(2),
+        archive.socialPersonal.toFixed(2),
+        archive.housingEmployer.toFixed(2),
+        archive.housingPersonal.toFixed(2),
         (r.specialAdditional || 0).toFixed(2),
         (r.incomeTax || 0).toFixed(2),
         (r.netPay || 0).toFixed(2),
@@ -457,7 +472,7 @@ export default function Payroll() {
             应发 = 提成 + 实发底薪 + 保密费 + 岗位补贴 + 实发绩效 + 其他加项 − 其他减项；月出勤系数{' '}
             21.75 × 7.5 = {PAYROLL_STANDARD_HOURS} 小时；未填缺勤按满勤（缺勤=0），未填考核分按 100 分。
             加项/减项可点「明细」录入多行说明与金额；实发=应发−社保个人−公积金个人−本期个税。
-            社保/公积金个人代扣固定取薪酬方案（可「去调整」/批量写入档案并记修改记录）；本期个税可改。人员关闭「内部员工」后只核算提成。
+            社保/公积金企业与个人固定取薪酬方案（可「去调整」/批量写入档案并记修改记录）；本期个税可改。人员关闭「内部员工」后只核算提成。
           </CardDescription>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground space-y-1">
@@ -584,7 +599,7 @@ export default function Payroll() {
           )}
           {calcPhase === 'wizard' && entryMode === 'insurance' && (
             <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              步骤 3/4 社保公积金录入 — 个人代扣按人员档案固定展示；不对时点「去调整」或「批量调整」写入薪酬方案/个税档案（有修改记录）。
+              步骤 3/4 社保公积金录入 — 企业/个人按人员档案固定展示；不对时点「去调整」或「批量调整」写入薪酬方案/个税档案（有修改记录）。
             </p>
           )}
           {calcPhase === 'wizard' && entryMode === 'tax' && (
@@ -643,7 +658,7 @@ export default function Payroll() {
                 onClick={() => setInsuranceAdjust({ mode: 'batch', person: null })}
               >
                 <Pencil className="mr-1.5 h-3.5 w-3.5" />
-                批量调整个人代扣
+                批量调整社保公积金
               </Button>
             )}
             <Badge variant="secondary" className="h-8 px-3">
@@ -712,7 +727,17 @@ export default function Payroll() {
                     )}
                     {showPayrollCol(entryMode, 'insurance') && (
                       <TableHead className="min-w-[96px] bg-amber-50/80 text-right">
+                        社保企业
+                      </TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'insurance') && (
+                      <TableHead className="min-w-[96px] bg-amber-50/80 text-right">
                         社保个人
+                      </TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'insurance') && (
+                      <TableHead className="min-w-[96px] bg-amber-50/80 text-right">
+                        公积金企业
                       </TableHead>
                     )}
                     {showPayrollCol(entryMode, 'insurance') && (
@@ -981,18 +1006,26 @@ export default function Payroll() {
                         {showPayrollCol(entryMode, 'insurance') && (() => {
                           const person = personnel.find((p) => p.id === row.personnelId)
                           const archive = person
-                            ? getArchivePersonal(person, yearMonth)
+                            ? getArchiveInsurance(person, yearMonth)
                             : {
-                              social: row.socialInsurancePersonal || 0,
-                              housing: row.housingFundPersonal || 0,
+                              socialEmployer: 0,
+                              housingEmployer: 0,
+                              socialPersonal: row.socialInsurancePersonal || 0,
+                              housingPersonal: row.housingFundPersonal || 0,
                             }
                           return (
                             <>
                               <TableCell className="bg-amber-50/40 text-right tabular-nums">
-                                {money(archive.social)}
+                                {money(archive.socialEmployer)}
                               </TableCell>
                               <TableCell className="bg-amber-50/40 text-right tabular-nums">
-                                {money(archive.housing)}
+                                {money(archive.socialPersonal)}
+                              </TableCell>
+                              <TableCell className="bg-amber-50/40 text-right tabular-nums">
+                                {money(archive.housingEmployer)}
+                              </TableCell>
+                              <TableCell className="bg-amber-50/40 text-right tabular-nums">
+                                {money(archive.housingPersonal)}
                               </TableCell>
                               {entryMode === 'insurance' && (
                                 <TableCell className="bg-amber-50/40">
@@ -1119,14 +1152,24 @@ export default function Payroll() {
           .map((r) => personnel.find((p) => p.id === r.personnelId))
           .filter((p): p is Personnel => Boolean(p))}
         defaultEffectiveDate={`${yearMonth}-01`}
+        defaultSocialEmployer={
+          insuranceAdjust?.mode === 'single' && insuranceAdjust.person
+            ? getArchiveInsurance(insuranceAdjust.person, yearMonth).socialEmployer
+            : 0
+        }
+        defaultHousingEmployer={
+          insuranceAdjust?.mode === 'single' && insuranceAdjust.person
+            ? getArchiveInsurance(insuranceAdjust.person, yearMonth).housingEmployer
+            : 0
+        }
         defaultSocialPersonal={
           insuranceAdjust?.mode === 'single' && insuranceAdjust.person
-            ? getArchivePersonal(insuranceAdjust.person, yearMonth).social
+            ? getArchiveInsurance(insuranceAdjust.person, yearMonth).socialPersonal
             : 0
         }
         defaultHousingPersonal={
           insuranceAdjust?.mode === 'single' && insuranceAdjust.person
-            ? getArchivePersonal(insuranceAdjust.person, yearMonth).housing
+            ? getArchiveInsurance(insuranceAdjust.person, yearMonth).housingPersonal
             : 0
         }
         onAdjusted={(ids) => {
@@ -1142,7 +1185,7 @@ export default function Payroll() {
             }
             return next
           })
-          setSavedTip(`已更新 ${ids.length} 人个人代扣档案`)
+          setSavedTip(`已更新 ${ids.length} 人社保公积金档案`)
           window.setTimeout(() => setSavedTip(''), 2500)
         }}
       />
