@@ -121,8 +121,16 @@ function getArchiveSpecialAdditional(person: Personnel): number {
   return resolveSpecialAdditionalMonthly(profile)
 }
 
-/** 档案社保公积金（方案优先；个人其次个税档案） */
+/** 档案社保公积金（方案优先；个人其次个税档案）；非内部/仅提成一律为 0 */
 function getArchiveInsurance(person: Personnel, yearMonth: string) {
+  if (isPayrollCommissionOnly(person, yearMonth)) {
+    return {
+      socialEmployer: 0,
+      housingEmployer: 0,
+      socialPersonal: 0,
+      housingPersonal: 0,
+    }
+  }
   const pay = resolvePayForDate(person, `${yearMonth}-15`)
   return {
     socialEmployer: Number(pay.socialInsurance) || Number(person.socialInsurance) || 0,
@@ -1097,48 +1105,52 @@ export default function Payroll() {
                           return (
                             <>
                               <TableCell className="bg-amber-50/40 text-right tabular-nums">
-                                {money(archive.socialEmployer)}
+                                {onlyCommission ? '—' : money(archive.socialEmployer)}
                               </TableCell>
                               <TableCell className="bg-amber-50/40 text-right tabular-nums">
-                                {money(archive.socialPersonal)}
+                                {onlyCommission ? '—' : money(archive.socialPersonal)}
                               </TableCell>
                               <TableCell className="bg-amber-50/40 text-right tabular-nums">
-                                {money(archive.housingEmployer)}
+                                {onlyCommission ? '—' : money(archive.housingEmployer)}
                               </TableCell>
                               <TableCell className="bg-amber-50/40 text-right tabular-nums">
-                                {money(archive.housingPersonal)}
+                                {onlyCommission ? '—' : money(archive.housingPersonal)}
                               </TableCell>
                               {entryMode === 'insurance' && (
                                 <TableCell className="bg-amber-50/40">
-                                  <div className="flex flex-wrap items-center gap-1">
-                                    {canEditPersonnel && person && (
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-7 px-2 text-xs"
-                                        onClick={() =>
-                                          setInsuranceAdjust({
-                                            mode: 'single',
-                                            person,
-                                          })
-                                        }
-                                      >
-                                        去调整
-                                      </Button>
-                                    )}
-                                    {person && (
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-7 px-2 text-xs text-muted-foreground"
-                                        onClick={() => setHistoryPerson(person)}
-                                      >
-                                        记录
-                                      </Button>
-                                    )}
-                                  </div>
+                                  {onlyCommission ? (
+                                    <span className="text-xs text-muted-foreground">合作方不缴纳</span>
+                                  ) : (
+                                    <div className="flex flex-wrap items-center gap-1">
+                                      {canEditPersonnel && person && (
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-7 px-2 text-xs"
+                                          onClick={() =>
+                                            setInsuranceAdjust({
+                                              mode: 'single',
+                                              person,
+                                            })
+                                          }
+                                        >
+                                          去调整
+                                        </Button>
+                                      )}
+                                      {person && (
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-7 px-2 text-xs text-muted-foreground"
+                                          onClick={() => setHistoryPerson(person)}
+                                        >
+                                          记录
+                                        </Button>
+                                      )}
+                                    </div>
+                                  )}
                                 </TableCell>
                               )}
                             </>

@@ -864,38 +864,48 @@ export function calculateMonthlySalary(
   const otherBonus = adjustment?.otherBonus || 0;
   const otherDeduction = adjustment?.otherDeduction || 0;
 
+  // 非内部/合作方：只保留提成与加减项，固定月薪与社保公积金一律为 0
+  const commissionOnly = !isInternalEmployeePerson(person);
+  const paidBase = commissionOnly ? 0 : baseSalary;
+  const paidConfidentiality = commissionOnly ? 0 : confidentialityFee;
+  const paidPerformance = commissionOnly ? 0 : performance;
+  const paidAllowance = commissionOnly ? 0 : positionAllowance;
+  const paidLeave = commissionOnly ? 0 : leaveDeduction;
+  const paidSi = commissionOnly
+    ? 0
+    : (acc ? acc.socialInsurance : (pay.socialInsurance || 0) * fixedRatio);
+  const paidHf = commissionOnly
+    ? 0
+    : (acc ? acc.housingFund : (pay.housingFund || 0) * fixedRatio);
+
   const total =
-    baseSalary +
-    confidentialityFee +
-    performance +
-    positionAllowance +
+    paidBase +
+    paidConfidentiality +
+    paidPerformance +
+    paidAllowance +
     managementCommission +
     personalCommission +
     internalSalesCommission -
-    leaveDeduction +
+    paidLeave +
     otherBonus -
     otherDeduction;
 
   return {
-    baseSalary,
-    confidentialityFee,
-    performance,
-    positionAllowance,
+    baseSalary: paidBase,
+    confidentialityFee: paidConfidentiality,
+    performance: paidPerformance,
+    positionAllowance: paidAllowance,
     managementCommission,
     personalCommission,
     internalSalesCommission,
     productCommission,
-    leaveDeduction,
+    leaveDeduction: paidLeave,
     otherBonus,
     otherDeduction,
     total,
-    socialInsurance: acc
-      ? acc.socialInsurance
-      : (pay.socialInsurance || 0) * fixedRatio,
-    housingFund: acc
-      ? acc.housingFund
-      : (pay.housingFund || 0) * fixedRatio,
-    fixedRatio,
+    socialInsurance: paidSi,
+    housingFund: paidHf,
+    fixedRatio: commissionOnly ? 0 : fixedRatio,
   };
 }
 

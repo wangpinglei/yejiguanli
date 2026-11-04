@@ -13,6 +13,7 @@ import {
   getInternalSalesRecipientId,
   getPersonalSales,
   isDistributionPosition,
+  isInternalEmployeePerson,
   isSalesBattlePosition,
   MONTHLY_STANDARD_HOURS,
 } from "@/lib/salary";
@@ -167,6 +168,8 @@ export default function PersonnelPage() {
   const [filterUnit, setFilterUnit] = useState(() => searchParams.get("unit") || "all");
   /** all | active | inactive — 在职/离职（与列表「在岗/离职」一致）；默认只看在职便于梳理 */
   const [filterStatus, setFilterStatus] = useState<"all" | "active" | "inactive">("active");
+  /** all | internal | external — 内部员工 / 非内部（合作方） */
+  const [filterInternal, setFilterInternal] = useState<"all" | "internal" | "external">("all");
   /** all | missing — 缺产品提成配置筛选（仅工资核算已纳入单位） */
   const [filterCommission, setFilterCommission] = useState<"all" | "missing">("all");
   /** 工资核算「纳入核算单位」名单（本机）；名单外单位不催配销售提成 */
@@ -378,11 +381,24 @@ export default function PersonnelPage() {
         filterStatus === "all"
         || (filterStatus === "active" && onDuty)
         || (filterStatus === "inactive" && !onDuty);
+      const isInternal = isInternalEmployeePerson(p);
+      const matchInternal =
+        filterInternal === "all"
+        || (filterInternal === "internal" && isInternal)
+        || (filterInternal === "external" && !isInternal);
       const missing = commissionStatusByPersonId[p.id]?.missingCount || 0;
       const matchCommission = filterCommission === "all" || missing > 0;
-      return matchSearch && matchUnit && matchStatus && matchCommission;
+      return matchSearch && matchUnit && matchStatus && matchInternal && matchCommission;
     });
-  }, [personnel, search, filterUnit, filterStatus, filterCommission, commissionStatusByPersonId]);
+  }, [
+    personnel,
+    search,
+    filterUnit,
+    filterStatus,
+    filterInternal,
+    filterCommission,
+    commissionStatusByPersonId,
+  ]);
 
   const getUnitName = (id: string) => salesUnits.find((u) => u.id === id)?.name || "-";
 
@@ -554,22 +570,36 @@ export default function PersonnelPage() {
     if (!form.name.trim() || !form.salesUnitId) return;
     const resignDate = form.resignDate.trim();
     const status = getFormDutyStatus(resignDate);
+    const isInternal = form.isInternalEmployee !== false
     const {
       socialInsurancePersonal,
       housingFundPersonal,
       ...formRest
     } = form
+    // 非内部/合作方：不缴纳也不保留社保公积金与固定月薪
+    const salary = isInternal
+      ? form.salary
+      : {
+          ...form.salary,
+          baseSalary: 0,
+          confidentialityFee: 0,
+          performance: 0,
+          positionAllowance: 0,
+        }
     const prevSpecial = editingPerson?.taxProfile?.special
     const taxProfile = {
       personnelId: editingPerson?.id || '',
       special: prevSpecial && typeof prevSpecial === 'object' ? prevSpecial : {},
-      socialInsurancePersonal: Number(socialInsurancePersonal) || 0,
-      housingFundPersonal: Number(housingFundPersonal) || 0,
+      socialInsurancePersonal: isInternal ? (Number(socialInsurancePersonal) || 0) : 0,
+      housingFundPersonal: isInternal ? (Number(housingFundPersonal) || 0) : 0,
       updatedAt: new Date().toISOString(),
     }
     // 显式传 null，服务端才能清空离职日（undefined 会被 JSON 省略并保留旧值）
     const data = {
       ...formRest,
+      salary,
+      socialInsurance: isInternal ? (Number(form.socialInsurance) || 0) : 0,
+      housingFund: isInternal ? (Number(form.housingFund) || 0) : 0,
       resignDate: resignDate ? resignDate : null,
       status,
       taxProfile,
@@ -1027,6 +1057,19 @@ export default function PersonnelPage() {
             <SelectItem value="inactive">离职</SelectItem>
           </SelectContent>
         </Select>
+        <Select
+          value={filterInternal}
+          onValueChange={(v) => setFilterInternal(v as "all" | "internal" | "external")}
+        >
+          <SelectTrigger className="w-36">
+            <SelectValue placeholder="内部/合作" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部人员</SelectItem>
+            <SelectItem value="internal">内部员工</SelectItem>
+            <SelectItem value="external">非内部人员</SelectItem>
+          </SelectContent>
+        </Select>
         <Button
           type="button"
           variant={filterCommission === "missing" ? "default" : "outline"}
@@ -1248,13 +1291,27 @@ export default function PersonnelPage() {
               <TableBody>
                 {displayedPersonnel.map((person) => {
                   const sales = getPersonnelSales(person.id);
-                  const fixed = getFixedSalary(person.salary);
+                  const isInternal = isInternalEmployeePerson(person);
+                  const fixed = isInternal ? getFixedSalary(person.salary) : 0;
                   return (
-                    <TableRow key={person.id}>
+                    <TableRow
+                      key={person.id}
+                      className={
+                        isInternal
+                          ? undefined
+                          : 'bg-violet-50/70 hover:bg-violet-100/80'
+                      }
+                    >
                       <TableCell className="max-w-[160px]">
                         <div className="flex items-center gap-2">
                           <Avatar className="h-8 w-8 shrink-0">
-                            <AvatarFallback className="bg-primary/10 text-primary text-xs">
+                            <AvatarFallback
+                              className={
+                                isInternal
+                                  ? 'bg-primary/10 text-primary text-xs'
+                                  : 'bg-violet-100 text-violet-700 text-xs'
+                              }
+                            >
                               {formatDisplayPersonName(person.name, {
                                 stripDistributionPrefix: isDistributionPosition(person.position),
                               })[0] || person.name[0]}
@@ -1265,9 +1322,19 @@ export default function PersonnelPage() {
                             title={person.name}
                           >
                             {formatDisplayPersonName(person.name, {
-                              stripDistributionPrefix: isDistributionPosition(person.position),
+                              stripDistributionPrefix:
+                                isDistributionPosition(person.position)
+                                || !isInternal,
                             })}
                           </span>
+                          {!isInternal && (
+                            <Badge
+                              variant="outline"
+                              className="shrink-0 border-violet-300 bg-violet-100/80 text-violet-800"
+                            >
+                              非内部
+                            </Badge>
+                          )}
                           {duplicateNameSet.has((person.name || "").trim()) && (
                             <Badge
                               variant="outline"
@@ -1280,8 +1347,16 @@ export default function PersonnelPage() {
                       </TableCell>
                       <TableCell>{getUnitName(person.salesUnitId)}</TableCell>
                       <TableCell>{person.position}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(person.salary.baseSalary)}</TableCell>
-                      <TableCell className="text-right font-medium">{formatCurrency(fixed)}</TableCell>
+                      <TableCell className="text-right text-muted-foreground">
+                        {isInternal
+                          ? formatCurrency(person.salary.baseSalary)
+                          : '—'}
+                      </TableCell>
+                      <TableCell className="text-right font-medium">
+                        {isInternal ? formatCurrency(fixed) : (
+                          <span className="text-violet-700">仅提成</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right font-medium text-blue-600">{formatCurrency(sales.total)}</TableCell>
                       <TableCell>
                         <Badge variant={isOnDutyPerson(person) ? "default" : "secondary"}>
@@ -1587,7 +1662,28 @@ export default function PersonnelPage() {
                   <Switch
                     id="is-internal-employee"
                     checked={form.isInternalEmployee}
-                    onCheckedChange={(checked) => setForm({ ...form, isInternalEmployee: checked })}
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        setForm({ ...form, isInternalEmployee: true })
+                        return
+                      }
+                      // 关闭内部员工：清空底薪/社保等，只保留提成相关
+                      setForm({
+                        ...form,
+                        isInternalEmployee: false,
+                        socialInsurance: 0,
+                        housingFund: 0,
+                        socialInsurancePersonal: 0,
+                        housingFundPersonal: 0,
+                        salary: {
+                          ...form.salary,
+                          baseSalary: 0,
+                          confidentialityFee: 0,
+                          performance: 0,
+                          positionAllowance: 0,
+                        },
+                      })
+                    }}
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
@@ -1628,67 +1724,78 @@ export default function PersonnelPage() {
                 <div className="space-y-3 rounded-lg border p-4">
                   <div className="flex items-center justify-between">
                     <h4 className="text-sm font-semibold">薪资结构</h4>
-                    <Badge variant="secondary">
-                      固定月薪：{formatCurrency(getFixedSalary(form.salary))}
-                    </Badge>
+                    {form.isInternalEmployee ? (
+                      <Badge variant="secondary">
+                        固定月薪：{formatCurrency(getFixedSalary(form.salary))}
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="border-violet-200 text-violet-700">
+                        合作方 · 仅提成
+                      </Badge>
+                    )}
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    月薪 = 底薪 + 保密费 + 绩效 + 岗位补贴 + 管理提成 + 个人提成（提成根据销售业绩动态计算）。
-                    保密费不受考勤影响；试用转正、调薪请用列表「调整薪酬」并填写生效日，否则会改掉历史月份成本。
+                    {form.isInternalEmployee
+                      ? '月薪 = 底薪 + 保密费 + 绩效 + 岗位补贴 + 管理提成 + 个人提成（提成根据销售业绩动态计算）。保密费不受考勤影响；试用转正、调薪请用列表「调整薪酬」并填写生效日，否则会改掉历史月份成本。'
+                      : '非内部员工（合作方）只核算提成，不发底薪/绩效/补贴，也不缴纳社保公积金。'}
                   </p>
 
-                  {/* 底薪 / 保密费 */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <Label className="text-xs">底薪 (¥)</Label>
-                      <Input type="number" value={form.salary.baseSalary} onChange={(e) => updateSalary("baseSalary", Number(e.target.value))} placeholder="0" />
-                      <p className="text-[10px] text-muted-foreground">受出勤影响</p>
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">保密费 (¥)</Label>
-                      <Input
-                        type="number"
-                        value={form.salary.confidentialityFee ?? 0}
-                        onChange={(e) => updateSalary('confidentialityFee', Number(e.target.value))}
-                        placeholder="0"
-                      />
-                      <p className="text-[10px] text-muted-foreground">不受考勤影响，按月全额</p>
-                    </div>
-                  </div>
+                  {form.isInternalEmployee && (
+                    <>
+                      {/* 底薪 / 保密费 */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                          <Label className="text-xs">底薪 (¥)</Label>
+                          <Input type="number" value={form.salary.baseSalary} onChange={(e) => updateSalary("baseSalary", Number(e.target.value))} placeholder="0" />
+                          <p className="text-[10px] text-muted-foreground">受出勤影响</p>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">保密费 (¥)</Label>
+                          <Input
+                            type="number"
+                            value={form.salary.confidentialityFee ?? 0}
+                            onChange={(e) => updateSalary('confidentialityFee', Number(e.target.value))}
+                            placeholder="0"
+                          />
+                          <p className="text-[10px] text-muted-foreground">不受考勤影响，按月全额</p>
+                        </div>
+                      </div>
 
-                  {/* 绩效 */}
-                  <div className="space-y-2 rounded-md bg-muted/30 p-3">
-                    <div className="flex items-center gap-2">
-                      <Badge className="bg-blue-100 text-blue-700">绩效</Badge>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1">
-                        <Label className="text-xs">绩效金额 (¥)</Label>
-                        <Input type="number" value={form.salary.performance} onChange={(e) => updateSalary("performance", Number(e.target.value))} placeholder="0" />
+                      {/* 绩效 */}
+                      <div className="space-y-2 rounded-md bg-muted/30 p-3">
+                        <div className="flex items-center gap-2">
+                          <Badge className="bg-blue-100 text-blue-700">绩效</Badge>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <Label className="text-xs">绩效金额 (¥)</Label>
+                            <Input type="number" value={form.salary.performance} onChange={(e) => updateSalary("performance", Number(e.target.value))} placeholder="0" />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">发放条件</Label>
+                            <Input value={form.salary.performanceCondition} onChange={(e) => updateSalary("performanceCondition", e.target.value)} placeholder="如：完成月度销售目标80%以上发放" />
+                          </div>
+                        </div>
                       </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">发放条件</Label>
-                        <Input value={form.salary.performanceCondition} onChange={(e) => updateSalary("performanceCondition", e.target.value)} placeholder="如：完成月度销售目标80%以上发放" />
-                      </div>
-                    </div>
-                  </div>
 
-                  {/* 岗位补贴 */}
-                  <div className="space-y-2 rounded-md bg-muted/30 p-3">
-                    <div className="flex items-center gap-2">
-                      <Badge className="bg-purple-100 text-purple-700">岗位补贴</Badge>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1">
-                        <Label className="text-xs">补贴金额 (¥)</Label>
-                        <Input type="number" value={form.salary.positionAllowance} onChange={(e) => updateSalary("positionAllowance", Number(e.target.value))} placeholder="0" />
+                      {/* 岗位补贴 */}
+                      <div className="space-y-2 rounded-md bg-muted/30 p-3">
+                        <div className="flex items-center gap-2">
+                          <Badge className="bg-purple-100 text-purple-700">岗位补贴</Badge>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <Label className="text-xs">补贴金额 (¥)</Label>
+                            <Input type="number" value={form.salary.positionAllowance} onChange={(e) => updateSalary("positionAllowance", Number(e.target.value))} placeholder="0" />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">发放条件</Label>
+                            <Input value={form.salary.positionAllowanceCondition} onChange={(e) => updateSalary("positionAllowanceCondition", e.target.value)} placeholder="如：管理岗位或特定职级发放" />
+                          </div>
+                        </div>
                       </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">发放条件</Label>
-                        <Input value={form.salary.positionAllowanceCondition} onChange={(e) => updateSalary("positionAllowanceCondition", e.target.value)} placeholder="如：管理岗位或特定职级发放" />
-                      </div>
-                    </div>
-                  </div>
+                    </>
+                  )}
 
                   {/* 提成默认（无产品级配置时使用） */}
                   <div className="space-y-2 rounded-md bg-muted/30 p-3">
@@ -1761,106 +1868,108 @@ export default function PersonnelPage() {
 
                 </div>
 
-                {/* 社保公积金：企业成本 + 个人代扣 */}
-                <div className="space-y-3 rounded-lg border p-4">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-semibold">社保公积金</h4>
-                    <Badge variant="secondary">
-                      企业合计：
-                      {formatCurrency((form.socialInsurance || 0) + (form.housingFund || 0))}
-                      {' · '}
-                      个人合计：
-                      {formatCurrency(
-                        (form.socialInsurancePersonal || 0) + (form.housingFundPersonal || 0),
-                      )}
-                    </Badge>
+                {/* 社保公积金：仅内部员工；合作方不缴纳也不展示 */}
+                {form.isInternalEmployee && (
+                  <div className="space-y-3 rounded-lg border p-4">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-semibold">社保公积金</h4>
+                      <Badge variant="secondary">
+                        企业合计：
+                        {formatCurrency((form.socialInsurance || 0) + (form.housingFund || 0))}
+                        {' · '}
+                        个人合计：
+                        {formatCurrency(
+                          (form.socialInsurancePersonal || 0) + (form.housingFundPersonal || 0),
+                        )}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      企业部分计入成本管理；个人部分用于工资代扣，并同步到个税扣除档案与薪酬方案
+                    </p>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2 rounded-md bg-red-50/50 p-3">
+                        <div className="flex items-center gap-2">
+                          <Badge className="bg-red-100 text-red-700">社保 · 企业</Badge>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">企业承担 (¥/月)</Label>
+                          <Input
+                            type="number"
+                            value={form.socialInsurance}
+                            onChange={(e) => setForm({
+                              ...form,
+                              socialInsurance: Number(e.target.value),
+                            })}
+                            placeholder="0"
+                          />
+                          <p className="text-[10px] text-muted-foreground">
+                            养老、医疗、失业、工伤、生育（企业）
+                          </p>
+                        </div>
+                      </div>
+                      <div className="space-y-2 rounded-md bg-rose-50/50 p-3">
+                        <div className="flex items-center gap-2">
+                          <Badge className="bg-rose-100 text-rose-700">社保 · 个人</Badge>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">个人代扣 (¥/月)</Label>
+                          <Input
+                            type="number"
+                            value={form.socialInsurancePersonal}
+                            onChange={(e) => setForm({
+                              ...form,
+                              socialInsurancePersonal: Number(e.target.value),
+                            })}
+                            placeholder="0"
+                          />
+                          <p className="text-[10px] text-muted-foreground">
+                            工资核算代扣，默认进个税累计
+                          </p>
+                        </div>
+                      </div>
+                      <div className="space-y-2 rounded-md bg-cyan-50/50 p-3">
+                        <div className="flex items-center gap-2">
+                          <Badge className="bg-cyan-100 text-cyan-700">公积金 · 企业</Badge>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">企业承担 (¥/月)</Label>
+                          <Input
+                            type="number"
+                            value={form.housingFund}
+                            onChange={(e) => setForm({
+                              ...form,
+                              housingFund: Number(e.target.value),
+                            })}
+                            placeholder="0"
+                          />
+                          <p className="text-[10px] text-muted-foreground">
+                            住房公积金（企业）
+                          </p>
+                        </div>
+                      </div>
+                      <div className="space-y-2 rounded-md bg-sky-50/50 p-3">
+                        <div className="flex items-center gap-2">
+                          <Badge className="bg-sky-100 text-sky-700">公积金 · 个人</Badge>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">个人代扣 (¥/月)</Label>
+                          <Input
+                            type="number"
+                            value={form.housingFundPersonal}
+                            onChange={(e) => setForm({
+                              ...form,
+                              housingFundPersonal: Number(e.target.value),
+                            })}
+                            placeholder="0"
+                          />
+                          <p className="text-[10px] text-muted-foreground">
+                            工资核算代扣，默认进个税累计
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    企业部分计入成本管理；个人部分用于工资代扣，并同步到个税扣除档案与薪酬方案
-                  </p>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2 rounded-md bg-red-50/50 p-3">
-                      <div className="flex items-center gap-2">
-                        <Badge className="bg-red-100 text-red-700">社保 · 企业</Badge>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">企业承担 (¥/月)</Label>
-                        <Input
-                          type="number"
-                          value={form.socialInsurance}
-                          onChange={(e) => setForm({
-                            ...form,
-                            socialInsurance: Number(e.target.value),
-                          })}
-                          placeholder="0"
-                        />
-                        <p className="text-[10px] text-muted-foreground">
-                          养老、医疗、失业、工伤、生育（企业）
-                        </p>
-                      </div>
-                    </div>
-                    <div className="space-y-2 rounded-md bg-rose-50/50 p-3">
-                      <div className="flex items-center gap-2">
-                        <Badge className="bg-rose-100 text-rose-700">社保 · 个人</Badge>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">个人代扣 (¥/月)</Label>
-                        <Input
-                          type="number"
-                          value={form.socialInsurancePersonal}
-                          onChange={(e) => setForm({
-                            ...form,
-                            socialInsurancePersonal: Number(e.target.value),
-                          })}
-                          placeholder="0"
-                        />
-                        <p className="text-[10px] text-muted-foreground">
-                          工资核算代扣，默认进个税累计
-                        </p>
-                      </div>
-                    </div>
-                    <div className="space-y-2 rounded-md bg-cyan-50/50 p-3">
-                      <div className="flex items-center gap-2">
-                        <Badge className="bg-cyan-100 text-cyan-700">公积金 · 企业</Badge>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">企业承担 (¥/月)</Label>
-                        <Input
-                          type="number"
-                          value={form.housingFund}
-                          onChange={(e) => setForm({
-                            ...form,
-                            housingFund: Number(e.target.value),
-                          })}
-                          placeholder="0"
-                        />
-                        <p className="text-[10px] text-muted-foreground">
-                          住房公积金（企业）
-                        </p>
-                      </div>
-                    </div>
-                    <div className="space-y-2 rounded-md bg-sky-50/50 p-3">
-                      <div className="flex items-center gap-2">
-                        <Badge className="bg-sky-100 text-sky-700">公积金 · 个人</Badge>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">个人代扣 (¥/月)</Label>
-                        <Input
-                          type="number"
-                          value={form.housingFundPersonal}
-                          onChange={(e) => setForm({
-                            ...form,
-                            housingFundPersonal: Number(e.target.value),
-                          })}
-                          placeholder="0"
-                        />
-                        <p className="text-[10px] text-muted-foreground">
-                          工资核算代扣，默认进个税累计
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                )}
               </>
             )}
           </div>
@@ -1879,7 +1988,11 @@ export default function PersonnelPage() {
               <span>薪资明细 - {salaryDetailPerson?.name}</span>
             </DialogTitle>
           </DialogHeader>
-          {salaryDetailPerson && salaryDetail && (
+          {salaryDetailPerson && salaryDetail && (() => {
+            const isInternal = isInternalEmployeePerson(salaryDetailPerson)
+            const si = isInternal ? (salaryDetail.socialInsurance || 0) : 0
+            const hf = isInternal ? (salaryDetail.housingFund || 0) : 0
+            return (
             <div className="space-y-3 py-2">
               {/* 月份选择器 */}
               <div className="flex items-center gap-2">
@@ -1890,6 +2003,11 @@ export default function PersonnelPage() {
                   onChange={(e) => setSalaryDetailMonth(e.target.value)}
                   className="h-8 w-40"
                 />
+                {!isInternal && (
+                  <Badge variant="outline" className="border-violet-200 text-violet-700">
+                    合作方 · 仅提成
+                  </Badge>
+                )}
               </div>
 
               {/* 月度业绩 */}
@@ -1899,22 +2017,26 @@ export default function PersonnelPage() {
               </div>
 
               <div className="grid grid-cols-2 gap-2 text-sm">
-                <div className="flex justify-between rounded-md border px-3 py-2">
-                  <span className="text-muted-foreground">底薪</span>
-                  <span className="font-medium">{formatCurrency(salaryDetail.baseSalary)}</span>
-                </div>
-                <div className="flex justify-between rounded-md border px-3 py-2">
-                  <span className="text-muted-foreground">保密费</span>
-                  <span className="font-medium">{formatCurrency(salaryDetail.confidentialityFee)}</span>
-                </div>
-                <div className="flex justify-between rounded-md border px-3 py-2">
-                  <span className="text-muted-foreground">绩效</span>
-                  <span className="font-medium">{formatCurrency(salaryDetail.performance)}</span>
-                </div>
-                <div className="flex justify-between rounded-md border px-3 py-2">
-                  <span className="text-muted-foreground">岗位补贴</span>
-                  <span className="font-medium">{formatCurrency(salaryDetail.positionAllowance)}</span>
-                </div>
+                {isInternal && (
+                  <>
+                    <div className="flex justify-between rounded-md border px-3 py-2">
+                      <span className="text-muted-foreground">底薪</span>
+                      <span className="font-medium">{formatCurrency(salaryDetail.baseSalary)}</span>
+                    </div>
+                    <div className="flex justify-between rounded-md border px-3 py-2">
+                      <span className="text-muted-foreground">保密费</span>
+                      <span className="font-medium">{formatCurrency(salaryDetail.confidentialityFee)}</span>
+                    </div>
+                    <div className="flex justify-between rounded-md border px-3 py-2">
+                      <span className="text-muted-foreground">绩效</span>
+                      <span className="font-medium">{formatCurrency(salaryDetail.performance)}</span>
+                    </div>
+                    <div className="flex justify-between rounded-md border px-3 py-2">
+                      <span className="text-muted-foreground">岗位补贴</span>
+                      <span className="font-medium">{formatCurrency(salaryDetail.positionAllowance)}</span>
+                    </div>
+                  </>
+                )}
                 <div className="flex justify-between rounded-md border px-3 py-2">
                   <span className="text-muted-foreground">管理提成</span>
                   <span className="font-medium text-emerald-600">{formatCurrency(salaryDetail.managementCommission)}</span>
@@ -1938,7 +2060,7 @@ export default function PersonnelPage() {
                     </span>
                   </div>
                 )}
-                {salaryDetail.leaveDeduction > 0 && (
+                {isInternal && salaryDetail.leaveDeduction > 0 && (
                   <div className="flex justify-between rounded-md border border-red-200 bg-red-50/30 px-3 py-2">
                     <span className="text-muted-foreground">请假扣款</span>
                     <span className="font-medium text-red-600">-{formatCurrency(salaryDetail.leaveDeduction)}</span>
@@ -1956,44 +2078,57 @@ export default function PersonnelPage() {
                     <span className="font-medium text-red-600">-{formatCurrency(salaryDetail.otherDeduction)}</span>
                   </div>
                 )}
-                <div className="flex justify-between rounded-md border px-3 py-2">
-                  <span className="text-muted-foreground">实际月薪</span>
+                <div className={`flex justify-between rounded-md border px-3 py-2 ${isInternal ? '' : 'col-span-2'}`}>
+                  <span className="text-muted-foreground">{isInternal ? '实际月薪' : '提成合计'}</span>
                   <span className="font-bold text-blue-600">{formatCurrency(salaryDetail.total)}</span>
                 </div>
               </div>
 
-              {/* 社保公积金 */}
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div className="flex justify-between rounded-md border border-red-200 bg-red-50/30 px-3 py-2">
-                  <span className="text-muted-foreground">社保（企业承担）</span>
-                  <span className="font-medium text-red-600">{formatCurrency(salaryDetailPerson.socialInsurance || 0)}</span>
-                </div>
-                <div className="flex justify-between rounded-md border border-cyan-200 bg-cyan-50/30 px-3 py-2">
-                  <span className="text-muted-foreground">公积金（企业承担）</span>
-                  <span className="font-medium text-cyan-600">{formatCurrency(salaryDetailPerson.housingFund || 0)}</span>
-                </div>
-              </div>
+              {isInternal && (
+                <>
+                  {/* 社保公积金 */}
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div className="flex justify-between rounded-md border border-red-200 bg-red-50/30 px-3 py-2">
+                      <span className="text-muted-foreground">社保（企业承担）</span>
+                      <span className="font-medium text-red-600">{formatCurrency(si)}</span>
+                    </div>
+                    <div className="flex justify-between rounded-md border border-cyan-200 bg-cyan-50/30 px-3 py-2">
+                      <span className="text-muted-foreground">公积金（企业承担）</span>
+                      <span className="font-medium text-cyan-600">{formatCurrency(hf)}</span>
+                    </div>
+                  </div>
 
-              <div className="flex justify-between rounded-lg bg-primary/5 px-4 py-3">
-                <span className="font-semibold">总人力成本（薪资+社保+公积金）</span>
-                <span className="text-lg font-bold text-primary">
-                  {formatCurrency(salaryDetail.total + (salaryDetailPerson.socialInsurance || 0) + (salaryDetailPerson.housingFund || 0))}
-                </span>
-              </div>
+                  <div className="flex justify-between rounded-lg bg-primary/5 px-4 py-3">
+                    <span className="font-semibold">总人力成本（薪资+社保+公积金）</span>
+                    <span className="text-lg font-bold text-primary">
+                      {formatCurrency(salaryDetail.total + si + hf)}
+                    </span>
+                  </div>
 
-              {/* 时薪参考：月出勤系数 21.75×7.5 */}
-              <div className="rounded-md border px-3 py-2 text-xs text-muted-foreground">
-                时薪参考：底薪 / {MONTHLY_STANDARD_HOURS}（21.75×7.5） ={' '}
-                {formatCurrency(salaryDetailPerson.salary.baseSalary / MONTHLY_STANDARD_HOURS)} / 小时
-              </div>
+                  {/* 时薪参考：月出勤系数 21.75×7.5 */}
+                  <div className="rounded-md border px-3 py-2 text-xs text-muted-foreground">
+                    时薪参考：底薪 / {MONTHLY_STANDARD_HOURS}（21.75×7.5） ={' '}
+                    {formatCurrency(salaryDetailPerson.salary.baseSalary / MONTHLY_STANDARD_HOURS)} / 小时
+                  </div>
+                </>
+              )}
+
+              {!isInternal && (
+                <div className="flex justify-between rounded-lg bg-primary/5 px-4 py-3">
+                  <span className="font-semibold">人力成本（仅提成）</span>
+                  <span className="text-lg font-bold text-primary">
+                    {formatCurrency(salaryDetail.total)}
+                  </span>
+                </div>
+              )}
 
               {/* 条件说明 */}
               <div className="space-y-1.5 rounded-md border p-3">
                 <p className="text-xs font-medium text-muted-foreground">条件说明：</p>
-                {salaryDetailPerson.salary.performanceCondition && (
+                {isInternal && salaryDetailPerson.salary.performanceCondition && (
                   <p className="text-xs">· 绩效：{salaryDetailPerson.salary.performanceCondition}</p>
                 )}
-                {salaryDetailPerson.salary.positionAllowanceCondition && (
+                {isInternal && salaryDetailPerson.salary.positionAllowanceCondition && (
                   <p className="text-xs">· 岗位补贴：{salaryDetailPerson.salary.positionAllowanceCondition}</p>
                 )}
                 {salaryDetailPerson.salary.managementCommissionCondition && (
@@ -2017,9 +2152,13 @@ export default function PersonnelPage() {
                     </p>
                   );
                 })()}
+                {!isInternal && (
+                  <p className="text-xs text-violet-700">· 合作方不发底薪/绩效/补贴，不缴纳社保公积金</p>
+                )}
               </div>
             </div>
-          )}
+            )
+          })()}
           <DialogFooter>
             <Button variant="outline" onClick={() => setSalaryDetailPerson(null)}>关闭</Button>
           </DialogFooter>

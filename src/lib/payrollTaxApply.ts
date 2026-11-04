@@ -12,6 +12,7 @@ import {
   resolveSpecialAdditionalMonthly,
 } from '@/lib/payrollTax'
 import { resolvePayForDate } from '@/lib/compensation'
+import { isPayrollCommissionOnly } from '@/lib/salary'
 import type { Personnel } from '@/types'
 
 export type PayrollTaxResolved = {
@@ -92,16 +93,22 @@ export function resolvePayrollTax(options: {
   const defaultHousingPersonal =
     Number(payAtMid.housingFundPersonal) || profile.housingFundPersonal
 
-  const socialInsurancePersonal = roundMoney(
-    entry.socialInsurancePersonal != null
-      ? Number(entry.socialInsurancePersonal) || 0
-      : defaultSocialPersonal,
-  )
-  const housingFundPersonal = roundMoney(
-    entry.housingFundPersonal != null
-      ? Number(entry.housingFundPersonal) || 0
-      : defaultHousingPersonal,
-  )
+  // 非内部/仅提成：不代扣社保公积金个人部分
+  const commissionOnly = isPayrollCommissionOnly(person, yearMonth)
+  const socialInsurancePersonal = commissionOnly
+    ? 0
+    : roundMoney(
+      entry.socialInsurancePersonal != null
+        ? Number(entry.socialInsurancePersonal) || 0
+        : defaultSocialPersonal,
+    )
+  const housingFundPersonal = commissionOnly
+    ? 0
+    : roundMoney(
+      entry.housingFundPersonal != null
+        ? Number(entry.housingFundPersonal) || 0
+        : defaultHousingPersonal,
+    )
   // 专项附加只认人员档案（覆盖额或勾选项合计），不认本月录入覆盖
   const specialAdditional = roundMoney(profileSpecial)
 

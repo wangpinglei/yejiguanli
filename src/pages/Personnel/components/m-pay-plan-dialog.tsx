@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useData } from '@/context/DataContext'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/format'
-import { EMPTY_SALARY, getFixedSalary } from '@/lib/salary'
+import { EMPTY_SALARY, getFixedSalary, isInternalEmployeePerson } from '@/lib/salary'
 import type { Personnel, PersonnelPayPlan, SalaryStructure } from '@/types'
 import { Wallet } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -199,7 +199,16 @@ export default function MPayPlanDialog({
             调整薪酬{person ? ` · ${person.name}` : ''}
           </DialogTitle>
         </DialogHeader>
-        {person && (
+        {person && !isInternalEmployeePerson(person) && (
+          <div className="rounded-md border border-violet-200 bg-violet-50/50 px-4 py-6 text-sm text-violet-900">
+            <p className="font-medium">合作方 · 仅提成</p>
+            <p className="mt-1 text-muted-foreground">
+              已关闭「内部员工」，不发底薪/绩效/补贴，也不缴纳社保公积金。
+              提成请在人员编辑或产品提成配置中维护；无需在此调整固定薪酬。
+            </p>
+          </div>
+        )}
+        {person && isInternalEmployeePerson(person) && (
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto py-1 pr-1">
             <p className="text-sm text-muted-foreground">
               与调岗、分销一样按生效日分段。试用转正请把生效日设为转正月 1 日，
@@ -419,7 +428,7 @@ export default function MPayPlanDialog({
           >
             取消
           </Button>
-          {canEdit && (
+          {canEdit && person && isInternalEmployeePerson(person) && (
             <Button onClick={() => void handleSubmit()} disabled={saving}>
               {saving ? '保存中…' : '确认调整'}
             </Button>
