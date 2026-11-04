@@ -308,13 +308,27 @@ export function clearLocalTaxProfile(personnelId: string): void {
 export type IitBracketResolved = {
   rate: number
   quick: number
-  /** ROUND(MAX(C×rate−quick, 0), 2) */
+  /** ROUND(MAX(税基×rate−quick, 0), 2) */
   tax: number
 }
 
-/** 按累计应纳税所得额 C 命中预扣率表一档 */
-export function resolveIitBracket(taxable: number): IitBracketResolved {
-  const t = Math.max(0, Number(taxable) || 0)
+/**
+ * A 计税税基 = MAX(应纳税所得额 C − 5000×N, 0)
+ * N = 个税周期内第几个月
+ */
+export function getIitTaxBaseForA(
+  taxableIncome: number,
+  monthsInCycle: number,
+): number {
+  const n = Math.max(0, Math.floor(Number(monthsInCycle) || 0))
+  return roundMoney(
+    Math.max(0, (Number(taxableIncome) || 0) - MONTHLY_BASIC_DEDUCTION * n),
+  )
+}
+
+/** 按计税税基命中预扣率表一档 */
+export function resolveIitBracket(taxBaseForA: number): IitBracketResolved {
+  const t = Math.max(0, Number(taxBaseForA) || 0)
   if (t <= 0) return { rate: 0.03, quick: 0, tax: 0 }
   for (const b of IIT_BRACKETS) {
     if (t <= b.upTo) {
@@ -333,8 +347,19 @@ export function resolveIitBracket(taxable: number): IitBracketResolved {
   }
 }
 
-export function calcTaxOnCumulativeTaxable(taxable: number): number {
-  return resolveIitBracket(taxable).tax
+/**
+ * A = ROUND(MAX((C−5000×N)×税率−速算扣除数, 0), 2)
+ * 若只传 taxable，则视为已扣减除费用的计税税基（兼容旧调用）
+ */
+export function calcTaxOnCumulativeTaxable(
+  taxable: number,
+  monthsInCycle?: number,
+): number {
+  const base =
+    monthsInCycle == null
+      ? Math.max(0, Number(taxable) || 0)
+      : getIitTaxBaseForA(taxable, monthsInCycle)
+  return resolveIitBracket(base).tax
 }
 
 /**

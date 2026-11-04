@@ -53,8 +53,10 @@ import { enrichPayrollRowWithTax, resolvePayrollTax } from '@/lib/payrollTaxAppl
 import {
   getIitCycleBounds,
   getIitCycleMonthIndex,
+  getIitTaxBaseForA,
   IIT_SEED_THROUGH_YM,
   loadTaxProfile,
+  MONTHLY_BASIC_DEDUCTION,
   resolveIitBracket,
   resolveSpecialAdditionalMonthly,
   shouldUseIitCycleOpening,
@@ -671,10 +673,10 @@ export default function Payroll() {
                 <strong>
                   {cycle.startYm}～{cycle.endYm}
                 </strong>
-                （本月为第 {n} 月）。
+                （本月为第 {n} 月，减除费用 {MONTHLY_BASIC_DEDUCTION}×{n}）。
                 C=累计扣税基数+本月应发−个人社保−个人公积金−本月专项附加合计；
                 B=已预缴个税；
-                A=ROUND(MAX(C×{'{3,10,20,25,30,35,45}%'}−速算扣除数, 0), 2)；
+                A=ROUND(MAX((C−{MONTHLY_BASIC_DEDUCTION}×{n})×{'{3,10,20,25,30,35,45}%'}−速算扣除数, 0), 2)；
                 本期个税=max(A−B, 0)。
                 {useOpening && (
                   <>
@@ -1405,8 +1407,15 @@ export default function Payroll() {
                           const special = Number(row.specialAdditional) || 0
                           const autoC = Number(row.autoTaxableIncome) || 0
                           const cVal = Number(row.cumulativeTaxable) || 0
+                          const n = Number(row.iitCycleMonthIndex) || 1
+                          const basicDeduct =
+                            Number(row.cumulativeBasicDeduction)
+                            || MONTHLY_BASIC_DEDUCTION * n
+                          const baseForA =
+                            Number(row.taxBaseForA)
+                            || getIitTaxBaseForA(cVal, n)
                           const bVal = Number(row.taxPaidBeforeThisMonth) || 0
-                          const bracket = resolveIitBracket(cVal)
+                          const bracket = resolveIitBracket(baseForA)
                           const aVal = Number(row.cumulativeTaxDue) || bracket.tax
                           const systemTax = Number(row.systemIncomeTax ?? row.incomeTax) || 0
                           const ratePct = `${(bracket.rate * 100).toFixed(0)}%`
@@ -1444,8 +1453,12 @@ export default function Payroll() {
                                   )}
                                 </div>
                                 <div>
-                                  A = ROUND(MAX(C×{ratePct}−{money(bracket.quick)}, 0), 2) ={' '}
-                                  {money(aVal)}
+                                  A = ROUND(MAX((C−{money(basicDeduct)})×{ratePct}−
+                                  {money(bracket.quick)}, 0), 2)
+                                  <span className="text-muted-foreground">
+                                    {' '}税基 {money(baseForA)}
+                                  </span>
+                                  {' '}= {money(aVal)}
                                 </div>
                                 <div>B(已预缴个税) = {money(bVal)}</div>
                                 <div className="font-medium text-amber-900">

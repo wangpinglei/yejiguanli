@@ -117,7 +117,11 @@ export interface PayrollRowResult extends PayrollRowInput {
   autoTaxableIncome?: number
   /** C 应纳税所得额（取值列/覆盖后） */
   cumulativeTaxable?: number
-  /** A = f(C) */
+  /** 累计减除费用 5000×N */
+  cumulativeBasicDeduction?: number
+  /** A 计税税基 MAX(C−5000×N, 0) */
+  taxBaseForA?: number
+  /** A = ROUND(MAX((C−5000×N)×税率−速算, 0), 2) */
   cumulativeTaxDue?: number
   /** B 已预缴 */
   taxPaidBeforeThisMonth?: number

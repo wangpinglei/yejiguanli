@@ -9,9 +9,11 @@ import {
   getIitCycleBounds,
   getIitCycleMonthIndex,
   getIitCycleOpening,
+  getIitTaxBaseForA,
   IIT_SEED_THROUGH_YM,
   listPriorMonthsInIitCycle,
   loadTaxProfile,
+  MONTHLY_BASIC_DEDUCTION,
   resolveSpecialAdditionalMonthly,
   shouldUseIitCycleOpening,
   type IitCycleOpening,
@@ -47,7 +49,11 @@ export type PayrollTaxResolved = {
   autoTaxable: number
   /** C：应纳税所得额（手工覆盖优先） */
   taxable: number
-  /** A = ROUND(MAX(C×税率−速算,0),2) */
+  /** 累计减除费用 5000×N */
+  cumulativeBasicDeduction: number
+  /** A 计税税基 = MAX(C−5000×N, 0) */
+  taxBaseForA: number
+  /** A = ROUND(MAX((C−5000×N)×税率−速算,0),2) */
   cumulativeTaxDue: number
   /** 是否使用了 2025-12 周期期初 */
   usedCycleOpening: boolean
@@ -193,8 +199,12 @@ export function resolvePayrollTax(options: {
     ? roundMoney(opening.taxPaid + prior.taxPaidBeforeThisMonth)
     : prior.taxPaidBeforeThisMonth
 
-  // A = ROUND(MAX(C×税率−速算扣除数, 0), 2)
-  const cumulativeTaxDue = calcTaxOnCumulativeTaxable(taxable)
+  // A = ROUND(MAX((C−5000×N)×税率−速算扣除数, 0), 2)
+  const cumulativeBasicDeduction = roundMoney(
+    MONTHLY_BASIC_DEDUCTION * monthsInYear,
+  )
+  const taxBaseForA = getIitTaxBaseForA(taxable, monthsInYear)
+  const cumulativeTaxDue = calcTaxOnCumulativeTaxable(taxable, monthsInYear)
   // 本期个税 = max(A − B, 0)
   const incomeTax = roundMoney(Math.max(0, cumulativeTaxDue - priorTaxPaid))
 
@@ -226,6 +236,8 @@ export function resolvePayrollTax(options: {
     payableForTax: roundMoney(payable),
     autoTaxable,
     taxable,
+    cumulativeBasicDeduction,
+    taxBaseForA,
     cumulativeTaxDue,
     usedCycleOpening: Boolean(opening),
     openingTaxBase: opening?.taxBase ?? 0,
@@ -260,6 +272,8 @@ export function enrichPayrollRowWithTax(
     payableForTax: tax.payableForTax,
     autoTaxableIncome: tax.autoTaxable,
     cumulativeTaxable: tax.taxable,
+    cumulativeBasicDeduction: tax.cumulativeBasicDeduction,
+    taxBaseForA: tax.taxBaseForA,
     cumulativeTaxDue: tax.cumulativeTaxDue,
     taxPaidBeforeThisMonth: tax.cumulativeTaxPaidBefore,
     systemIncomeTax: tax.incomeTax,
