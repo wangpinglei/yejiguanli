@@ -32,7 +32,6 @@ import { formatCurrency, formatDisplayPersonName } from '@/lib/format'
 import {
   calcPayrollRow,
   createEmptyPayrollEntry,
-  isLikelyOpsCenterName,
   loadPayrollEntries,
   loadPayrollScopeUnitIds,
   PAYROLL_STANDARD_HOURS,
@@ -204,19 +203,9 @@ export default function Payroll() {
     [teamMgmtCommissionRules, performanceTargets, unitProductSettlements],
   )
 
-  const opsCenterCandidates = useMemo(
+  const unitCandidates = useMemo(
     () =>
-      salesUnits
-        .filter((u) => isLikelyOpsCenterName(u.name))
-        .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
-    [salesUnits],
-  )
-
-  const otherUnitCandidates = useMemo(
-    () =>
-      salesUnits
-        .filter((u) => !isLikelyOpsCenterName(u.name))
-        .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
+      [...salesUnits].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
     [salesUnits],
   )
 
@@ -266,10 +255,6 @@ export default function Payroll() {
         block: 'start',
       })
     }, 50)
-  }
-
-  function handleSelectSuggestedOpsCenters() {
-    setDraftScopeIds(opsCenterCandidates.map((u) => u.id))
   }
 
   function updateEntry(personnelId: string, patch: Partial<PayrollMonthEntry>) {
@@ -552,15 +537,11 @@ export default function Payroll() {
             1. 选择单位
           </CardTitle>
           <CardDescription>
-            勾选要核算的单位后点「去核算工资」。建议优先选名称含「运营中心」的单位；分仓可不选。
-            工资表默认先显示所选中的第一个单位。
+            勾选要核算的单位后点「去核算工资」。工资表默认先显示所选中的第一个单位。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" size="sm" onClick={handleSelectSuggestedOpsCenters}>
-              一键勾选全部运营中心（{opsCenterCandidates.length}）
-            </Button>
             <Button type="button" variant="outline" size="sm" onClick={() => setDraftScopeIds([])}>
               清空勾选
             </Button>
@@ -571,46 +552,23 @@ export default function Payroll() {
             {savedTip && <span className="text-sm text-emerald-700 self-center">{savedTip}</span>}
           </div>
 
-          <div>
-            <p className="mb-2 text-sm font-medium">运营中心候选</p>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {opsCenterCandidates.map((u) => (
-                <label
-                  key={u.id}
-                  className="flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm"
-                >
-                  <Checkbox
-                    checked={draftScopeIds.includes(u.id)}
-                    onCheckedChange={(c) => handleToggleDraftUnit(u.id, c === true)}
-                  />
-                  <span className="truncate">{u.name}</span>
-                </label>
-              ))}
-              {opsCenterCandidates.length === 0 && (
-                <p className="text-sm text-muted-foreground">暂无名称含「运营中心」的销售单位</p>
-              )}
-            </div>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {unitCandidates.map((u) => (
+              <label
+                key={u.id}
+                className="flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm"
+              >
+                <Checkbox
+                  checked={draftScopeIds.includes(u.id)}
+                  onCheckedChange={(c) => handleToggleDraftUnit(u.id, c === true)}
+                />
+                <span className="truncate">{u.name}</span>
+              </label>
+            ))}
+            {unitCandidates.length === 0 && (
+              <p className="text-sm text-muted-foreground">暂无销售单位</p>
+            )}
           </div>
-
-          <details className="rounded-md border px-3 py-2">
-            <summary className="cursor-pointer text-sm font-medium">
-              其他单位（一般分仓不核算，可按需勾选）
-            </summary>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {otherUnitCandidates.map((u) => (
-                <label
-                  key={u.id}
-                  className="flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm"
-                >
-                  <Checkbox
-                    checked={draftScopeIds.includes(u.id)}
-                    onCheckedChange={(c) => handleToggleDraftUnit(u.id, c === true)}
-                  />
-                  <span className="truncate">{u.name}</span>
-                </label>
-              ))}
-            </div>
-          </details>
 
           <p className="text-sm text-muted-foreground">
             当前已选单位：
