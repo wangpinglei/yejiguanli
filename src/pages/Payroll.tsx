@@ -734,13 +734,19 @@ export default function Payroll() {
                       <TableHead className="text-right">业绩提成</TableHead>
                     )}
                     {showPayrollCol(entryMode, 'attendance') && (
-                      <TableHead className="min-w-[108px] bg-sky-50/80">实际出勤</TableHead>
+                      <TableHead className="w-[100px] min-w-[100px] bg-sky-50/80 text-right">
+                        实际出勤
+                      </TableHead>
                     )}
                     {showPayrollCol(entryMode, 'attendance') && (
-                      <TableHead className="min-w-[96px] bg-sky-50/80">缺勤时间</TableHead>
+                      <TableHead className="w-[100px] min-w-[100px] bg-sky-50/80 text-center">
+                        缺勤时间
+                      </TableHead>
                     )}
                     {showPayrollCol(entryMode, 'attendance') && (
-                      <TableHead className="min-w-[96px] bg-sky-50/80">应出勤时间</TableHead>
+                      <TableHead className="w-[100px] min-w-[100px] bg-sky-50/80 text-right">
+                        应出勤时间
+                      </TableHead>
                     )}
                     {showPayrollCol(entryMode, 'score') && (
                       <TableHead className="min-w-[88px] bg-emerald-50/80">绩效分数</TableHead>
@@ -909,8 +915,8 @@ export default function Payroll() {
                         <TableCell
                           className={
                             entryMode === 'attendance'
-                              ? 'bg-sky-50/40 text-right tabular-nums text-muted-foreground'
-                              : 'text-right tabular-nums text-muted-foreground'
+                              ? 'w-[100px] min-w-[100px] bg-sky-50/40 text-right tabular-nums text-muted-foreground'
+                              : 'w-[100px] min-w-[100px] text-right tabular-nums text-muted-foreground'
                           }
                           title="实际出勤 = 应出勤 − 缺勤"
                         >
@@ -918,7 +924,13 @@ export default function Payroll() {
                         </TableCell>
                         )}
                         {showPayrollCol(entryMode, 'attendance') && (
-                        <TableCell className={entryMode === 'attendance' ? 'bg-sky-50/40' : undefined}>
+                        <TableCell
+                          className={
+                            entryMode === 'attendance'
+                              ? 'w-[100px] min-w-[100px] bg-sky-50/40 text-center'
+                              : 'w-[100px] min-w-[100px] text-center'
+                          }
+                        >
                           {onlyCommission ? (
                             <span className="text-muted-foreground">—</span>
                           ) : (
@@ -927,7 +939,7 @@ export default function Payroll() {
                               step="0.5"
                               min={0}
                               max={PAYROLL_STANDARD_HOURS}
-                              className="h-8 w-[96px]"
+                              className="mx-auto h-8 w-[84px] text-right"
                               title="缺勤从应出勤中扣除；实际出勤 = 应出勤 − 缺勤"
                               placeholder="0"
                               value={entry.absenceHours ?? ''}
@@ -945,8 +957,8 @@ export default function Payroll() {
                         <TableCell
                           className={
                             entryMode === 'attendance'
-                              ? 'bg-sky-50/40 text-right tabular-nums text-muted-foreground'
-                              : 'text-right tabular-nums text-muted-foreground'
+                              ? 'w-[100px] min-w-[100px] bg-sky-50/40 text-right tabular-nums text-muted-foreground'
+                              : 'w-[100px] min-w-[100px] text-right tabular-nums text-muted-foreground'
                           }
                           title="月应出勤固定（21.75×7.5）"
                         >
