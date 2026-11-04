@@ -12,7 +12,6 @@ import {
   IIT_SEED_THROUGH_YM,
   listPriorMonthsInIitCycle,
   loadTaxProfile,
-  MONTHLY_BASIC_DEDUCTION,
   resolveSpecialAdditionalMonthly,
   shouldUseIitCycleOpening,
   type IitCycleOpening,
@@ -37,11 +36,13 @@ export type PayrollTaxResolved = {
   monthsInYear: number
   cycleStartYm: string
   cycleEndYm: string
-  /** 累计扣税基数 */
+  /** 截至上月累计扣税基数 */
   cumulativeTaxBase: number
-  /** C */
+  /** 本期应发（参与 C 计算） */
+  payableForTax: number
+  /** C = 累计扣税基数 + 本期应发 */
   taxable: number
-  /** A = f(C) 累计应扣税 */
+  /** f(C) 累计应扣税 */
   cumulativeTaxDue: number
   /** 是否使用了 2025-12 周期期初 */
   usedCycleOpening: boolean
@@ -162,43 +163,17 @@ export function resolvePayrollTax(options: {
     opening ? throughYm : undefined,
   )
 
-  const monthNetBase = roundMoney(
-    payable - socialInsurancePersonal - housingFundPersonal,
-  )
+  // 截至上月累计扣税基数（期初 + 期后至上月的应发−个人社保公积金）
   const priorTaxBase = opening
     ? roundMoney(opening.taxBase + prior.cumulativeIncome - prior.cumulativeSpecialDeduction)
     : roundMoney(prior.cumulativeIncome - prior.cumulativeSpecialDeduction)
-  const cumulativeTaxBase = roundMoney(priorTaxBase + monthNetBase)
+  // 口径：应纳税所得额 C = 累计扣税基数(截至上月) + 本期应发工资
+  const cumulativeTaxBase = priorTaxBase
+  const taxable = roundMoney(priorTaxBase + payable)
 
   const priorTaxPaid = opening
     ? roundMoney(opening.taxPaid + prior.taxPaidBeforeThisMonth)
     : prior.taxPaidBeforeThisMonth
-
-  let taxable: number
-  if (opening && opening.taxable != null) {
-    const throughIndex = getIitCycleMonthIndex(opening.throughYm)
-    const deltaAfterOpening = roundMoney(
-      prior.cumulativeIncome
-      - prior.cumulativeSpecialDeduction
-      - prior.cumulativeSpecialAdditional
-      + monthNetBase
-      - specialAdditional,
-    )
-    taxable = roundMoney(
-      opening.taxable
-      + deltaAfterOpening
-      - MONTHLY_BASIC_DEDUCTION * (monthsInYear - throughIndex),
-    )
-  } else {
-    const cumulativeSpecialAdditional = roundMoney(
-      prior.cumulativeSpecialAdditional + specialAdditional,
-    )
-    taxable = roundMoney(
-      cumulativeTaxBase
-      - cumulativeSpecialAdditional
-      - MONTHLY_BASIC_DEDUCTION * monthsInYear,
-    )
-  }
 
   const cumulativeTaxDue = calcTaxOnCumulativeTaxable(taxable)
   const incomeTax = roundMoney(Math.max(0, cumulativeTaxDue - priorTaxPaid))
@@ -228,6 +203,7 @@ export function resolvePayrollTax(options: {
     cycleStartYm: cycle.startYm,
     cycleEndYm: cycle.endYm,
     cumulativeTaxBase,
+    payableForTax: roundMoney(payable),
     taxable,
     cumulativeTaxDue,
     usedCycleOpening: Boolean(opening),
@@ -260,6 +236,7 @@ export function enrichPayrollRowWithTax(
     iitCycleStartYm: tax.cycleStartYm,
     iitCycleEndYm: tax.cycleEndYm,
     cumulativeTaxBase: tax.cumulativeTaxBase,
+    payableForTax: tax.payableForTax,
     cumulativeTaxable: tax.taxable,
     cumulativeTaxDue: tax.cumulativeTaxDue,
     taxPaidBeforeThisMonth: tax.cumulativeTaxPaidBefore,

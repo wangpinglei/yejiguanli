@@ -673,12 +673,13 @@ export default function Payroll() {
                   {cycle.startYm}～{cycle.endYm}
                 </strong>
                 （本月为第 {n} 月，减除费用 {MONTHLY_BASIC_DEDUCTION}×{n}）。
+                C = 累计扣税基数(截至上月) + 本期应发；
                 本月应扣 = max(f(C)−B, 0)；
                 f(C)=ROUND(MAX(C×{'{3,10,20,25,30,35,45}%'}−速算扣除数, 0), 2)。
                 {useOpening && (
                   <>
                     {' '}
-                    请填写截至 {IIT_SEED_THROUGH_YM} 的期初：已预扣个税、累计扣税基数、应纳税所得额（可空则自动算）。
+                    请填写截至 {IIT_SEED_THROUGH_YM} 的期初：已预扣个税、累计扣税基数（应纳税所得额可空）。
                   </>
                 )}
                 {' '}完成后点「生成工资表」。
@@ -1366,6 +1367,8 @@ export default function Payroll() {
                             )
                           })()}
                         {showPayrollCol(entryMode, 'tax') && (() => {
+                          const taxBase = Number(row.cumulativeTaxBase) || 0
+                          const pay = Number(row.payableForTax ?? row.payable) || 0
                           const cVal = Number(row.cumulativeTaxable) || 0
                           const bVal = Number(row.taxPaidBeforeThisMonth) || 0
                           const bracket = resolveIitBracket(cVal)
@@ -1374,7 +1377,7 @@ export default function Payroll() {
                           const ratePct = `${(bracket.rate * 100).toFixed(0)}%`
                           return (
                         <TableCell className="bg-amber-50/40 align-top">
-                          <div className="space-y-1.5 min-w-[190px]">
+                          <div className="space-y-1.5 min-w-[210px]">
                             <Input
                               type="number"
                               className="h-8 w-[96px]"
@@ -1394,14 +1397,14 @@ export default function Payroll() {
                             {entryMode === 'tax' && (
                               <div className="rounded border border-amber-200/80 bg-white/80 px-2 py-1.5 text-[10px] leading-relaxed text-amber-950 tabular-nums">
                                 <div className="font-medium text-amber-900">
-                                  本月 = max(f(C) − B, 0)
+                                  C = 累计扣税基数 + 本期应发
                                 </div>
                                 <div>
-                                  C = {money(cVal)}
+                                  C = {money(taxBase)} + {money(pay)} = {money(cVal)}
                                   {cVal > 0 ? (
                                     <>
                                       {' '}
-                                      → 税率 {ratePct}，速算 {money(bracket.quick)}
+                                      → {ratePct} / 速算 {money(bracket.quick)}
                                     </>
                                   ) : (
                                     <>（≤0 则 f(C)=0）</>
@@ -1410,8 +1413,9 @@ export default function Payroll() {
                                 <div>
                                   f(C) = ROUND(MAX(C×{ratePct}−速算, 0), 2) = {money(fC)}
                                 </div>
-                                <div>
-                                  max({money(fC)} − {money(bVal)}, 0) = {money(systemTax)}
+                                <div className="font-medium">
+                                  本月 = max(f(C)−B, 0) = max({money(fC)}−{money(bVal)}, 0) ={' '}
+                                  {money(systemTax)}
                                 </div>
                               </div>
                             )}
