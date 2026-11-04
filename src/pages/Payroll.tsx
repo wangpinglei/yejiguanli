@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
-import { Calculator, CheckSquare, FileSpreadsheet, Save } from 'lucide-react'
+import { Calculator, CheckSquare, FileSpreadsheet, Pencil, Save } from 'lucide-react'
 
 import { PageHeader } from '@/components/PageHeader'
 import { Badge } from '@/components/ui/badge'
@@ -40,12 +40,16 @@ import {
   type PayrollMonthEntry,
   type PayrollRowResult,
 } from '@/lib/payrollCalc'
+import { resolvePayForDate } from '@/lib/compensation'
 import MPayrollAdjCell from '@/pages/Payroll/components/m-payroll-adj-cell'
+import MInsurancePersonalDialog from '@/pages/Payroll/components/m-insurance-personal-dialog'
 import MPayrollEntryLinks, {
   type PayrollCalcPhase,
   type PayrollEntryMode,
 } from '@/pages/Payroll/components/m-payroll-entry-links'
+import MPayPlanDialog from '@/pages/Personnel/components/m-pay-plan-dialog'
 import { enrichPayrollRowWithTax, resolvePayrollTax } from '@/lib/payrollTaxApply'
+import type { Personnel } from '@/types'
 import {
   calculateMonthlySalary,
   isPayrollCommissionOnly,
@@ -88,9 +92,24 @@ function payrollColSpan(mode: PayrollEntryMode): number {
   // 与表头条件保持一致：单位+姓名=2
   if (mode === 'attendance') return 2 + 1 + 1 + 2 + 1 // 标准底薪 + 实际/缺勤/应出勤 + 实发底薪
   if (mode === 'score') return 2 + 1 + 1 + 1 // 标准绩效 + 分数 + 实发绩效
-  if (mode === 'insurance') return 2 + 1 + 2 // 应发 + 社保 + 公积金
+  if (mode === 'insurance') return 2 + 1 + 2 + 1 // 应发 + 社保 + 公积金 + 操作
   if (mode === 'tax') return 2 + 1 + 2 + 3 // 应发 + 社保公积金 + 专项/个税/实发
   return 16 // 最终表不含出勤三列
+}
+
+/** 档案默认个人代扣（方案优先，其次个税档案） */
+function getArchivePersonal(person: Personnel, yearMonth: string) {
+  const pay = resolvePayForDate(person, `${yearMonth}-15`)
+  return {
+    social:
+      Number(pay.socialInsurancePersonal)
+      || Number(person.taxProfile?.socialInsurancePersonal)
+      || 0,
+    housing:
+      Number(pay.housingFundPersonal)
+      || Number(person.taxProfile?.housingFundPersonal)
+      || 0,
+  }
 }
 
 /** 跳转人员「调整薪酬」并定位字段 */
@@ -116,8 +135,12 @@ export default function Payroll() {
     performanceTargets,
     unitProductSettlements,
   } = useData()
-  const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleSalesRecords: salesRecords } =
-    usePermissions()
+  const {
+    visibleSalesUnits: salesUnits,
+    visiblePersonnel: personnel,
+    visibleSalesRecords: salesRecords,
+    canEditPersonnel,
+  } = usePermissions()
 
   const [yearMonth, setYearMonth] = useState(() => new Date().toISOString().slice(0, 7))
   const [scopeUnitIds, setScopeUnitIds] = useState<string[]>(() => loadPayrollScopeUnitIds())
@@ -127,6 +150,11 @@ export default function Payroll() {
   const [calcPhase, setCalcPhase] = useState<PayrollCalcPhase>('idle')
   const [entryMode, setEntryMode] = useState<PayrollEntryMode>('all')
   const [savedTip, setSavedTip] = useState('')
+  const [insuranceAdjust, setInsuranceAdjust] = useState<{
+    mode: 'single' | 'batch'
+    person: Personnel | null
+  } | null>(null)
+  const [historyPerson, setHistoryPerson] = useState<Personnel | null>(null)
 
   const teamMgmtContext = useMemo(
     () => ({
@@ -249,7 +277,13 @@ export default function Payroll() {
           (calc.internalSalesCommission || 0) +
           (calc.managementCommission || 0)
 
-        const entry = entries[person.id] || createEmptyPayrollEntry(person.id)
+        const rawEntry = entries[person.id] || createEmptyPayrollEntry(person.id)
+        // 个人代扣只认人员档案/薪酬方案，不认本月录入覆盖
+        const entry: PayrollMonthEntry = {
+          ...rawEntry,
+          socialInsurancePersonal: null,
+          housingFundPersonal: null,
+        }
         const baseRow = calcPayrollRow({
           personnelId: person.id,
           name: person.name,
@@ -422,8 +456,8 @@ export default function Payroll() {
           <CardDescription>
             应发 = 提成 + 实发底薪 + 保密费 + 岗位补贴 + 实发绩效 + 其他加项 − 其他减项；月出勤系数{' '}
             21.75 × 7.5 = {PAYROLL_STANDARD_HOURS} 小时；未填缺勤按满勤（缺勤=0），未填考核分按 100 分。
-            加项/减项可点「明细」录入多行说明与金额；黄列为人社代扣与累计个税（可改），实发=应发−社保个人−公积金个人−本期个税。
-            专项附加在人员「个税扣除」维护；社保/公积金个人代扣优先取薪酬方案（调整薪酬），其次取个税档案。人员关闭「内部员工」后只核算提成。
+            加项/减项可点「明细」录入多行说明与金额；实发=应发−社保个人−公积金个人−本期个税。
+            社保/公积金个人代扣固定取薪酬方案（可「去调整」/批量写入档案并记修改记录）；本期个税可改。人员关闭「内部员工」后只核算提成。
           </CardDescription>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground space-y-1">
@@ -550,7 +584,7 @@ export default function Payroll() {
           )}
           {calcPhase === 'wizard' && entryMode === 'insurance' && (
             <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              步骤 3/4 社保公积金录入 — 个人代扣默认来自「调整薪酬」方案（其次个税档案）；特殊期间可改。
+              步骤 3/4 社保公积金录入 — 个人代扣按人员档案固定展示；不对时点「去调整」或「批量调整」写入薪酬方案/个税档案（有修改记录）。
             </p>
           )}
           {calcPhase === 'wizard' && entryMode === 'tax' && (
@@ -601,6 +635,17 @@ export default function Payroll() {
               <FileSpreadsheet className="mr-1.5 h-3.5 w-3.5" />
               导出 CSV
             </Button>
+            {entryMode === 'insurance' && canEditPersonnel && (
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={rows.length === 0}
+                onClick={() => setInsuranceAdjust({ mode: 'batch', person: null })}
+              >
+                <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                批量调整个人代扣
+              </Button>
+            )}
             <Badge variant="secondary" className="h-8 px-3">
               {rows.length} 人
             </Badge>
@@ -666,10 +711,17 @@ export default function Payroll() {
                       <TableHead className="text-right font-semibold">应发</TableHead>
                     )}
                     {showPayrollCol(entryMode, 'insurance') && (
-                      <TableHead className="min-w-[96px] bg-amber-50/80">社保个人</TableHead>
+                      <TableHead className="min-w-[96px] bg-amber-50/80 text-right">
+                        社保个人
+                      </TableHead>
                     )}
                     {showPayrollCol(entryMode, 'insurance') && (
-                      <TableHead className="min-w-[96px] bg-amber-50/80">公积金个人</TableHead>
+                      <TableHead className="min-w-[96px] bg-amber-50/80 text-right">
+                        公积金个人
+                      </TableHead>
+                    )}
+                    {entryMode === 'insurance' && (
+                      <TableHead className="min-w-[140px] bg-amber-50/80">操作</TableHead>
                     )}
                     {showPayrollCol(entryMode, 'tax') && (
                       <TableHead className="text-right min-w-[96px] bg-amber-50/80">专项附加</TableHead>
@@ -926,36 +978,58 @@ export default function Payroll() {
                           {money(row.payable)}
                         </TableCell>
                         )}
-                        {showPayrollCol(entryMode, 'insurance') && (
-                        <TableCell className="bg-amber-50/40">
-                          <Input
-                            type="number"
-                            className="h-8 w-[92px]"
-                            title="默认来自薪酬方案个人代扣；特殊期间可改"
-                            value={entry.socialInsurancePersonal ?? row.socialInsurancePersonal ?? 0}
-                            onChange={(e) =>
-                              updateEntry(row.personnelId, {
-                                socialInsurancePersonal: Number(e.target.value) || 0,
-                              })
+                        {showPayrollCol(entryMode, 'insurance') && (() => {
+                          const person = personnel.find((p) => p.id === row.personnelId)
+                          const archive = person
+                            ? getArchivePersonal(person, yearMonth)
+                            : {
+                              social: row.socialInsurancePersonal || 0,
+                              housing: row.housingFundPersonal || 0,
                             }
-                          />
-                        </TableCell>
-                        )}
-                        {showPayrollCol(entryMode, 'insurance') && (
-                        <TableCell className="bg-amber-50/40">
-                          <Input
-                            type="number"
-                            className="h-8 w-[92px]"
-                            title="默认来自薪酬方案个人代扣；特殊期间可改"
-                            value={entry.housingFundPersonal ?? row.housingFundPersonal ?? 0}
-                            onChange={(e) =>
-                              updateEntry(row.personnelId, {
-                                housingFundPersonal: Number(e.target.value) || 0,
-                              })
-                            }
-                          />
-                        </TableCell>
-                        )}
+                          return (
+                            <>
+                              <TableCell className="bg-amber-50/40 text-right tabular-nums">
+                                {money(archive.social)}
+                              </TableCell>
+                              <TableCell className="bg-amber-50/40 text-right tabular-nums">
+                                {money(archive.housing)}
+                              </TableCell>
+                              {entryMode === 'insurance' && (
+                                <TableCell className="bg-amber-50/40">
+                                  <div className="flex flex-wrap items-center gap-1">
+                                    {canEditPersonnel && person && (
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 px-2 text-xs"
+                                        onClick={() =>
+                                          setInsuranceAdjust({
+                                            mode: 'single',
+                                            person,
+                                          })
+                                        }
+                                      >
+                                        去调整
+                                      </Button>
+                                    )}
+                                    {person && (
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 px-2 text-xs text-muted-foreground"
+                                        onClick={() => setHistoryPerson(person)}
+                                      >
+                                        记录
+                                      </Button>
+                                    )}
+                                  </div>
+                                </TableCell>
+                              )}
+                            </>
+                          )
+                        })()}
                         {showPayrollCol(entryMode, 'tax') && (
                         <TableCell className="text-right tabular-nums bg-amber-50/40">
                           {money(row.specialAdditional || 0)}
@@ -1033,6 +1107,54 @@ export default function Payroll() {
           )}
 </CardContent>
       </Card>
+
+      <MInsurancePersonalDialog
+        open={Boolean(insuranceAdjust)}
+        onOpenChange={(open) => {
+          if (!open) setInsuranceAdjust(null)
+        }}
+        mode={insuranceAdjust?.mode || 'single'}
+        person={insuranceAdjust?.person || null}
+        people={rows
+          .map((r) => personnel.find((p) => p.id === r.personnelId))
+          .filter((p): p is Personnel => Boolean(p))}
+        defaultEffectiveDate={`${yearMonth}-01`}
+        defaultSocialPersonal={
+          insuranceAdjust?.mode === 'single' && insuranceAdjust.person
+            ? getArchivePersonal(insuranceAdjust.person, yearMonth).social
+            : 0
+        }
+        defaultHousingPersonal={
+          insuranceAdjust?.mode === 'single' && insuranceAdjust.person
+            ? getArchivePersonal(insuranceAdjust.person, yearMonth).housing
+            : 0
+        }
+        onAdjusted={(ids) => {
+          setEntries((prev) => {
+            const next = { ...prev }
+            for (const id of ids) {
+              const cur = next[id] || createEmptyPayrollEntry(id)
+              next[id] = {
+                ...cur,
+                socialInsurancePersonal: null,
+                housingFundPersonal: null,
+              }
+            }
+            return next
+          })
+          setSavedTip(`已更新 ${ids.length} 人个人代扣档案`)
+          window.setTimeout(() => setSavedTip(''), 2500)
+        }}
+      />
+
+      <MPayPlanDialog
+        person={historyPerson}
+        open={Boolean(historyPerson)}
+        onOpenChange={(open) => {
+          if (!open) setHistoryPerson(null)
+        }}
+        canEdit={false}
+      />
     </div>
   )
 }
