@@ -757,8 +757,9 @@ export default function Payroll() {
                   {cycle.startYm}～{cycle.endYm}
                 </strong>
                 （本月为第 {n} 月，减除费用 {MONTHLY_BASIC_DEDUCTION}×{n}）。
+                累计扣税基数=上月应纳税所得额C（首月取期初）；
                 C=累计扣税基数+本月应发−个人社保−个人公积金−本月专项附加合计；
-                B=已预缴个税；
+                B=上月B+上月本期个税；
                 A=ROUND(MAX((C−{MONTHLY_BASIC_DEDUCTION}×{n})×{'{3,10,20,25,30,35,45}%'}−速算扣除数, 0), 2)；
                 本期个税=max(A−B, 0)。
                 {useOpening && (
@@ -969,7 +970,7 @@ export default function Payroll() {
                       <TableHead className="min-w-[110px] bg-violet-50/80 text-right">
                         已预缴个税 B
                         <div className="text-[10px] font-normal text-muted-foreground">
-                          期初截至{IIT_SEED_THROUGH_YM}
+                          上月B+上月本期个税
                         </div>
                       </TableHead>
                     )}
@@ -977,7 +978,7 @@ export default function Payroll() {
                       <TableHead className="min-w-[120px] bg-violet-50/80 text-right">
                         累计扣税基数
                         <div className="text-[10px] font-normal text-muted-foreground">
-                          截至上月
+                          上月应纳税所得额C
                         </div>
                       </TableHead>
                     )}
@@ -985,7 +986,7 @@ export default function Payroll() {
                       <TableHead className="min-w-[120px] bg-violet-50/80 text-right">
                         应纳税所得额 C
                         <div className="text-[10px] font-normal text-muted-foreground">
-                          税基+本期应发
+                          税基+应发−社保公积金−专项
                         </div>
                       </TableHead>
                     )}
@@ -1401,7 +1402,7 @@ export default function Payroll() {
                                     type="number"
                                     step="0.01"
                                     className="ml-auto h-8 w-[100px] text-right"
-                                    title="已预缴个税 B（期初截至 2026-09，其后月份自动累加）"
+                                    title="期初已预缴（截至 2026-09）；其后月份 B=上月B+上月本期个税"
                                     defaultValue={row.iitOpeningTaxPaid ?? 0}
                                     key={`paid-${person.id}-${row.iitOpeningTaxPaid ?? 0}`}
                                     onBlur={(e) => {
@@ -1411,7 +1412,7 @@ export default function Payroll() {
                                     }}
                                   />
                                   <div className="mt-1 text-right text-[10px] text-muted-foreground tabular-nums">
-                                    参与计算 B={money(row.taxPaidBeforeThisMonth || 0)}
+                                    本月B={money(row.taxPaidBeforeThisMonth || 0)}
                                   </div>
                                 </TableCell>
                                 <TableCell className="bg-violet-50/40">
@@ -1419,7 +1420,7 @@ export default function Payroll() {
                                     type="number"
                                     step="0.01"
                                     className="ml-auto h-8 w-[100px] text-right"
-                                    title="累计扣税基数期初（截至 2026-09）"
+                                    title="期初累计扣税基数（截至 2026-09）；其后月份=上月应纳税所得额C"
                                     defaultValue={row.iitOpeningTaxBase ?? 0}
                                     key={`base-${person.id}-${row.iitOpeningTaxBase ?? 0}`}
                                     onBlur={(e) => {
@@ -1429,7 +1430,7 @@ export default function Payroll() {
                                     }}
                                   />
                                   <div className="mt-1 text-right text-[10px] text-muted-foreground tabular-nums">
-                                    截至上月 {money(row.cumulativeTaxBase || 0)}
+                                    本月税基={money(row.cumulativeTaxBase || 0)}
                                   </div>
                                 </TableCell>
                                 <TableCell className="bg-violet-50/40">

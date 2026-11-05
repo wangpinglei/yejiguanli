@@ -49,9 +49,9 @@ export type TaxProfileChangeLog = {
 
 /** 个税周期期初（如 2025-12 周期截至 2026-09） */
 export type IitCycleOpening = {
-  /** 累计扣税基数 Σ(应发−个人社保−个人公积金) */
+  /** 期初累计扣税基数（其后月份结转为上月 C） */
   taxBase: number
-  /** 已预扣个税 B */
+  /** 期初已预扣个税（其后 B=上月B+上月本期个税） */
   taxPaid: number
   /** 应纳税所得额 C；null=不手填 */
   taxable: number | null
