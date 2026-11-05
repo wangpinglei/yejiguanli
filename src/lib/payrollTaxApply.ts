@@ -193,8 +193,48 @@ function resolveCumulativeTaxBaseFromPriorC(options: {
 }
 
 /**
- * 本月已预缴 B = 上月 B + 上月本期个税。
- * 优先读上月 taxPaidBeforeSnapshot；否则期初 + 各月本期个税合计。
+ * 某工资月当时的「已预缴个税 B」（只读，不写回）。
+ * - 期初后首月（如 2026-10）：始终 = 期初手工已预缴（opening.taxPaid）
+ * - 其后月份：优先该月保存的 taxPaidBeforeSnapshot；否则 = 再上月 B + 再上月本期个税
+ */
+function resolveMonthPrepaidB(options: {
+  person: Personnel
+  yearMonth: string
+  opening: IitCycleOpening | null
+  throughYm?: string
+}): number {
+  const { person, yearMonth, opening, throughYm } = options
+  const priors = listCarryPriorMonths(yearMonth, opening ? throughYm : undefined)
+  // 10 月：B = 期初已预缴（跟 10 月表里手工填的「已预缴个税 B」一致）
+  if (priors.length === 0) {
+    return roundMoney(opening?.taxPaid ?? 0)
+  }
+
+  const entry = loadPayrollEntries(yearMonth)[person.id]
+  if (
+    entry
+    && entry.taxPaidBeforeSnapshot != null
+    && Number.isFinite(Number(entry.taxPaidBeforeSnapshot))
+  ) {
+    return roundMoney(Number(entry.taxPaidBeforeSnapshot) || 0)
+  }
+
+  // 无快照：B = 上月 B + 上月本期个税（与界面结转口径一致）
+  const prevYm = priors[priors.length - 1]
+  const prevB = resolveMonthPrepaidB({
+    person,
+    yearMonth: prevYm,
+    opening,
+    throughYm,
+  })
+  const prevEntry = loadPayrollEntries(prevYm)[person.id]
+  const prevTax = prevEntry ? getEffectiveIncomeTax(prevEntry) : 0
+  return roundMoney(prevB + prevTax)
+}
+
+/**
+ * 本月已预缴 B = 上月已预缴 B + 上月本期个税。
+ * 例：核算 2026-11 → B = 10 月表「已预缴个税 B」+ 10 月「本期个税」。
  */
 function resolvePrepaidTaxB(options: {
   person: Personnel
@@ -211,20 +251,22 @@ function resolvePrepaidTaxB(options: {
 
   const prevYm = priors[priors.length - 1]
   const prevEntry = loadPayrollEntries(prevYm)[person.id]
-  if (
-    prevEntry
-    && prevEntry.taxPaidBeforeSnapshot != null
-    && Number.isFinite(Number(prevEntry.taxPaidBeforeSnapshot))
-  ) {
-    return roundMoney(
-      Number(prevEntry.taxPaidBeforeSnapshot)
-      + getEffectiveIncomeTax(prevEntry),
-    )
-  }
+  const prevB = resolveMonthPrepaidB({
+    person,
+    yearMonth: prevYm,
+    opening,
+    throughYm,
+  })
+  const prevTax = prevEntry ? getEffectiveIncomeTax(prevEntry) : 0
+  const carried = roundMoney(prevB + prevTax)
 
-  return opening
-    ? roundMoney(opening.taxPaid + priorTaxPaidSum)
-    : roundMoney(priorTaxPaidSum)
+  // 若上月完全没有工资录入，退回「期初 + 已有月份本期个税合计」
+  if (!prevEntry && priorTaxPaidSum > 0) {
+    return opening
+      ? roundMoney(opening.taxPaid + priorTaxPaidSum)
+      : roundMoney(priorTaxPaidSum)
+  }
+  return carried
 }
 
 function resolveOpening(
@@ -374,6 +416,41 @@ export function resolvePayrollTax(options: {
     openingTaxBase: opening?.taxBase ?? 0,
     openingTaxPaid: opening?.taxPaid ?? 0,
     openingTaxable: opening?.taxable ?? null,
+  }
+}
+
+/** 结转拆解：上月 B、上月本期个税（供 11 月等界面核对） */
+export function getIitCarryFromPriorMonth(options: {
+  person: Personnel
+  yearMonth: string
+}): { priorYm: string; priorB: number; priorPeriodTax: number } | null {
+  const { person, yearMonth } = options
+  if (!shouldUseIitCycleOpening(yearMonth)) return null
+  const profile = loadTaxProfile(
+    person.id,
+    {
+      socialInsurance: person.socialInsurance,
+      housingFund: person.housingFund,
+    },
+    person.taxProfile || null,
+  )
+  const opening = resolveOpening(profile, yearMonth)
+  const throughYm = opening?.throughYm
+  const priors = listCarryPriorMonths(yearMonth, opening ? throughYm : undefined)
+  if (priors.length === 0) return null
+  const priorYm = priors[priors.length - 1]
+  const priorEntry = loadPayrollEntries(priorYm)[person.id]
+  const priorB = resolveMonthPrepaidB({
+    person,
+    yearMonth: priorYm,
+    opening,
+    throughYm,
+  })
+  const priorPeriodTax = priorEntry ? getEffectiveIncomeTax(priorEntry) : 0
+  return {
+    priorYm,
+    priorB: roundMoney(priorB),
+    priorPeriodTax: roundMoney(priorPeriodTax),
   }
 }
 

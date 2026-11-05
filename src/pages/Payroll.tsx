@@ -53,7 +53,11 @@ import MPayrollEntryLinks, {
 import MSpecialAdditionalDialog from '@/pages/Payroll/components/m-special-additional-dialog'
 import MPayPlanDialog from '@/pages/Personnel/components/m-pay-plan-dialog'
 import { resolvePayrollCommissionTotal } from '@/lib/payrollCommissionDetail'
-import { enrichPayrollRowWithTax, resolvePayrollTax } from '@/lib/payrollTaxApply'
+import {
+  enrichPayrollRowWithTax,
+  getIitCarryFromPriorMonth,
+  resolvePayrollTax,
+} from '@/lib/payrollTaxApply'
 import {
   getIitCycleBounds,
   getIitCycleMonthIndex,
@@ -1423,15 +1427,29 @@ export default function Payroll() {
                                       </div>
                                     </>
                                   ) : (
-                                    <div
-                                      className="text-right tabular-nums"
-                                      title="上月B + 上月本期个税（只读结转，不改写上月）"
-                                    >
-                                      {money(row.taxPaidBeforeThisMonth || 0)}
-                                      <div className="mt-1 text-[10px] text-muted-foreground">
-                                        上月B+本期个税
-                                      </div>
-                                    </div>
+                                    (() => {
+                                      const carry = getIitCarryFromPriorMonth({
+                                        person,
+                                        yearMonth,
+                                      })
+                                      return (
+                                        <div
+                                          className="text-right tabular-nums"
+                                          title={
+                                            carry
+                                              ? `${carry.priorYm}已预缴B ${money(carry.priorB)} + 本期个税 ${money(carry.priorPeriodTax)}`
+                                              : '上月B + 上月本期个税'
+                                          }
+                                        >
+                                          {money(row.taxPaidBeforeThisMonth || 0)}
+                                          <div className="mt-1 text-[10px] text-muted-foreground leading-snug">
+                                            {carry
+                                              ? `${carry.priorYm.slice(5)}月B ${money(carry.priorB)}+个税 ${money(carry.priorPeriodTax)}`
+                                              : '上月B+本期个税'}
+                                          </div>
+                                        </div>
+                                      )
+                                    })()
                                   )}
                                 </TableCell>
                                 <TableCell className="bg-violet-50/40">
