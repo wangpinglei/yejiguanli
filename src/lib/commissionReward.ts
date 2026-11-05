@@ -1,7 +1,12 @@
 import { roundMoney } from '@/lib/format'
 import { calcPersonalCommissionByTiers } from '@/lib/personalCommissionTiers'
-import { isSaleDateInRange, toDateOnly } from '@/lib/settlement'
-import type { ProductPersonCommission, SalesRecord, SalesUnit } from '@/types'
+import { findUnitProductSettlement, isSaleDateInRange, toDateOnly } from '@/lib/settlement'
+import type {
+  ProductPersonCommission,
+  SalesRecord,
+  SalesUnit,
+  UnitProductSettlement,
+} from '@/types'
 
 /** 查找单位×产品×人员提成配置 */
 export function findProductPersonCommission(
@@ -73,6 +78,7 @@ export function calcSalePersonCommissionPreview(
     saleDate?: string
   },
   ppcList: ProductPersonCommission[],
+  upsList: UnitProductSettlement[] = [],
 ): number {
   const ppc = findProductPersonCommission(
     ppcList,
@@ -86,10 +92,21 @@ export function calcSalePersonCommissionPreview(
   if (ppc.personalCommissionType === 'fixed') {
     base = (sale.quantity || 0) * (ppc.personalCommissionAmount || 0)
   } else {
+    const ups = findUnitProductSettlement(
+      upsList,
+      sale.productId,
+      sale.salesUnitId,
+      sale.saleDate,
+    )
     // 有梯度：单笔预览按本单金额估档（工资汇总仍按月累计整段定档）
+    // 按件结算 / 不计入业绩 → 不走梯度
     const tiered = calcPersonalCommissionByTiers(
       sale.totalAmount || 0,
       ppc.personalCommissionTiers,
+      {
+        personalCommissionType: ppc.personalCommissionType,
+        ups,
+      },
     )
     if (tiered != null) {
       base = tiered

@@ -9,9 +9,12 @@ import {
   groupCommissionRewardHits,
 } from '@/lib/commissionReward'
 import {
+  canApplyPersonalCommissionTiers,
   formatPersonalCommissionTiersLabel,
+  getPersonalCommissionTiersBlockReason,
   hasPersonalCommissionTiers,
   normalizePersonalCommissionTiers,
+  sanitizePersonalCommissionTiersForSave,
 } from '@/lib/personalCommissionTiers'
 import type { SalesUnit, ProductPersonCommission, Personnel, Product, UnitProductSettlement } from '@/types'
 import {
@@ -299,7 +302,15 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
         personalCommissionRate: ppcForm.personalCommissionRate || 0,
         personalCommissionAmount: ppcForm.personalCommissionAmount || 0,
         personalCommissionThreshold: ppcForm.personalCommissionThreshold || 0,
-        personalCommissionTiers: normalizePersonalCommissionTiers(ppcForm.personalCommissionTiers),
+        personalCommissionTiers: sanitizePersonalCommissionTiersForSave({
+          personalCommissionType: ppcForm.personalCommissionType,
+          tiers: ppcForm.personalCommissionTiers,
+          ups: upsList.find(
+            (x) =>
+              x.productId === ppcEditKey.productId
+              && x.salesUnitId === ppcEditKey.unitId,
+          ),
+        }),
         personalCommissionCondition: ppcForm.personalCommissionCondition,
         internalSalesCommissionType: ppcForm.internalSalesCommissionType || 'percentage',
         internalSalesCommissionRate: ppcForm.internalSalesCommissionRate || 0,
@@ -347,7 +358,13 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
           personalCommissionRate: ppcForm.personalCommissionRate || 0,
           personalCommissionAmount: ppcForm.personalCommissionAmount || 0,
           personalCommissionThreshold: ppcForm.personalCommissionThreshold || 0,
-          personalCommissionTiers: normalizePersonalCommissionTiers(ppcForm.personalCommissionTiers),
+          personalCommissionTiers: sanitizePersonalCommissionTiersForSave({
+            personalCommissionType: ppcForm.personalCommissionType,
+            tiers: ppcForm.personalCommissionTiers,
+            ups: upsList.find(
+              (x) => x.productId === productId && x.salesUnitId === unit.id,
+            ),
+          }),
           personalCommissionCondition: ppcForm.personalCommissionCondition,
           internalSalesCommissionType: ppcForm.internalSalesCommissionType || 'percentage',
           internalSalesCommissionRate: ppcForm.internalSalesCommissionRate || 0,
@@ -675,9 +692,16 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                                   <TableBody>
                                     {people.map(({ person, ppc, personSales }) => {
                                       const isPersonalFixed = ppc?.personalCommissionType === 'fixed'
-                                      const hasTiers = hasPersonalCommissionTiers(
-                                        ppc?.personalCommissionTiers,
+                                      const ups = upsList.find(
+                                        (x) =>
+                                          x.productId === product.id
+                                          && x.salesUnitId === unit.id,
                                       )
+                                      const hasTiers = canApplyPersonalCommissionTiers({
+                                        personalCommissionType: ppc?.personalCommissionType,
+                                        tiers: ppc?.personalCommissionTiers,
+                                        ups,
+                                      })
                                       const hasPersonal = isPersonalFixed
                                         ? (ppc?.personalCommissionAmount || 0) > 0
                                         : hasTiers || (ppc?.personalCommissionRate || 0) > 0
@@ -929,6 +953,18 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                   </div>
                   <MPersonalCommissionTiersEditor
                     tiers={ppcForm.personalCommissionTiers}
+                    blockReason={
+                      ppcEditKey
+                        ? getPersonalCommissionTiersBlockReason({
+                            personalCommissionType: ppcForm.personalCommissionType,
+                            ups: upsList.find(
+                              (x) =>
+                                x.productId === ppcEditKey.productId
+                                && x.salesUnitId === ppcEditKey.unitId,
+                            ),
+                          })
+                        : null
+                    }
                     onChange={(personalCommissionTiers) =>
                       setPpcForm({ ...ppcForm, personalCommissionTiers })
                     }
@@ -950,7 +986,16 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
               </div>
               {ppcForm.personalCommissionType !== 'fixed' && (
                 <p className="text-xs text-muted-foreground">
-                  {hasPersonalCommissionTiers(ppcForm.personalCommissionTiers)
+                  {ppcEditKey
+                  && canApplyPersonalCommissionTiers({
+                    personalCommissionType: ppcForm.personalCommissionType,
+                    tiers: ppcForm.personalCommissionTiers,
+                    ups: upsList.find(
+                      (x) =>
+                        x.productId === ppcEditKey.productId
+                        && x.salesUnitId === ppcEditKey.unitId,
+                    ),
+                  })
                     ? '当前启用梯度：按月累计业绩整段定档，全部×命中档比例'
                     : '计算公式：(个人该产品销售额 - 起算门槛) × 提成比例%'}
                 </p>
@@ -1358,6 +1403,9 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                       setPpcForm({ ...ppcForm, personalCommissionTiers })
                     }
                   />
+                  <p className="text-[11px] text-muted-foreground">
+                    批量时：按件结算 / 不计入业绩的产品会自动跳过梯度，提成不变
+                  </p>
                 </>
               )}
               <div className="space-y-1">

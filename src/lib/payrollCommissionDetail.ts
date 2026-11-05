@@ -14,9 +14,10 @@ import {
 } from '@/lib/commissionReward'
 import { roundMoney } from '@/lib/format'
 import {
+  canApplyPersonalCommissionTiers,
   formatPersonalCommissionTiersLabel,
-  hasPersonalCommissionTiers,
 } from '@/lib/personalCommissionTiers'
+import { findUnitProductSettlement } from '@/lib/settlement'
 import {
   calculateMonthlySalary,
   filterByMonth,
@@ -116,9 +117,12 @@ function buildSaleRecordLines(options: {
   salesRecords: SalesRecord[]
   products: Product[]
   ppcList: ProductPersonCommission[]
+  upsList: UnitProductSettlement[]
   adjMap: Record<string, CommissionOrderAdj>
 }): CommissionDetailLine[] {
-  const { person, unitId, yearMonth, salesRecords, products, ppcList, adjMap } = options
+  const {
+    person, unitId, yearMonth, salesRecords, products, ppcList, upsList, adjMap,
+  } = options
   const monthly = filterByMonth(salesRecords, yearMonth)
 
   const productNameOf = (id: string, fallback?: string) =>
@@ -153,14 +157,26 @@ function buildSaleRecordLines(options: {
       baseRatePct = Number(person.salary?.personalCommissionRate) || 0
     }
 
+    const ups = findUnitProductSettlement(
+      upsList,
+      sale.productId,
+      sale.salesUnitId,
+      sale.saleDate,
+    ) || findUnitProductSettlement(upsList, sale.productId, person.salesUnitId)
+
     let rateLabel = '未配置（走人员默认）'
     if (ppc) {
+      const useTiers = canApplyPersonalCommissionTiers({
+        personalCommissionType: ppc.personalCommissionType,
+        tiers: ppc.personalCommissionTiers,
+        ups,
+      })
       rateLabel = formatRateLabel({
         type: ppc.personalCommissionType || 'percentage',
         rate: ppc.personalCommissionRate,
         amount: ppc.personalCommissionAmount,
         threshold: ppc.personalCommissionThreshold,
-        tiersLabel: hasPersonalCommissionTiers(ppc.personalCommissionTiers)
+        tiersLabel: useTiers
           ? formatPersonalCommissionTiersLabel(ppc.personalCommissionTiers)
           : undefined,
         rewardAmount: ppc.rewardAmount,
@@ -184,6 +200,7 @@ function buildSaleRecordLines(options: {
         saleDate: sale.saleDate,
       },
       ppcList,
+      upsList,
     )
     // 无产品配置时用默认比例估算本单
     let systemAmount = preview
@@ -197,7 +214,7 @@ function buildSaleRecordLines(options: {
     if (ppc) {
       systemAmount = preview
       if ((sale.collaborators || []).length > 0 && orderAmount > 0 && (sale.totalAmount || 0) > 0) {
-        const fullPreview = calcSalePersonCommissionPreview(sale, ppcList)
+        const fullPreview = calcSalePersonCommissionPreview(sale, ppcList, upsList)
         const reward = calcSaleCommissionReward(sale, ppc)
         const baseFull = Math.max(0, fullPreview - reward)
         const shareRatio = orderAmount / (sale.totalAmount || 1)
@@ -295,6 +312,7 @@ export function buildPayrollCommissionDetail(options: {
     salesRecords,
     products,
     ppcList: productPersonCommissions,
+    upsList: unitProductSettlements,
     adjMap,
   })
 

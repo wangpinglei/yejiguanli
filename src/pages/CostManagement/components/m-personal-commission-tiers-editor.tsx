@@ -11,6 +11,8 @@ import { Label } from '@/components/ui/label'
 type Props = {
   tiers?: PersonalCommissionTier[]
   disabled?: boolean
+  /** 不适用原因（按件 / 不计入业绩等）；有值时仅展示说明 */
+  blockReason?: string | null
   onChange: (tiers: PersonalCommissionTier[]) => void
 }
 
@@ -21,10 +23,20 @@ type Props = {
 export default function MPersonalCommissionTiersEditor({
   tiers,
   disabled,
+  blockReason,
   onChange,
 }: Props) {
   const list = normalizePersonalCommissionTiers(tiers)
   const enabled = hasPersonalCommissionTiers(list)
+
+  if (blockReason) {
+    return (
+      <div className="rounded-md border border-dashed border-muted-foreground/30 bg-muted/30 p-3">
+        <Label className="text-xs">业绩梯度（可选）</Label>
+        <p className="text-[11px] text-muted-foreground mt-1">{blockReason}</p>
+      </div>
+    )
+  }
 
   function handleAdd() {
     const last = list[list.length - 1]

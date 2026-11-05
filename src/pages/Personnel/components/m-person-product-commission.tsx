@@ -3,8 +3,11 @@ import { Link } from 'react-router-dom'
 import { useData } from '@/context/DataContext'
 import { formatCurrency } from '@/lib/format'
 import {
+  canApplyPersonalCommissionTiers,
   formatPersonalCommissionTiersLabel,
+  getPersonalCommissionTiersBlockReason,
   normalizePersonalCommissionTiers,
+  sanitizePersonalCommissionTiersForSave,
 } from '@/lib/personalCommissionTiers'
 import type { Personnel, Product, ProductPersonCommission, UnitProductSettlement } from '@/types'
 import { Layers, Package, Pencil, Percent, Plus, Trash2 } from 'lucide-react'
@@ -326,7 +329,13 @@ export default function MPersonProductCommission({
       personalCommissionRate: form.personalCommissionRate || 0,
       personalCommissionAmount: form.personalCommissionAmount || 0,
       personalCommissionThreshold: form.personalCommissionThreshold || 0,
-      personalCommissionTiers: normalizePersonalCommissionTiers(form.personalCommissionTiers),
+      personalCommissionTiers: sanitizePersonalCommissionTiersForSave({
+        personalCommissionType: form.personalCommissionType,
+        tiers: form.personalCommissionTiers,
+        ups: upsList.find(
+          (x) => x.productId === productId && x.salesUnitId === person.salesUnitId,
+        ),
+      }),
       personalCommissionCondition: form.personalCommissionCondition,
       internalSalesCommissionType: form.internalSalesCommissionType || 'percentage',
       internalSalesCommissionRate: form.internalSalesCommissionRate || 0,
@@ -616,7 +625,17 @@ export default function MPersonProductCommission({
                                         rate: ppc.personalCommissionRate,
                                         amount: ppc.personalCommissionAmount || 0,
                                         threshold: ppc.personalCommissionThreshold,
-                                        tiers: ppc.personalCommissionTiers,
+                                        tiers: canApplyPersonalCommissionTiers({
+                                          personalCommissionType: ppc.personalCommissionType,
+                                          tiers: ppc.personalCommissionTiers,
+                                          ups: upsList.find(
+                                            (x) =>
+                                              x.productId === product.id
+                                              && x.salesUnitId === person.salesUnitId,
+                                          ),
+                                        })
+                                          ? ppc.personalCommissionTiers
+                                          : [],
                                         rewardAmount: ppc.rewardAmount || 0,
                                         rewardFrom: ppc.rewardFrom,
                                         rewardTo: ppc.rewardTo,
@@ -828,6 +847,20 @@ export default function MPersonProductCommission({
                   <MPersonalCommissionTiersEditor
                     tiers={form.personalCommissionTiers}
                     disabled={!canEdit}
+                    blockReason={
+                      editProductId || batchProductIds[0]
+                        ? getPersonalCommissionTiersBlockReason({
+                            personalCommissionType: form.personalCommissionType,
+                            ups: upsList.find(
+                              (x) =>
+                                x.productId === (editProductId || batchProductIds[0])
+                                && x.salesUnitId === person?.salesUnitId,
+                            ),
+                          })
+                        : getPersonalCommissionTiersBlockReason({
+                            personalCommissionType: form.personalCommissionType,
+                          })
+                    }
                     onChange={(personalCommissionTiers) =>
                       setForm({ ...form, personalCommissionTiers })
                     }

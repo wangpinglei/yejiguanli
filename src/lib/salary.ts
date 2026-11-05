@@ -7,6 +7,7 @@ import {
   resolvePpcListForSaleDate,
 } from "@/lib/compensation";
 import { calcPersonalCommissionByTiers } from "@/lib/personalCommissionTiers";
+import { findUnitProductSettlement } from "@/lib/settlement";
 import {
   getPersonShareAmount,
   saleInvolvesPerson,
@@ -397,8 +398,15 @@ export function calcPersonalCommissionByProduct(
   monthlyRecords: SalesRecord[],
   _products: Product[],
   ppcList: ProductPersonCommission[],
+  upsList: UnitProductSettlement[] = [],
 ): number {
-  return calcProductCommissionByKind(person, monthlyRecords, ppcList, "personal");
+  return calcProductCommissionByKind(
+    person,
+    monthlyRecords,
+    ppcList,
+    "personal",
+    upsList,
+  );
 }
 
 /** 关联内部销售提成（不计入销售业额） */
@@ -603,6 +611,7 @@ function calcProductCommissionByKind(
   monthlyRecords: SalesRecord[],
   ppcList: ProductPersonCommission[],
   kind: ProductCommissionKind,
+  upsList: UnitProductSettlement[] = [],
 ): number {
   const personRecords = monthlyRecords
     .map((r) => scaleSaleForPerson(r, person.id))
@@ -628,6 +637,7 @@ function calcProductCommissionByKind(
       ),
       true,
       kind,
+      upsList,
     );
   }
   if (distributionRecords.length > 0) {
@@ -641,6 +651,7 @@ function calcProductCommissionByKind(
       ),
       false,
       kind,
+      upsList,
     );
   }
   return total;
@@ -652,6 +663,7 @@ function calcCommissionForRecords(
   personPpcList: ProductPersonCommission[],
   useRegularSalaryFallback: boolean,
   kind: ProductCommissionKind,
+  upsList: UnitProductSettlement[] = [],
 ): number {
   if (personRecords.length === 0) return 0;
 
@@ -705,11 +717,17 @@ function calcCommissionForRecords(
         total += qty * (fields.amount || 0);
         return;
       }
-      // 个人提成：有可选梯度则月度整段定档；未设置则保持 (销售额−门槛)×比例
+      // 个人提成：有可选梯度则月度整段定档；按件/不计入业绩/未设置 → 原逻辑
       if (kind === "personal") {
+        const ups = findUnitProductSettlement(upsList, productId, unitId)
+          || findUnitProductSettlement(upsList, productId, person.salesUnitId);
         const tiered = calcPersonalCommissionByTiers(
           sales,
           ppc.personalCommissionTiers,
+          {
+            personalCommissionType: fields.type,
+            ups,
+          },
         );
         if (tiered != null) {
           total += tiered;
@@ -830,7 +848,13 @@ export function calculateMonthlySalary(
   // 个人提成：优先产品×单位×人员配置（按成交日分段）
   const usePpc = productPersonCommissions !== undefined;
   const personalCommission = usePpc
-    ? calcPersonalCommissionByProduct(person, monthlyRecords, products, productPersonCommissions)
+    ? calcPersonalCommissionByProduct(
+        person,
+        monthlyRecords,
+        products,
+        productPersonCommissions,
+        teamMgmtContext?.upsList || [],
+      )
     : calcPersonalCommission(s, personalSales);
   const internalRecords = filterByMonth(
     calcOptions?.internalSalesRecords ?? salesRecords,
