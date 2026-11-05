@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, Fragment } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import ExcelJS from "exceljs";
 import { useData } from "@/context/DataContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useAuth } from "@/context/AuthContext";
@@ -26,7 +27,7 @@ import type { CostRecord, CostSettlement, RevenueSettlement } from "@/types";
 import {
   TrendingUp, DollarSign, Award, AlertTriangle,
   ChevronDown, ChevronRight, Pencil, Receipt, CheckCircle2, Clock,
-  Calculator,
+  Calculator, Download,
 } from "lucide-react";
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
@@ -560,6 +561,167 @@ unitIds,
       return next;
     });
   };
+
+  async function handleExportIncomeDetail() {
+    if (incomeDetail.length === 0) {
+      alert("当前没有可导出的收入明细，请先选择月份与单位");
+      return;
+    }
+    const monthLabel = /^\d{4}-\d{2}$/.test(selectedMonth)
+      ? `${selectedMonth.slice(0, 4)}年${Number(selectedMonth.slice(5, 7))}月`
+      : selectedMonth;
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "yejiguanli";
+
+    const summarySheet = workbook.addWorksheet("单位汇总", {
+      views: [{ state: "frozen", ySplit: 1 }],
+    });
+    summarySheet.addRow([
+      "月份",
+      "销售单位",
+      "预估结算收入",
+      "实际结算金额",
+      "差额",
+      "其他收入",
+      "收入合计",
+      "状态",
+      "业绩笔数",
+      "其他收入条数",
+    ]);
+    summarySheet.getRow(1).font = { bold: true };
+    for (const d of incomeDetail) {
+      summarySheet.addRow([
+        monthLabel,
+        d.unit.name,
+        d.estimatedAmount,
+        d.actualAmount,
+        d.diff,
+        d.otherIncome,
+        d.totalIncome,
+        d.isAdjusted ? "已调整" : "待确认",
+        d.unitSales.length,
+        d.unitIncomeRecords.length,
+      ]);
+    }
+    summarySheet.addRow([
+      monthLabel,
+      "合计",
+      incomeTotals.totalEstimated,
+      incomeTotals.totalActual,
+      incomeTotals.totalActual - incomeTotals.totalEstimated,
+      incomeTotals.totalOther,
+      incomeTotals.grandTotal,
+      "",
+      incomeDetail.reduce((n, d) => n + d.unitSales.length, 0),
+      incomeDetail.reduce((n, d) => n + d.unitIncomeRecords.length, 0),
+    ]);
+    summarySheet.getRow(summarySheet.rowCount).font = { bold: true };
+
+    const salesSheet = workbook.addWorksheet("业绩收入明细", {
+      views: [{ state: "frozen", ySplit: 1 }],
+    });
+    salesSheet.addRow([
+      "月份",
+      "销售单位",
+      "成交日期",
+      "销售人员",
+      "客户",
+      "产品",
+      "订单金额",
+      "结算比例",
+      "结算金额",
+      "来源",
+    ]);
+    salesSheet.getRow(1).font = { bold: true };
+    for (const d of incomeDetail) {
+      for (const s of d.unitSales) {
+        const person = personnel.find((p) => p.id === s.personnelId);
+        const product = products.find((p) => p.id === s.productId);
+        salesSheet.addRow([
+          monthLabel,
+          d.unit.name,
+          s.saleDate || "",
+          person?.name || s.salesPersonName || "",
+          s.customerName || "",
+          product?.name || s.productName || "",
+          s.totalAmount,
+          formatSaleSettlementRatioForSale(s, visibleUnitProductSettlements),
+          calcSaleSettlementIncome(s, visibleUnitProductSettlements),
+          s.synced ? "生态圈" : "手动",
+        ]);
+      }
+    }
+
+    const otherSheet = workbook.addWorksheet("其他收入明细", {
+      views: [{ state: "frozen", ySplit: 1 }],
+    });
+    otherSheet.addRow([
+      "月份",
+      "销售单位",
+      "日期",
+      "类别",
+      "说明",
+      "金额",
+      "是否每月",
+      "录入人",
+      "备注",
+    ]);
+    otherSheet.getRow(1).font = { bold: true };
+    for (const d of incomeDetail) {
+      for (const r of d.unitIncomeRecords) {
+        if (r.items.length === 0) {
+          otherSheet.addRow([
+            monthLabel,
+            d.unit.name,
+            r.date || "",
+            "",
+            "",
+            r.totalAmount,
+            r.isRecurring ? "是" : "否",
+            r.createdBy || "",
+            r.remark || "",
+          ]);
+          continue;
+        }
+        for (const item of r.items) {
+          otherSheet.addRow([
+            monthLabel,
+            d.unit.name,
+            r.date || "",
+            item.category || "",
+            item.description || "",
+            item.amount,
+            r.isRecurring ? "是" : "否",
+            r.createdBy || "",
+            r.remark || "",
+          ]);
+        }
+      }
+    }
+
+    for (const sheet of [summarySheet, salesSheet, otherSheet]) {
+      sheet.columns.forEach((col) => {
+        let max = 10;
+        col.eachCell?.({ includeEmpty: true }, (cell) => {
+          const len = String(cell.value ?? "").length;
+          if (len > max) max = len;
+        });
+        col.width = Math.min(28, Math.max(10, max + 2));
+      });
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `收入明细与结算_${monthLabel}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   function toggleCostRow(unitId: string) {
     setExpandedCostRows((prev) => {
@@ -1121,14 +1283,26 @@ unitIds,
 
       {/* ===================== 收入明细与结算 ===================== */}
       <Card id="section-profit-income" className="mb-6 scroll-mt-20">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Receipt className="h-5 w-5 text-emerald-600" />
-            收入明细与结算
-          </CardTitle>
-          <CardDescription>
-            业绩结算可在此调整；其他收入请在「成本与收入录入」记账，本表只汇总
-          </CardDescription>
+        <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+          <div className="space-y-1.5">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Receipt className="h-5 w-5 text-emerald-600" />
+              收入明细与结算
+            </CardTitle>
+            <CardDescription>
+              业绩结算可在此调整；其他收入请在「成本与收入录入」记账，本表只汇总
+            </CardDescription>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            onClick={() => void handleExportIncomeDetail()}
+          >
+            <Download className="mr-1.5 h-4 w-4" />
+            导出明细
+          </Button>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
