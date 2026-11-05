@@ -1267,7 +1267,7 @@ export default function PersonnelPage() {
               </div>
             ) : (
               <div className="space-y-2">
-                {filteredPersonnel.map((person) => {
+                {displayedPersonnel.map((person) => {
                   const st = commissionStatusByPersonId[person.id]
                   const names = st?.missingNames || []
                   return (
