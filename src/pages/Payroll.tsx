@@ -307,7 +307,8 @@ export default function Payroll() {
         specialAdditional: tax.specialAdditional,
         incomeTax: tax.incomeTax,
         payableSnapshot: row.payable,
-        // 冻结本月 C / B，供下月只读结转（不改写历史手工）
+        // 冻结本月税基 / C / B，供下月只读结转（不改写历史手工）
+        cumulativeTaxBaseSnapshot: tax.cumulativeTaxBase,
         taxableIncomeSnapshot: tax.taxable,
         taxPaidBeforeSnapshot: tax.cumulativeTaxPaidBefore,
       }
@@ -1473,15 +1474,29 @@ export default function Payroll() {
                                       </div>
                                     </>
                                   ) : (
-                                    <div
-                                      className="text-right tabular-nums"
-                                      title="上月累计扣税基数 + 上月应纳税所得额 C"
-                                    >
-                                      {money(row.cumulativeTaxBase || 0)}
-                                      <div className="mt-1 text-[10px] text-muted-foreground">
-                                        上月税基+上月C
-                                      </div>
-                                    </div>
+                                    (() => {
+                                      const carry = getIitCarryFromPriorMonth({
+                                        person,
+                                        yearMonth,
+                                      })
+                                      return (
+                                        <div
+                                          className="text-right tabular-nums"
+                                          title={
+                                            carry
+                                              ? `${carry.priorYm}税基 ${money(carry.priorTaxBase)} + C ${money(carry.priorC)}`
+                                              : '上月税基 + 上月C'
+                                          }
+                                        >
+                                          {money(row.cumulativeTaxBase || 0)}
+                                          <div className="mt-1 text-[10px] text-muted-foreground leading-snug">
+                                            {carry
+                                              ? `税基 ${money(carry.priorTaxBase)}+C ${money(carry.priorC)}`
+                                              : '上月税基+上月C'}
+                                          </div>
+                                        </div>
+                                      )
+                                    })()
                                   )}
                                 </TableCell>
                                 <TableCell className="bg-violet-50/40">

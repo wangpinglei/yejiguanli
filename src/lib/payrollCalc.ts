@@ -66,9 +66,14 @@ export interface PayrollMonthEntry {
   payableSnapshot?: number
   /**
    * 保存时本月采用的应纳税所得额 C（含手工覆盖）。
-   * 下月累计扣税基数只读取此值，不重算、不改写本月。
+   * 下月结转只读取，不重算、不改写本月。
    */
   taxableIncomeSnapshot?: number
+  /**
+   * 保存时本月采用的累计扣税基数。
+   * 下月税基 = 此值 + 上月 C。
+   */
+  cumulativeTaxBaseSnapshot?: number
   /**
    * 保存时本月采用的已预缴个税 B。
    * 下月 B = 此值 + 本月本期个税（有效值）。
@@ -331,6 +336,11 @@ export function normalizePayrollEntry(
       raw.taxableIncomeSnapshot === undefined || raw.taxableIncomeSnapshot === null
         ? undefined
         : Number(raw.taxableIncomeSnapshot) || 0,
+    cumulativeTaxBaseSnapshot:
+      raw.cumulativeTaxBaseSnapshot === undefined
+      || raw.cumulativeTaxBaseSnapshot === null
+        ? undefined
+        : Number(raw.cumulativeTaxBaseSnapshot) || 0,
     taxPaidBeforeSnapshot:
       raw.taxPaidBeforeSnapshot === undefined || raw.taxPaidBeforeSnapshot === null
         ? undefined

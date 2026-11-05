@@ -151,9 +151,39 @@ function resolvePriorMonthTaxableC(options: {
   return roundMoney(prevTaxBase + prevPay - prevSocial - prevHousing - prevSpecial)
 }
 
+/** 上月工资表中的累计扣税基数（快照优先，与 10 月表展示一致） */
+function resolveMonthTaxBase(options: {
+  person: Personnel
+  yearMonth: string
+  opening: IitCycleOpening | null
+  throughYm?: string
+}): number {
+  const { person, yearMonth, opening, throughYm } = options
+  const priors = listCarryPriorMonths(yearMonth, opening ? throughYm : undefined)
+  const entry = loadPayrollEntries(yearMonth)[person.id]
+  if (
+    entry
+    && entry.cumulativeTaxBaseSnapshot != null
+    && Number.isFinite(Number(entry.cumulativeTaxBaseSnapshot))
+  ) {
+    return roundMoney(Number(entry.cumulativeTaxBaseSnapshot) || 0)
+  }
+  // 期初后首月：与表上「累计扣税基数/本月税基」一致 = 期初税基
+  if (priors.length === 0) {
+    return roundMoney(opening?.taxBase ?? 0)
+  }
+  // 无快照时再按结转公式回推（不写回）
+  return resolveCumulativeTaxBaseFromPriorC({
+    person,
+    yearMonth,
+    opening,
+    throughYm,
+  })
+}
+
 /**
  * 本月累计扣税基数 = 上月累计扣税基数 + 上月应纳税所得额 C。
- * 例：11 月税基 = 10 月税基 + 10 月 C；首月（10 月）= 期初税基。
+ * 例：11 月税基 = 10 月表「累计扣税基数」+ 10 月表「应纳税所得额 C」。
  */
 function resolveCumulativeTaxBaseFromPriorC(options: {
   person: Personnel
@@ -169,7 +199,7 @@ function resolveCumulativeTaxBaseFromPriorC(options: {
 
   const prevYm = priors[priors.length - 1]
   const prevEntry = loadPayrollEntries(prevYm)[person.id]
-  const prevTaxBase = resolveCumulativeTaxBaseFromPriorC({
+  const prevTaxBase = resolveMonthTaxBase({
     person,
     yearMonth: prevYm,
     opening,
@@ -411,11 +441,17 @@ export function resolvePayrollTax(options: {
   }
 }
 
-/** 结转拆解：上月 B、上月本期个税（供 11 月等界面核对） */
+/** 结转拆解：上月 B/本期个税、上月税基/C（供 11 月等界面核对） */
 export function getIitCarryFromPriorMonth(options: {
   person: Personnel
   yearMonth: string
-}): { priorYm: string; priorB: number; priorPeriodTax: number } | null {
+}): {
+  priorYm: string
+  priorB: number
+  priorPeriodTax: number
+  priorTaxBase: number
+  priorC: number
+} | null {
   const { person, yearMonth } = options
   if (!shouldUseIitCycleOpening(yearMonth)) return null
   const profile = loadTaxProfile(
@@ -439,10 +475,24 @@ export function getIitCarryFromPriorMonth(options: {
     throughYm,
   })
   const priorPeriodTax = priorEntry ? getEffectiveIncomeTax(priorEntry) : 0
+  const priorTaxBase = resolveMonthTaxBase({
+    person,
+    yearMonth: priorYm,
+    opening,
+    throughYm,
+  })
+  const priorC = resolvePriorMonthTaxableC({
+    person,
+    prevYm: priorYm,
+    prevTaxBase: priorTaxBase,
+    prevEntry: priorEntry,
+  })
   return {
     priorYm,
     priorB: roundMoney(priorB),
     priorPeriodTax: roundMoney(priorPeriodTax),
+    priorTaxBase: roundMoney(priorTaxBase),
+    priorC: roundMoney(priorC),
   }
 }
 
