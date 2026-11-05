@@ -491,27 +491,34 @@ export default function PersonnelPage() {
     })
   }
 
+  /** 展示优先级：在岗内部 → 在岗分销/非内部 → 离职 */
+  function getPersonnelDisplayRank(p: Personnel): number {
+    if (!isOnDutyPerson(p)) return 2
+    if (!isInternalEmployeePerson(p)) return 1
+    return 0
+  }
+
   const displayedPersonnel = useMemo(() => {
     const list = [...filteredPersonnel]
-    if (salesSortOrder !== 'none') {
-      const dir = salesSortOrder === 'desc' ? -1 : 1
-      list.sort((a, b) => {
+    list.sort((a, b) => {
+      const ra = getPersonnelDisplayRank(a)
+      const rb = getPersonnelDisplayRank(b)
+      if (ra !== rb) return ra - rb
+
+      if (salesSortOrder !== 'none') {
+        const dir = salesSortOrder === 'desc' ? -1 : 1
         const ta = getPersonnelSales(a.id).total
         const tb = getPersonnelSales(b.id).total
-        if (ta === tb) return a.name.localeCompare(b.name, 'zh')
-        return (ta - tb) * dir
-      })
-      return list
-    }
-    list.sort((a, b) => {
-      const aOn = isOnDutyPerson(a)
-      const bOn = isOnDutyPerson(b)
-      if (aOn !== bOn) return aOn ? -1 : 1
-      if (!aOn && !bOn) {
+        if (ta !== tb) return (ta - tb) * dir
+      }
+
+      // 离职组：按离职日近→远
+      if (ra === 2) {
         const da = (a.resignDate || '').slice(0, 10)
         const db = (b.resignDate || '').slice(0, 10)
         if (da !== db) return db.localeCompare(da)
       }
+
       return a.name.localeCompare(b.name, 'zh')
     })
     return list
