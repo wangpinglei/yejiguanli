@@ -112,10 +112,42 @@ function sumPriorFromSnapshots(
   }
 }
 
-/** 读取上月已落盘的 C（不重算、不写回上月） */
+type PriorActivityEntry = {
+  payableSnapshot?: number
+  incomeTax?: number
+  incomeTaxOverride?: number | null
+}
+
+/** 上月录入是否有应发/个税信号（用于识别脏的 0 快照） */
+function hasPriorMonthActivity(
+  prevEntry: PriorActivityEntry | undefined,
+): boolean {
+  if (!prevEntry) return false
+  if ((Number(prevEntry.payableSnapshot) || 0) > 0) return true
+  if (
+    getEffectiveIncomeTax({
+      incomeTax: Number(prevEntry.incomeTax) || 0,
+      incomeTaxOverride:
+        prevEntry.incomeTaxOverride === undefined
+          ? null
+          : prevEntry.incomeTaxOverride,
+    }) > 0
+  ) {
+    return true
+  }
+  return false
+}
+
+/**
+ * 读取上月已落盘的 C。
+ * 手工覆盖始终有效；快照为 0 且上月有应发/个税时视为脏数据（同 B 的 0 快照问题）。
+ */
 function readPriorMonthTaxableC(prevEntry: {
   taxableIncomeOverride?: number | null
   taxableIncomeSnapshot?: number
+  payableSnapshot?: number
+  incomeTax?: number
+  incomeTaxOverride?: number | null
 } | undefined): number | null {
   if (!prevEntry) return null
   if (
@@ -128,30 +160,43 @@ function readPriorMonthTaxableC(prevEntry: {
     prevEntry.taxableIncomeSnapshot != null
     && Number.isFinite(Number(prevEntry.taxableIncomeSnapshot))
   ) {
-    return roundMoney(Number(prevEntry.taxableIncomeSnapshot) || 0)
+    const snap = roundMoney(Number(prevEntry.taxableIncomeSnapshot) || 0)
+    // 脏快照 0：忽略，改为按上月表重算
+    if (snap === 0 && hasPriorMonthActivity(prevEntry)) return null
+    return snap
   }
   return null
 }
 
-/** 拼上月 C：手工/快照优先；否则 = 上月税基 + 应发 − 社保 − 公积金 − 专项 */
+/** 按上月工资表口径取 C（与 10 月表「应纳税所得额 C」一致） */
 function resolvePriorMonthTaxableC(options: {
   person: Personnel
   prevYm: string
   prevTaxBase: number
   prevEntry: ReturnType<typeof loadPayrollEntries>[string] | undefined
 }): number {
-  const { prevTaxBase, prevEntry } = options
+  const { person, prevYm, prevTaxBase, prevEntry } = options
   const frozenC = readPriorMonthTaxableC(prevEntry)
   if (frozenC != null) return frozenC
   if (!prevEntry) return 0
-  const prevPay = Number(prevEntry.payableSnapshot) || 0
+  // 与上月表展示一致：走 resolvePayrollTax（尊重手工 C，忽略脏 0 快照）
+  const prevPayable = Number(prevEntry.payableSnapshot) || 0
+  const prevTax = resolvePayrollTax({
+    person,
+    yearMonth: prevYm,
+    payable: prevPayable,
+    entry: prevEntry,
+  })
+  if (Number.isFinite(prevTax.taxable)) {
+    return roundMoney(prevTax.taxable)
+  }
   const prevSocial = Number(prevEntry.socialInsurancePersonal) || 0
   const prevHousing = Number(prevEntry.housingFundPersonal) || 0
   const prevSpecial = Number(prevEntry.specialAdditional) || 0
-  return roundMoney(prevTaxBase + prevPay - prevSocial - prevHousing - prevSpecial)
+  return roundMoney(prevTaxBase + prevPayable - prevSocial - prevHousing - prevSpecial)
 }
 
-/** 上月工资表中的累计扣税基数（快照优先，与 10 月表展示一致） */
+/** 上月工资表中的累计扣税基数（与 10 月表展示一致） */
 function resolveMonthTaxBase(options: {
   person: Personnel
   yearMonth: string
@@ -166,13 +211,20 @@ function resolveMonthTaxBase(options: {
     && entry.cumulativeTaxBaseSnapshot != null
     && Number.isFinite(Number(entry.cumulativeTaxBaseSnapshot))
   ) {
-    return roundMoney(Number(entry.cumulativeTaxBaseSnapshot) || 0)
-  }
-  // 期初后首月：与表上「累计扣税基数/本月税基」一致 = 期初税基
-  if (priors.length === 0) {
+    const snap = roundMoney(Number(entry.cumulativeTaxBaseSnapshot) || 0)
+    // 非 0 快照直接用；0 且上月有活动视为脏快照，回退
+    if (snap !== 0) return snap
+    if (!hasPriorMonthActivity(entry) && priors.length === 0) {
+      return roundMoney(opening?.taxBase ?? 0)
+    }
+    if (priors.length === 0) {
+      return roundMoney(opening?.taxBase ?? 0)
+    }
+  } else if (priors.length === 0) {
+    // 期初后首月：与表上「累计扣税基数/本月税基」一致 = 期初税基
     return roundMoney(opening?.taxBase ?? 0)
   }
-  // 无快照时再按结转公式回推（不写回）
+  // 无可用快照时再按结转公式回推（不写回）
   return resolveCumulativeTaxBaseFromPriorC({
     person,
     yearMonth,
@@ -199,6 +251,18 @@ function resolveCumulativeTaxBaseFromPriorC(options: {
 
   const prevYm = priors[priors.length - 1]
   const prevEntry = loadPayrollEntries(prevYm)[person.id]
+  // 优先直接对齐上月表当前展示（税基、C），避免脏 0 快照把结转打成「仅税基」
+  if (prevEntry) {
+    const prevPayable = Number(prevEntry.payableSnapshot) || 0
+    const prevTax = resolvePayrollTax({
+      person,
+      yearMonth: prevYm,
+      payable: prevPayable,
+      entry: prevEntry,
+    })
+    return roundMoney(prevTax.cumulativeTaxBase + prevTax.taxable)
+  }
+
   const prevTaxBase = resolveMonthTaxBase({
     person,
     yearMonth: prevYm,
@@ -475,18 +539,33 @@ export function getIitCarryFromPriorMonth(options: {
     throughYm,
   })
   const priorPeriodTax = priorEntry ? getEffectiveIncomeTax(priorEntry) : 0
-  const priorTaxBase = resolveMonthTaxBase({
-    person,
-    yearMonth: priorYm,
-    opening,
-    throughYm,
-  })
-  const priorC = resolvePriorMonthTaxableC({
-    person,
-    prevYm: priorYm,
-    prevTaxBase: priorTaxBase,
-    prevEntry: priorEntry,
-  })
+  // 与结转公式同一口径：上月表税基 + 上月 C
+  let priorTaxBase = 0
+  let priorC = 0
+  if (priorEntry) {
+    const priorPayable = Number(priorEntry.payableSnapshot) || 0
+    const priorTax = resolvePayrollTax({
+      person,
+      yearMonth: priorYm,
+      payable: priorPayable,
+      entry: priorEntry,
+    })
+    priorTaxBase = priorTax.cumulativeTaxBase
+    priorC = priorTax.taxable
+  } else {
+    priorTaxBase = resolveMonthTaxBase({
+      person,
+      yearMonth: priorYm,
+      opening,
+      throughYm,
+    })
+    priorC = resolvePriorMonthTaxableC({
+      person,
+      prevYm: priorYm,
+      prevTaxBase: priorTaxBase,
+      prevEntry: priorEntry,
+    })
+  }
   return {
     priorYm,
     priorB: roundMoney(priorB),
