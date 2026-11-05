@@ -255,40 +255,52 @@ export default function MTeamMgmtCommissionPanel({ selectedMonth }: Props) {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
-          <Card>
-            <CardContent className="p-2 space-y-1">
-              {units.map((u) => {
-                const hasRule = teamMgmtCommissionRules.some((r) => r.salesUnitId === u.id)
-                const active = u.id === activeUnitId
-                return (
-                  <button
-                    key={u.id}
-                    type="button"
-                    className={`w-full flex items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
-                      active
-                        ? 'bg-emerald-100 text-emerald-900 font-medium'
-                        : 'hover:bg-muted/60'
-                    }`}
-                    onClick={() => {
-                      if (dirty && activeUnitId !== u.id) {
-                        if (!confirm('当前单位有未保存修改，切换将丢弃，是否继续？')) return
-                      }
-                      loadUnit(u.id)
-                    }}
-                  >
-                    <Building2 className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate flex-1">{u.name}</span>
-                    {hasRule && (
-                      <Badge className="bg-emerald-600 text-white text-[10px] px-1.5 py-0">
-                        已配
-                      </Badge>
-                    )}
-                  </button>
-                )
-              })}
-            </CardContent>
-          </Card>
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Label className="shrink-0 text-sm text-muted-foreground">销售单位</Label>
+            <Select
+              value={activeUnitId || undefined}
+              onValueChange={(id) => {
+                if (dirty && activeUnitId !== id) {
+                  if (!confirm('当前单位有未保存修改，切换将丢弃，是否继续？')) return
+                }
+                loadUnit(id)
+              }}
+            >
+              <SelectTrigger className="w-full max-w-[280px] bg-white">
+                <span className="flex min-w-0 items-center gap-2">
+                  <Building2 className="h-3.5 w-3.5 shrink-0 text-emerald-700" />
+                  <SelectValue placeholder="选择单位" />
+                </span>
+              </SelectTrigger>
+              <SelectContent className="max-h-[min(16rem,var(--radix-select-content-available-height))]">
+                {units.map((u) => {
+                  const hasRule = teamMgmtCommissionRules.some((r) => r.salesUnitId === u.id)
+                  return (
+                    <SelectItem key={u.id} value={u.id}>
+                      <span className="flex items-center gap-2">
+                        <span className="truncate">{u.name}</span>
+                        {hasRule ? (
+                          <Badge className="bg-emerald-600 text-white text-[10px] px-1.5 py-0">
+                            已配
+                          </Badge>
+                        ) : null}
+                      </span>
+                    </SelectItem>
+                  )
+                })}
+              </SelectContent>
+            </Select>
+            {existingRule ? (
+              <Badge className="bg-emerald-600 text-white text-[10px] px-1.5 py-0">
+                已配
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                未配置
+              </Badge>
+            )}
+          </div>
 
           <div className="space-y-4">
             {preview && (
