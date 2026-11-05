@@ -8,11 +8,17 @@ import {
   formatCommissionRewardPeriod,
   groupCommissionRewardHits,
 } from '@/lib/commissionReward'
+import {
+  formatPersonalCommissionTiersLabel,
+  hasPersonalCommissionTiers,
+  normalizePersonalCommissionTiers,
+} from '@/lib/personalCommissionTiers'
 import type { SalesUnit, ProductPersonCommission, Personnel, Product, UnitProductSettlement } from '@/types'
 import {
   Building2, Package, Pencil, Users, Layers, Calculator,
   ChevronDown, ChevronRight, ListOrdered,
 } from 'lucide-react'
+import MPersonalCommissionTiersEditor from '@/pages/CostManagement/components/m-personal-commission-tiers-editor'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -39,6 +45,7 @@ const EMPTY_PERSON_COMMISSION = {
   personalCommissionRate: 0,
   personalCommissionAmount: 0,
   personalCommissionThreshold: 0,
+  personalCommissionTiers: [] as { minSalesAmount: number; ratePercent: number }[],
   personalCommissionCondition: '',
   internalSalesCommissionType: 'percentage' as PersonalCommissionType,
   internalSalesCommissionRate: 0,
@@ -261,6 +268,7 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
         ...ppc,
         personalCommissionType: ppc.personalCommissionType || defaultType,
         personalCommissionAmount: ppc.personalCommissionAmount || 0,
+        personalCommissionTiers: normalizePersonalCommissionTiers(ppc.personalCommissionTiers),
         internalSalesCommissionRecipientId: ppc.internalSalesCommissionRecipientId || '',
         rewardAmount: ppc.rewardAmount || 0,
         rewardFrom: ppc.rewardFrom || '',
@@ -291,6 +299,7 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
         personalCommissionRate: ppcForm.personalCommissionRate || 0,
         personalCommissionAmount: ppcForm.personalCommissionAmount || 0,
         personalCommissionThreshold: ppcForm.personalCommissionThreshold || 0,
+        personalCommissionTiers: normalizePersonalCommissionTiers(ppcForm.personalCommissionTiers),
         personalCommissionCondition: ppcForm.personalCommissionCondition,
         internalSalesCommissionType: ppcForm.internalSalesCommissionType || 'percentage',
         internalSalesCommissionRate: ppcForm.internalSalesCommissionRate || 0,
@@ -338,6 +347,7 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
           personalCommissionRate: ppcForm.personalCommissionRate || 0,
           personalCommissionAmount: ppcForm.personalCommissionAmount || 0,
           personalCommissionThreshold: ppcForm.personalCommissionThreshold || 0,
+          personalCommissionTiers: normalizePersonalCommissionTiers(ppcForm.personalCommissionTiers),
           personalCommissionCondition: ppcForm.personalCommissionCondition,
           internalSalesCommissionType: ppcForm.internalSalesCommissionType || 'percentage',
           internalSalesCommissionRate: ppcForm.internalSalesCommissionRate || 0,
@@ -521,6 +531,7 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
               ppc?.personalCommissionType === 'fixed' && (ppc.personalCommissionAmount || 0) > 0
             return (
               (ppc?.personalCommissionRate || 0) > 0 ||
+              hasPersonalCommissionTiers(ppc?.personalCommissionTiers) ||
               hasPersonalFixed ||
               (ppc?.rewardAmount || 0) > 0
             )
@@ -599,6 +610,7 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                             && (r.ppc.personalCommissionAmount || 0) > 0
                           return (
                             (r.ppc?.personalCommissionRate || 0) > 0 ||
+                            hasPersonalCommissionTiers(r.ppc?.personalCommissionTiers) ||
                             hasPersonalFixed ||
                             (r.ppc?.rewardAmount || 0) > 0
                           )
@@ -663,10 +675,16 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                                   <TableBody>
                                     {people.map(({ person, ppc, personSales }) => {
                                       const isPersonalFixed = ppc?.personalCommissionType === 'fixed'
+                                      const hasTiers = hasPersonalCommissionTiers(
+                                        ppc?.personalCommissionTiers,
+                                      )
                                       const hasPersonal = isPersonalFixed
                                         ? (ppc?.personalCommissionAmount || 0) > 0
-                                        : (ppc?.personalCommissionRate || 0) > 0
+                                        : hasTiers || (ppc?.personalCommissionRate || 0) > 0
                                       const hasReward = (ppc?.rewardAmount || 0) > 0
+                                      const tierLabel = formatPersonalCommissionTiersLabel(
+                                        ppc?.personalCommissionTiers,
+                                      )
                                       return (
                                         <TableRow key={person.id}>
                                           <TableCell>
@@ -682,10 +700,15 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                                           </TableCell>
                                           <TableCell className="text-right">
                                             {hasPersonal ? (
-                                              <Badge className="bg-orange-100 text-orange-700">
+                                              <Badge
+                                                className="bg-orange-100 text-orange-700 max-w-[220px] whitespace-normal text-left"
+                                                title={hasTiers ? tierLabel : undefined}
+                                              >
                                                 {isPersonalFixed
                                                   ? `${formatCurrency(ppc!.personalCommissionAmount || 0)}/件`
-                                                  : `${ppc!.personalCommissionRate}%`}
+                                                  : hasTiers
+                                                    ? `梯度 ${tierLabel}`
+                                                    : `${ppc!.personalCommissionRate}%`}
                                               </Badge>
                                             ) : (
                                               <span className="text-xs text-muted-foreground">
@@ -872,37 +895,45 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                   </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <Label className="text-xs">提成比例 (%)</Label>
-                    <Input
-                      type="number"
-                      step="0.1"
-                      value={ppcForm.personalCommissionRate}
-                      onChange={(e) =>
-                        setPpcForm({
-                          ...ppcForm,
-                          personalCommissionRate: Number(e.target.value),
-                        })
-                      }
-                      placeholder="如：3"
-                    />
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <Label className="text-xs">提成比例 (%)</Label>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        value={ppcForm.personalCommissionRate}
+                        onChange={(e) =>
+                          setPpcForm({
+                            ...ppcForm,
+                            personalCommissionRate: Number(e.target.value),
+                          })
+                        }
+                        placeholder="如：3"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">起算门槛 (¥)</Label>
+                      <Input
+                        type="number"
+                        value={ppcForm.personalCommissionThreshold}
+                        onChange={(e) =>
+                          setPpcForm({
+                            ...ppcForm,
+                            personalCommissionThreshold: Number(e.target.value),
+                          })
+                        }
+                        placeholder="如：50000"
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">起算门槛 (¥)</Label>
-                    <Input
-                      type="number"
-                      value={ppcForm.personalCommissionThreshold}
-                      onChange={(e) =>
-                        setPpcForm({
-                          ...ppcForm,
-                          personalCommissionThreshold: Number(e.target.value),
-                        })
-                      }
-                      placeholder="如：50000"
-                    />
-                  </div>
-                </div>
+                  <MPersonalCommissionTiersEditor
+                    tiers={ppcForm.personalCommissionTiers}
+                    onChange={(personalCommissionTiers) =>
+                      setPpcForm({ ...ppcForm, personalCommissionTiers })
+                    }
+                  />
+                </>
               )}
               <div className="space-y-1">
                 <Label className="text-xs">发放条件</Label>
@@ -919,7 +950,9 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
               </div>
               {ppcForm.personalCommissionType !== 'fixed' && (
                 <p className="text-xs text-muted-foreground">
-                  计算公式：(个人该产品销售额 - 起算门槛) × 提成比例%
+                  {hasPersonalCommissionTiers(ppcForm.personalCommissionTiers)
+                    ? '当前启用梯度：按月累计业绩整段定档，全部×命中档比例'
+                    : '计算公式：(个人该产品销售额 - 起算门槛) × 提成比例%'}
                 </p>
               )}
             </div>
@@ -1287,37 +1320,45 @@ export default function MSalesCommissionPanel({ selectedMonth }: Props) {
                   />
                 </div>
               ) : (
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <Label className="text-xs">提成比例 (%)</Label>
-                    <Input
-                      type="number"
-                      step="0.1"
-                      value={ppcForm.personalCommissionRate}
-                      onChange={(e) =>
-                        setPpcForm({
-                          ...ppcForm,
-                          personalCommissionRate: Number(e.target.value),
-                        })
-                      }
-                      placeholder="如：3"
-                    />
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <Label className="text-xs">提成比例 (%)</Label>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        value={ppcForm.personalCommissionRate}
+                        onChange={(e) =>
+                          setPpcForm({
+                            ...ppcForm,
+                            personalCommissionRate: Number(e.target.value),
+                          })
+                        }
+                        placeholder="如：3"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">起算门槛 (¥)</Label>
+                      <Input
+                        type="number"
+                        value={ppcForm.personalCommissionThreshold}
+                        onChange={(e) =>
+                          setPpcForm({
+                            ...ppcForm,
+                            personalCommissionThreshold: Number(e.target.value),
+                          })
+                        }
+                        placeholder="如：50000"
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">起算门槛 (¥)</Label>
-                    <Input
-                      type="number"
-                      value={ppcForm.personalCommissionThreshold}
-                      onChange={(e) =>
-                        setPpcForm({
-                          ...ppcForm,
-                          personalCommissionThreshold: Number(e.target.value),
-                        })
-                      }
-                      placeholder="如：50000"
-                    />
-                  </div>
-                </div>
+                  <MPersonalCommissionTiersEditor
+                    tiers={ppcForm.personalCommissionTiers}
+                    onChange={(personalCommissionTiers) =>
+                      setPpcForm({ ...ppcForm, personalCommissionTiers })
+                    }
+                  />
+                </>
               )}
               <div className="space-y-1">
                 <Label className="text-xs">发放条件</Label>

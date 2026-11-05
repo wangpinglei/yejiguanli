@@ -6,6 +6,7 @@ import {
   getFixedPayRatioInMonth,
   resolvePpcListForSaleDate,
 } from "@/lib/compensation";
+import { calcPersonalCommissionByTiers } from "@/lib/personalCommissionTiers";
 import {
   getPersonShareAmount,
   saleInvolvesPerson,
@@ -703,6 +704,17 @@ function calcCommissionForRecords(
       if (fields.type === "fixed") {
         total += qty * (fields.amount || 0);
         return;
+      }
+      // 个人提成：有可选梯度则月度整段定档；未设置则保持 (销售额−门槛)×比例
+      if (kind === "personal") {
+        const tiered = calcPersonalCommissionByTiers(
+          sales,
+          ppc.personalCommissionTiers,
+        );
+        if (tiered != null) {
+          total += tiered;
+          return;
+        }
       }
       if (sales > (fields.threshold || 0) && (fields.rate || 0) > 0) {
         total += (sales - fields.threshold) * (fields.rate / 100);

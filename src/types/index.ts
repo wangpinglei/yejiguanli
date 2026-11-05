@@ -525,6 +525,14 @@ export interface UnitProductSettlement {
   updatedAt?: string;
 }
 
+/** 个人提成：月度业绩梯度（整段定档） */
+export interface PersonalCommissionTier {
+  /** 当月该产品累计业绩下限（¥，含） */
+  minSalesAmount: number
+  /** 命中该档后，全部业绩适用的比例 % */
+  ratePercent: number
+}
+
 // 单位×产品×人员提成设置（每个销售人员在不同产品上的管理/个人提成）
 export interface ProductPersonCommission {
   id: string;
@@ -539,7 +547,13 @@ export interface ProductPersonCommission {
   personalCommissionType?: "percentage" | "fixed"; // 默认 percentage；结算为固定金额时默认 fixed
   personalCommissionRate: number; // %，percentage 时生效
   personalCommissionAmount?: number; // 每件提成 ¥，fixed 时生效
-  personalCommissionThreshold: number; // 起算门槛 ¥（仅 percentage）
+  personalCommissionThreshold: number; // 起算门槛 ¥（仅 percentage；有梯度时不用）
+  /**
+   * 可选月度业绩梯度（整段定档）。
+   * 未配置/空数组：仍用 personalCommissionRate + personalCommissionThreshold。
+   * 有配置：按当月该产品累计业绩命中最高档，全部×该档比例。
+   */
+  personalCommissionTiers?: PersonalCommissionTier[];
   personalCommissionCondition: string; // 条件描述
   /** 关联内部销售提成（不计入销售业额） */
   internalSalesCommissionType?: 'percentage' | 'fixed';

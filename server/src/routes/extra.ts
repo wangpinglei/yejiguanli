@@ -4,7 +4,7 @@ import {
   rowToIncomeRecord, rowToRevenueSettlement, rowToCostSettlement, rowToUnitProductSettlement,
   rowToProductPersonCommission, rowToCostChangeLog, rowToNotification,
   rowToMonthlyAdjustment, rowToPerformanceTarget, rowToPositionGroupLabel,
-  rowToTeamMgmtCommissionRule,
+  rowToTeamMgmtCommissionRule, serializePersonalCommissionTiersJson,
 } from "../db";
 import { authMiddleware } from "../auth";
 import {
@@ -353,11 +353,12 @@ router.post("/product-person-commissions/upsert", requireEditPermission, (req, r
   ).get(b.salesUnitId, b.productId, b.personnelId);
   const now = new Date().toISOString();
   if (existing) {
+    const tiersJson = serializePersonalCommissionTiersJson(b.personalCommissionTiers);
     db.prepare(`
       UPDATE product_person_commissions SET
         management_commission_rate=?, management_commission_threshold=?, management_commission_condition=?,
         personal_commission_type=?, personal_commission_rate=?, personal_commission_amount=?,
-        personal_commission_threshold=?, personal_commission_condition=?,
+        personal_commission_threshold=?, personal_commission_tiers=?, personal_commission_condition=?,
         internal_sales_commission_type=?, internal_sales_commission_rate=?, internal_sales_commission_amount=?,
         internal_sales_commission_threshold=?, internal_sales_commission_condition=?,
         internal_sales_commission_recipient_id=?,
@@ -367,7 +368,7 @@ router.post("/product-person-commissions/upsert", requireEditPermission, (req, r
       b.managementCommissionRate ?? 0, b.managementCommissionThreshold ?? 0, b.managementCommissionCondition || "",
       b.personalCommissionType === "fixed" ? "fixed" : "percentage",
       b.personalCommissionRate ?? 0, b.personalCommissionAmount ?? 0,
-      b.personalCommissionThreshold ?? 0, b.personalCommissionCondition || "",
+      b.personalCommissionThreshold ?? 0, tiersJson, b.personalCommissionCondition || "",
       b.internalSalesCommissionType === "fixed" ? "fixed" : "percentage",
       b.internalSalesCommissionRate ?? 0, b.internalSalesCommissionAmount ?? 0,
       b.internalSalesCommissionThreshold ?? 0, b.internalSalesCommissionCondition || "",
@@ -378,23 +379,24 @@ router.post("/product-person-commissions/upsert", requireEditPermission, (req, r
     return res.json(rowToProductPersonCommission(db.prepare("SELECT * FROM product_person_commissions WHERE id=?").get(existing.id)));
   }
   const id = generateId("ppc");
+  const tiersJson = serializePersonalCommissionTiersJson(b.personalCommissionTiers);
   db.prepare(`
     INSERT INTO product_person_commissions (
       id, sales_unit_id, product_id, personnel_id,
       management_commission_rate, management_commission_threshold, management_commission_condition,
       personal_commission_type, personal_commission_rate, personal_commission_amount,
-      personal_commission_threshold, personal_commission_condition,
+      personal_commission_threshold, personal_commission_tiers, personal_commission_condition,
       internal_sales_commission_type, internal_sales_commission_rate, internal_sales_commission_amount,
       internal_sales_commission_threshold, internal_sales_commission_condition,
       internal_sales_commission_recipient_id,
       reward_amount, reward_from, reward_to, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id, b.salesUnitId, b.productId, b.personnelId,
     b.managementCommissionRate ?? 0, b.managementCommissionThreshold ?? 0, b.managementCommissionCondition || "",
     b.personalCommissionType === "fixed" ? "fixed" : "percentage",
     b.personalCommissionRate ?? 0, b.personalCommissionAmount ?? 0,
-    b.personalCommissionThreshold ?? 0, b.personalCommissionCondition || "",
+    b.personalCommissionThreshold ?? 0, tiersJson, b.personalCommissionCondition || "",
     b.internalSalesCommissionType === "fixed" ? "fixed" : "percentage",
     b.internalSalesCommissionRate ?? 0, b.internalSalesCommissionAmount ?? 0,
     b.internalSalesCommissionThreshold ?? 0, b.internalSalesCommissionCondition || "",
@@ -414,7 +416,7 @@ router.post("/product-person-commissions/batch", requireEditPermission, (req, re
         salesUnitId, productId, personnelId,
         managementCommissionRate, managementCommissionThreshold, managementCommissionCondition,
         personalCommissionType, personalCommissionRate, personalCommissionAmount,
-        personalCommissionThreshold, personalCommissionCondition,
+        personalCommissionThreshold, personalCommissionTiers, personalCommissionCondition,
         internalSalesCommissionType, internalSalesCommissionRate, internalSalesCommissionAmount,
         internalSalesCommissionThreshold, internalSalesCommissionCondition,
         internalSalesCommissionRecipientId,
@@ -427,12 +429,13 @@ router.post("/product-person-commissions/batch", requireEditPermission, (req, re
       const now = new Date().toISOString();
       const typeVal = personalCommissionType === "fixed" ? "fixed" : "percentage";
       const internalTypeVal = internalSalesCommissionType === "fixed" ? "fixed" : "percentage";
+      const tiersJson = serializePersonalCommissionTiersJson(personalCommissionTiers);
       if (existing) {
         db.prepare(`
           UPDATE product_person_commissions SET
             management_commission_rate=?, management_commission_threshold=?, management_commission_condition=?,
             personal_commission_type=?, personal_commission_rate=?, personal_commission_amount=?,
-            personal_commission_threshold=?, personal_commission_condition=?,
+            personal_commission_threshold=?, personal_commission_tiers=?, personal_commission_condition=?,
             internal_sales_commission_type=?, internal_sales_commission_rate=?, internal_sales_commission_amount=?,
             internal_sales_commission_threshold=?, internal_sales_commission_condition=?,
             internal_sales_commission_recipient_id=?,
@@ -441,7 +444,7 @@ router.post("/product-person-commissions/batch", requireEditPermission, (req, re
         `).run(
           managementCommissionRate ?? 0, managementCommissionThreshold ?? 0, managementCommissionCondition || "",
           typeVal, personalCommissionRate ?? 0, personalCommissionAmount ?? 0,
-          personalCommissionThreshold ?? 0, personalCommissionCondition || "",
+          personalCommissionThreshold ?? 0, tiersJson, personalCommissionCondition || "",
           internalTypeVal, internalSalesCommissionRate ?? 0, internalSalesCommissionAmount ?? 0,
           internalSalesCommissionThreshold ?? 0, internalSalesCommissionCondition || "",
           internalSalesCommissionRecipientId || "",
@@ -458,17 +461,17 @@ router.post("/product-person-commissions/batch", requireEditPermission, (req, re
             id, sales_unit_id, product_id, personnel_id,
             management_commission_rate, management_commission_threshold, management_commission_condition,
             personal_commission_type, personal_commission_rate, personal_commission_amount,
-            personal_commission_threshold, personal_commission_condition,
+            personal_commission_threshold, personal_commission_tiers, personal_commission_condition,
             internal_sales_commission_type, internal_sales_commission_rate, internal_sales_commission_amount,
             internal_sales_commission_threshold, internal_sales_commission_condition,
             internal_sales_commission_recipient_id,
             reward_amount, reward_from, reward_to, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           id, salesUnitId, productId, personnelId,
           managementCommissionRate ?? 0, managementCommissionThreshold ?? 0, managementCommissionCondition || "",
           typeVal, personalCommissionRate ?? 0, personalCommissionAmount ?? 0,
-          personalCommissionThreshold ?? 0, personalCommissionCondition || "",
+          personalCommissionThreshold ?? 0, tiersJson, personalCommissionCondition || "",
           internalTypeVal, internalSalesCommissionRate ?? 0, internalSalesCommissionAmount ?? 0,
           internalSalesCommissionThreshold ?? 0, internalSalesCommissionCondition || "",
           internalSalesCommissionRecipientId || "",

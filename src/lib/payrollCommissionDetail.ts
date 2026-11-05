@@ -14,6 +14,10 @@ import {
 } from '@/lib/commissionReward'
 import { roundMoney } from '@/lib/format'
 import {
+  formatPersonalCommissionTiersLabel,
+  hasPersonalCommissionTiers,
+} from '@/lib/personalCommissionTiers'
+import {
   calculateMonthlySalary,
   filterByMonth,
   getPersonalSales,
@@ -81,12 +85,15 @@ function formatRateLabel(opts: {
   rate?: number
   amount?: number
   threshold?: number
+  tiersLabel?: string
   rewardAmount?: number
 }): string {
   const type = opts.type || 'percentage'
   const parts: string[] = []
   if (type === 'fixed') {
     parts.push(`¥${Number(opts.amount || 0).toFixed(2)}/件`)
+  } else if (opts.tiersLabel) {
+    parts.push(`月度梯度 ${opts.tiersLabel}`)
   } else {
     const rate = Number(opts.rate || 0)
     const threshold = opts.threshold || 0
@@ -153,6 +160,9 @@ function buildSaleRecordLines(options: {
         rate: ppc.personalCommissionRate,
         amount: ppc.personalCommissionAmount,
         threshold: ppc.personalCommissionThreshold,
+        tiersLabel: hasPersonalCommissionTiers(ppc.personalCommissionTiers)
+          ? formatPersonalCommissionTiersLabel(ppc.personalCommissionTiers)
+          : undefined,
         rewardAmount: ppc.rewardAmount,
       })
     } else {

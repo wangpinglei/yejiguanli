@@ -303,6 +303,7 @@ function initSchema() {
       management_commission_condition TEXT DEFAULT '',
       personal_commission_rate REAL DEFAULT 0,
       personal_commission_threshold REAL DEFAULT 0,
+      personal_commission_tiers TEXT DEFAULT '',
       personal_commission_condition TEXT DEFAULT '',
       personal_commission_type TEXT DEFAULT 'percentage',
       personal_commission_amount REAL DEFAULT 0,
@@ -543,6 +544,7 @@ function initSchema() {
   ensureColumns("product_person_commissions", [
     { name: "personal_commission_type", ddl: "personal_commission_type TEXT DEFAULT 'percentage'" },
     { name: "personal_commission_amount", ddl: "personal_commission_amount REAL DEFAULT 0" },
+    { name: "personal_commission_tiers", ddl: "personal_commission_tiers TEXT DEFAULT ''" },
     { name: "reward_amount", ddl: "reward_amount REAL DEFAULT 0" },
     { name: "reward_from", ddl: "reward_from TEXT DEFAULT ''" },
     { name: "reward_to", ddl: "reward_to TEXT DEFAULT ''" },
@@ -2551,6 +2553,30 @@ export function rowToTeamMgmtCommissionRule(row: any) {
   };
 }
 
+/** 个人提成可选梯度 JSON 列 */
+export function serializePersonalCommissionTiersJson(tiers: unknown): string {
+  if (!Array.isArray(tiers) || tiers.length === 0) return "";
+  const list = tiers
+    .map((t: any) => ({
+      minSalesAmount: Math.max(0, Number(t?.minSalesAmount) || 0),
+      ratePercent: Math.max(0, Number(t?.ratePercent) || 0),
+    }))
+    .sort((a, b) => a.minSalesAmount - b.minSalesAmount);
+  return list.length > 0 ? JSON.stringify(list) : "";
+}
+
+function parsePersonalCommissionTiersJson(raw: unknown) {
+  const arr = Array.isArray(raw)
+    ? raw
+    : parseJsonArray(typeof raw === "string" ? raw : "");
+  return arr
+    .map((t: any) => ({
+      minSalesAmount: Math.max(0, Number(t?.minSalesAmount) || 0),
+      ratePercent: Math.max(0, Number(t?.ratePercent) || 0),
+    }))
+    .sort((a: any, b: any) => a.minSalesAmount - b.minSalesAmount);
+}
+
 export function rowToProductPersonCommission(row: any) {
   return {
     id: row.id,
@@ -2566,6 +2592,7 @@ export function rowToProductPersonCommission(row: any) {
     personalCommissionRate: row.personal_commission_rate || 0,
     personalCommissionAmount: row.personal_commission_amount || 0,
     personalCommissionThreshold: row.personal_commission_threshold || 0,
+    personalCommissionTiers: parsePersonalCommissionTiersJson(row.personal_commission_tiers),
     personalCommissionCondition: row.personal_commission_condition || "",
     internalSalesCommissionType: (row.internal_sales_commission_type === "fixed" ? "fixed" : "percentage") as
       | "percentage"

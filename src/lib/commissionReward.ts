@@ -1,4 +1,5 @@
 import { roundMoney } from '@/lib/format'
+import { calcPersonalCommissionByTiers } from '@/lib/personalCommissionTiers'
 import { isSaleDateInRange, toDateOnly } from '@/lib/settlement'
 import type { ProductPersonCommission, SalesRecord, SalesUnit } from '@/types'
 
@@ -84,8 +85,17 @@ export function calcSalePersonCommissionPreview(
   let base = 0
   if (ppc.personalCommissionType === 'fixed') {
     base = (sale.quantity || 0) * (ppc.personalCommissionAmount || 0)
-  } else if ((ppc.personalCommissionRate || 0) > 0) {
-    base = (sale.totalAmount || 0) * (ppc.personalCommissionRate / 100)
+  } else {
+    // 有梯度：单笔预览按本单金额估档（工资汇总仍按月累计整段定档）
+    const tiered = calcPersonalCommissionByTiers(
+      sale.totalAmount || 0,
+      ppc.personalCommissionTiers,
+    )
+    if (tiered != null) {
+      base = tiered
+    } else if ((ppc.personalCommissionRate || 0) > 0) {
+      base = (sale.totalAmount || 0) * (ppc.personalCommissionRate / 100)
+    }
   }
   return roundMoney(base + calcSaleCommissionReward(sale, ppc))
 }

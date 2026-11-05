@@ -2,8 +2,13 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useData } from '@/context/DataContext'
 import { formatCurrency } from '@/lib/format'
+import {
+  formatPersonalCommissionTiersLabel,
+  normalizePersonalCommissionTiers,
+} from '@/lib/personalCommissionTiers'
 import type { Personnel, Product, ProductPersonCommission, UnitProductSettlement } from '@/types'
 import { Layers, Package, Pencil, Percent, Plus, Trash2 } from 'lucide-react'
+import MPersonalCommissionTiersEditor from '@/pages/CostManagement/components/m-personal-commission-tiers-editor'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -27,6 +32,7 @@ const EMPTY_FORM = {
   personalCommissionRate: 0,
   personalCommissionAmount: 0,
   personalCommissionThreshold: 0,
+  personalCommissionTiers: [] as { minSalesAmount: number; ratePercent: number }[],
   personalCommissionCondition: '',
   internalSalesCommissionType: 'percentage' as PersonalCommissionType,
   internalSalesCommissionRate: 0,
@@ -58,15 +64,19 @@ function formatPpcSummary(opts: {
   rate: number
   amount: number
   threshold: number
+  tiers?: { minSalesAmount: number; ratePercent: number }[]
   rewardAmount: number
   rewardFrom?: string
   rewardTo?: string
 }): string {
+  const tierLabel = formatPersonalCommissionTiersLabel(opts.tiers)
   const base =
     opts.type === 'fixed'
       ? `按件 ¥${opts.amount || 0}`
-      : `比例 ${opts.rate || 0}%` +
-        (opts.threshold > 0 ? `（门槛 ${formatCurrency(opts.threshold)}）` : '')
+      : tierLabel
+        ? `梯度 ${tierLabel}`
+        : `比例 ${opts.rate || 0}%` +
+          (opts.threshold > 0 ? `（门槛 ${formatCurrency(opts.threshold)}）` : '')
   const rewardFrom = opts.rewardFrom || '不限'
   const rewardTo = opts.rewardTo || '不限'
   const rewardPeriod =
@@ -263,6 +273,7 @@ export default function MPersonProductCommission({
         personalCommissionRate: ppc.personalCommissionRate || 0,
         personalCommissionAmount: ppc.personalCommissionAmount || 0,
         personalCommissionThreshold: ppc.personalCommissionThreshold || 0,
+        personalCommissionTiers: normalizePersonalCommissionTiers(ppc.personalCommissionTiers),
         personalCommissionCondition: ppc.personalCommissionCondition || '',
         internalSalesCommissionType: ppc.internalSalesCommissionType || 'percentage',
         internalSalesCommissionRate: ppc.internalSalesCommissionRate || 0,
@@ -315,6 +326,7 @@ export default function MPersonProductCommission({
       personalCommissionRate: form.personalCommissionRate || 0,
       personalCommissionAmount: form.personalCommissionAmount || 0,
       personalCommissionThreshold: form.personalCommissionThreshold || 0,
+      personalCommissionTiers: normalizePersonalCommissionTiers(form.personalCommissionTiers),
       personalCommissionCondition: form.personalCommissionCondition,
       internalSalesCommissionType: form.internalSalesCommissionType || 'percentage',
       internalSalesCommissionRate: form.internalSalesCommissionRate || 0,
@@ -604,6 +616,7 @@ export default function MPersonProductCommission({
                                         rate: ppc.personalCommissionRate,
                                         amount: ppc.personalCommissionAmount || 0,
                                         threshold: ppc.personalCommissionThreshold,
+                                        tiers: ppc.personalCommissionTiers,
                                         rewardAmount: ppc.rewardAmount || 0,
                                         rewardFrom: ppc.rewardFrom,
                                         rewardTo: ppc.rewardTo,
@@ -778,39 +791,48 @@ export default function MPersonProductCommission({
                   />
                 </div>
               ) : (
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <Label className="text-xs">提成比例 (%)</Label>
-                    <Input
-                      type="number"
-                      step="0.1"
-                      disabled={!canEdit}
-                      value={form.personalCommissionRate}
-                      onChange={(e) =>
-                        setForm({
-                          ...form,
-                          personalCommissionRate: Number(e.target.value),
-                        })
-                      }
-                      placeholder="如：3"
-                    />
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <Label className="text-xs">提成比例 (%)</Label>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        disabled={!canEdit}
+                        value={form.personalCommissionRate}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            personalCommissionRate: Number(e.target.value),
+                          })
+                        }
+                        placeholder="如：3"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">起算门槛 (¥)</Label>
+                      <Input
+                        type="number"
+                        disabled={!canEdit}
+                        value={form.personalCommissionThreshold}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            personalCommissionThreshold: Number(e.target.value),
+                          })
+                        }
+                        placeholder="如：50000"
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">起算门槛 (¥)</Label>
-                    <Input
-                      type="number"
-                      disabled={!canEdit}
-                      value={form.personalCommissionThreshold}
-                      onChange={(e) =>
-                        setForm({
-                          ...form,
-                          personalCommissionThreshold: Number(e.target.value),
-                        })
-                      }
-                      placeholder="如：50000"
-                    />
-                  </div>
-                </div>
+                  <MPersonalCommissionTiersEditor
+                    tiers={form.personalCommissionTiers}
+                    disabled={!canEdit}
+                    onChange={(personalCommissionTiers) =>
+                      setForm({ ...form, personalCommissionTiers })
+                    }
+                  />
+                </>
               )}
               <div className="space-y-1">
                 <Label className="text-xs">发放条件</Label>
