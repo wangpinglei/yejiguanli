@@ -688,7 +688,12 @@ export default function ProductSettlement() {
         {settleConfigExpanded && settleViewMode === 'product' && showProductSettleList && settleConfigProducts.map((product: Product) => {
           const productUnits = getUnitsForProduct(product.id);
           const isExpanded = expandedSettleProductIds.has(product.id);
-          const configuredCount = productUnits.filter((u) => findUps(product.id, u.id)).length;
+          const configuredUps = productUnits
+            .map((u) => findUps(product.id, u.id))
+            .filter((x): x is NonNullable<typeof x> => Boolean(x));
+          const configuredCount = configuredUps.length;
+          const excludeMgmtCount = configuredUps.filter((u) => u.excludeFromTeamMgmt).length;
+          const excludePerfCount = configuredUps.filter((u) => u.excludeFromPerformance).length;
           const hasCommission = ppcList.some((x) => x.productId === product.id);
           return (
             <Card key={product.id}>
@@ -696,7 +701,7 @@ export default function ProductSettlement() {
                 <div className="flex items-center gap-3 border-b px-4 py-3">
                   <button
                     type="button"
-                    className="flex flex-1 min-w-0 items-center gap-3 text-left"
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
                     onClick={() => setExpandedSettleProductIds((prev) => toggleIdInSet(prev, product.id))}
                   >
                     {isExpanded
@@ -705,7 +710,7 @@ export default function ProductSettlement() {
                     <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10">
                       <Package className="h-4 w-4 text-primary" />
                     </div>
-                    <div className="flex-1 min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="font-medium truncate">{product.name}</p>
                       <p className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-0.5">
                         <span>
@@ -725,6 +730,40 @@ export default function ProductSettlement() {
                       </p>
                     </div>
                   </button>
+                  {(excludeMgmtCount > 0 || excludePerfCount > 0) && (
+                    <div className="flex max-w-[240px] flex-wrap items-center justify-end gap-1.5">
+                      {excludeMgmtCount > 0 && (
+                        <Badge
+                          className="bg-slate-100 text-slate-700 text-[10px]"
+                          title={
+                            excludeMgmtCount === configuredCount
+                              ? '全部已配单位不参与管理提成'
+                              : `${excludeMgmtCount}/${configuredCount} 个单位不参与管理提成`
+                          }
+                        >
+                          不参与管理提成
+                          {excludeMgmtCount < configuredCount
+                            ? ` ${excludeMgmtCount}/${configuredCount}`
+                            : ''}
+                        </Badge>
+                      )}
+                      {excludePerfCount > 0 && (
+                        <Badge
+                          className="bg-orange-100 text-orange-800 text-[10px]"
+                          title={
+                            excludePerfCount === configuredCount
+                              ? '全部已配单位不参与业绩汇入'
+                              : `${excludePerfCount}/${configuredCount} 个单位不参与业绩汇入`
+                          }
+                        >
+                          不参与业绩汇入
+                          {excludePerfCount < configuredCount
+                            ? ` ${excludePerfCount}/${configuredCount}`
+                            : ''}
+                        </Badge>
+                      )}
+                    </div>
+                  )}
                   <div
                     className="shrink-0"
                     onClick={(e) => e.stopPropagation()}
