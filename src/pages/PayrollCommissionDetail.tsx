@@ -179,7 +179,7 @@ export default function PayrollCommissionDetail() {
         <CardHeader>
           <CardTitle className="text-base">销售明细核对</CardTitle>
           <CardDescription>
-            与销售记录一致：客户、产品、订单金额；「调整」可改单笔业绩/比例/提成金额，保存后本行提成与工资表个人提成同步。
+            与销售记录一致：客户、产品、活动、订单金额；「调整」可改单笔业绩/比例/提成金额，保存后本行提成与工资表个人提成同步。
             {!detail.hasOrderAdj
               && Math.abs(lineSum - detail.systemPersonalTotal) > 0.05 && (
               <span className="ml-1 text-amber-700">
@@ -196,6 +196,7 @@ export default function PayrollCommissionDetail() {
               <TableRow>
                 <TableHead className="min-w-[120px]">客户姓名</TableHead>
                 <TableHead className="min-w-[160px]">购买产品</TableHead>
+                <TableHead className="min-w-[120px]">活动</TableHead>
                 <TableHead className="text-right min-w-[100px]">订单金额</TableHead>
                 <TableHead className="min-w-[120px]">提成比例</TableHead>
                 <TableHead className="min-w-[140px]">调整</TableHead>
@@ -205,7 +206,7 @@ export default function PayrollCommissionDetail() {
             <TableBody>
               {detail.lines.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                  <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
                     本月该单位暂无相关销售记录
                   </TableCell>
                 </TableRow>
@@ -215,6 +216,12 @@ export default function PayrollCommissionDetail() {
                     <TableCell className="font-medium">{line.customerName}</TableCell>
                     <TableCell className="max-w-[240px] truncate" title={line.productName}>
                       {line.productName}
+                    </TableCell>
+                    <TableCell
+                      className="max-w-[160px] truncate text-sm text-muted-foreground"
+                      title={line.activityName || undefined}
+                    >
+                      {line.activityName || '—'}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {formatCurrency(line.orderAmount)}
@@ -239,7 +246,7 @@ export default function PayrollCommissionDetail() {
               )}
               {detail.lines.length > 0 && (
                 <TableRow className="border-t-2 bg-muted/40 font-semibold hover:bg-muted/40">
-                  <TableCell colSpan={2}>合计（{detail.lines.length} 单）</TableCell>
+                  <TableCell colSpan={3}>合计（{detail.lines.length} 单）</TableCell>
                   <TableCell className="text-right tabular-nums text-blue-700">
                     {formatCurrency(orderSum)}
                   </TableCell>

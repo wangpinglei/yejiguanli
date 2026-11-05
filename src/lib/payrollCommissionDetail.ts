@@ -44,6 +44,8 @@ export interface CommissionDetailLine {
   /** 购买产品（对齐销售记录） */
   productName: string
   productId: string
+  /** 参加活动（对齐销售记录 activityName；无活动则空） */
+  activityName: string
   /** 订单金额 / 本人业绩份额 */
   orderAmount: number
   /** 提成规则文案 */
@@ -239,6 +241,10 @@ function buildSaleRecordLines(options: {
       customerName: (sale.customerName || '').trim() || '—',
       productName: productNameOf(sale.productId, sale.productName),
       productId: sale.productId,
+      activityName: (() => {
+        const act = (sale.activityName || '').trim()
+        return !act || act === '无活动' ? '' : act
+      })(),
       orderAmount: roundMoney(orderAmount),
       rateLabel,
       baseRatePct,
