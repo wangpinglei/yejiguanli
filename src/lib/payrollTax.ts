@@ -90,6 +90,15 @@ export function shouldUseIitCycleOpening(yearMonth: string): boolean {
   return startYm === IIT_SEED_CYCLE_START && yearMonth > IIT_SEED_THROUGH_YM
 }
 
+/** 期初手工录入月（2026-10）：仅此月改期初 B/税基；其后月份只读结转上月 */
+export function isIitOpeningEditMonth(yearMonth: string): boolean {
+  if (!shouldUseIitCycleOpening(yearMonth)) return false
+  const priorsAfterSeed = listPriorMonthsInIitCycle(yearMonth).filter(
+    (ym) => ym > IIT_SEED_THROUGH_YM,
+  )
+  return priorsAfterSeed.length === 0
+}
+
 export function getIitCycleOpening(
   profile: Pick<PersonnelTaxProfile, 'iitCycleOpenings'> | null | undefined,
   cycleStartYm: string = IIT_SEED_CYCLE_START,

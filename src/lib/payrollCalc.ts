@@ -64,6 +64,16 @@ export interface PayrollMonthEntry {
   taxableIncomeOverride: number | null
   /** 保存时应发快照，供本年累计个税使用 */
   payableSnapshot?: number
+  /**
+   * 保存时本月采用的应纳税所得额 C（含手工覆盖）。
+   * 下月累计扣税基数只读取此值，不重算、不改写本月。
+   */
+  taxableIncomeSnapshot?: number
+  /**
+   * 保存时本月采用的已预缴个税 B。
+   * 下月 B = 此值 + 本月本期个税（有效值）。
+   */
+  taxPaidBeforeSnapshot?: number
 }
 
 export interface PayrollRowInput {
@@ -317,6 +327,14 @@ export function normalizePayrollEntry(
     payableSnapshot: raw.payableSnapshot === undefined || raw.payableSnapshot === null
       ? undefined
       : Number(raw.payableSnapshot) || 0,
+    taxableIncomeSnapshot:
+      raw.taxableIncomeSnapshot === undefined || raw.taxableIncomeSnapshot === null
+        ? undefined
+        : Number(raw.taxableIncomeSnapshot) || 0,
+    taxPaidBeforeSnapshot:
+      raw.taxPaidBeforeSnapshot === undefined || raw.taxPaidBeforeSnapshot === null
+        ? undefined
+        : Number(raw.taxPaidBeforeSnapshot) || 0,
   }
 }
 

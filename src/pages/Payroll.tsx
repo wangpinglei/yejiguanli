@@ -59,6 +59,7 @@ import {
   getIitCycleMonthIndex,
   getIitTaxBaseForA,
   IIT_SEED_THROUGH_YM,
+  isIitOpeningEditMonth,
   loadTaxProfile,
   MONTHLY_BASIC_DEDUCTION,
   resolveIitBracket,
@@ -302,6 +303,9 @@ export default function Payroll() {
         specialAdditional: tax.specialAdditional,
         incomeTax: tax.incomeTax,
         payableSnapshot: row.payable,
+        // 冻结本月 C / B，供下月只读结转（不改写历史手工）
+        taxableIncomeSnapshot: tax.taxable,
+        taxPaidBeforeSnapshot: tax.cumulativeTaxPaidBefore,
       }
     }
     setEntries(next)
@@ -1395,43 +1399,72 @@ export default function Payroll() {
                                 </>
                               )
                             }
+                            const canEditOpening = isIitOpeningEditMonth(yearMonth)
                             return (
                               <>
                                 <TableCell className="bg-violet-50/40">
-                                  <Input
-                                    type="number"
-                                    step="0.01"
-                                    className="ml-auto h-8 w-[100px] text-right"
-                                    title="期初已预缴（截至 2026-09）；其后月份 B=上月B+上月本期个税"
-                                    defaultValue={row.iitOpeningTaxPaid ?? 0}
-                                    key={`paid-${person.id}-${row.iitOpeningTaxPaid ?? 0}`}
-                                    onBlur={(e) => {
-                                      const v = e.target.value === '' ? 0 : Number(e.target.value) || 0
-                                      if (v === (row.iitOpeningTaxPaid ?? 0)) return
-                                      void handleSaveIitOpening(person, { taxPaid: v })
-                                    }}
-                                  />
-                                  <div className="mt-1 text-right text-[10px] text-muted-foreground tabular-nums">
-                                    本月B={money(row.taxPaidBeforeThisMonth || 0)}
-                                  </div>
+                                  {canEditOpening ? (
+                                    <>
+                                      <Input
+                                        type="number"
+                                        step="0.01"
+                                        className="ml-auto h-8 w-[100px] text-right"
+                                        title="期初已预缴（截至 2026-09）"
+                                        defaultValue={row.iitOpeningTaxPaid ?? 0}
+                                        key={`paid-${person.id}-${row.iitOpeningTaxPaid ?? 0}`}
+                                        onBlur={(e) => {
+                                          const v = e.target.value === '' ? 0 : Number(e.target.value) || 0
+                                          if (v === (row.iitOpeningTaxPaid ?? 0)) return
+                                          void handleSaveIitOpening(person, { taxPaid: v })
+                                        }}
+                                      />
+                                      <div className="mt-1 text-right text-[10px] text-muted-foreground tabular-nums">
+                                        本月B={money(row.taxPaidBeforeThisMonth || 0)}
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <div
+                                      className="text-right tabular-nums"
+                                      title="上月B + 上月本期个税（只读结转，不改写上月）"
+                                    >
+                                      {money(row.taxPaidBeforeThisMonth || 0)}
+                                      <div className="mt-1 text-[10px] text-muted-foreground">
+                                        上月B+本期个税
+                                      </div>
+                                    </div>
+                                  )}
                                 </TableCell>
                                 <TableCell className="bg-violet-50/40">
-                                  <Input
-                                    type="number"
-                                    step="0.01"
-                                    className="ml-auto h-8 w-[100px] text-right"
-                                    title="期初累计扣税基数（截至 2026-09）；其后月份=上月应纳税所得额C"
-                                    defaultValue={row.iitOpeningTaxBase ?? 0}
-                                    key={`base-${person.id}-${row.iitOpeningTaxBase ?? 0}`}
-                                    onBlur={(e) => {
-                                      const v = e.target.value === '' ? 0 : Number(e.target.value) || 0
-                                      if (v === (row.iitOpeningTaxBase ?? 0)) return
-                                      void handleSaveIitOpening(person, { taxBase: v })
-                                    }}
-                                  />
-                                  <div className="mt-1 text-right text-[10px] text-muted-foreground tabular-nums">
-                                    本月税基={money(row.cumulativeTaxBase || 0)}
-                                  </div>
+                                  {canEditOpening ? (
+                                    <>
+                                      <Input
+                                        type="number"
+                                        step="0.01"
+                                        className="ml-auto h-8 w-[100px] text-right"
+                                        title="期初累计扣税基数（截至 2026-09）"
+                                        defaultValue={row.iitOpeningTaxBase ?? 0}
+                                        key={`base-${person.id}-${row.iitOpeningTaxBase ?? 0}`}
+                                        onBlur={(e) => {
+                                          const v = e.target.value === '' ? 0 : Number(e.target.value) || 0
+                                          if (v === (row.iitOpeningTaxBase ?? 0)) return
+                                          void handleSaveIitOpening(person, { taxBase: v })
+                                        }}
+                                      />
+                                      <div className="mt-1 text-right text-[10px] text-muted-foreground tabular-nums">
+                                        本月税基={money(row.cumulativeTaxBase || 0)}
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <div
+                                      className="text-right tabular-nums"
+                                      title="上月应纳税所得额 C（只读结转，不改写上月）"
+                                    >
+                                      {money(row.cumulativeTaxBase || 0)}
+                                      <div className="mt-1 text-[10px] text-muted-foreground">
+                                        上月C结转
+                                      </div>
+                                    </div>
+                                  )}
                                 </TableCell>
                                 <TableCell className="bg-violet-50/40">
                                   <Input
