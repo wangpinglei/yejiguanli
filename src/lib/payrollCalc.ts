@@ -185,6 +185,26 @@ export function formatAdjLinesNote(lines: PayrollAdjLine[]): string {
     .join('；')
 }
 
+/** Excel 单元格批注：多行「说明：金额」；无明细行时回退备注文字 */
+export function formatAdjLinesComment(
+  lines: PayrollAdjLine[],
+  fallbackNote = '',
+): string {
+  const fromLines = lines
+    .map((line) => {
+      const label = (line.label || '').trim()
+      const amount = Number(line.amount) || 0
+      if (!label && amount === 0) return ''
+      if (!label) return String(amount)
+      if (amount === 0) return label
+      return `${label}：${amount}`
+    })
+    .filter(Boolean)
+    .join('\n')
+  if (fromLines) return fromLines
+  return (fallbackNote || '').trim()
+}
+
 /** 兼容旧「出勤天数」字段：有 hours 用 hours，否则天数 × 7.5 */
 export function normalizePayrollEntry(
   personnelId: string,

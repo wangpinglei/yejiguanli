@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import ExcelJS from 'exceljs'
 
 import { Calculator, CheckSquare, FileSpreadsheet, Pencil, Save } from 'lucide-react'
 
@@ -32,6 +33,8 @@ import { formatCurrency, formatDisplayPersonName } from '@/lib/format'
 import {
   calcPayrollRow,
   createEmptyPayrollEntry,
+  formatAdjLinesComment,
+  formatAdjLinesNote,
   loadPayrollEntries,
   loadPayrollScopeUnitIds,
   PAYROLL_STANDARD_HOURS,
@@ -433,7 +436,7 @@ export default function Payroll() {
     )
   }, [rows])
 
-  function handleExportCsv() {
+  async function handleExportExcel() {
     if (rows.length === 0) {
       alert('当前没有可导出的工资行，请先选择单位并确认月份')
       return
@@ -466,12 +469,22 @@ export default function Payroll() {
       '本期个税',
       '实发',
     ]
+    const bonusCol = header.indexOf('其他加项') + 1
+    const deductCol = header.indexOf('其他减项') + 1
     // Excel 会把 "2026-10" 自动当成日期显示成 Oct-26，导出用中文月份文本避免误识别
     const monthLabel = /^\d{4}-\d{2}$/.test(yearMonth)
       ? `${yearMonth.slice(0, 4)}年${Number(yearMonth.slice(5, 7))}月`
       : yearMonth
 
-    const lines = rows.map((r) => {
+    const workbook = new ExcelJS.Workbook()
+    workbook.creator = 'yejiguanli'
+    const sheet = workbook.addWorksheet('工资表', {
+      views: [{ state: 'frozen', ySplit: 1 }],
+    })
+    sheet.addRow(header)
+    sheet.getRow(1).font = { bold: true }
+
+    rows.forEach((r) => {
       const entry = entries[r.personnelId] || createEmptyPayrollEntry(r.personnelId)
       const person = personnel.find((p) => p.id === r.personnelId)
       const archive = person
@@ -482,41 +495,82 @@ export default function Payroll() {
           socialPersonal: r.socialInsurancePersonal || 0,
           housingPersonal: r.housingFundPersonal || 0,
         }
-      return [
+      const bonusNote =
+        entry.otherBonusNote
+        || (entry.otherBonusLines?.length
+          ? formatAdjLinesNote(entry.otherBonusLines)
+          : '')
+      const deductNote =
+        entry.otherDeductionNote
+        || (entry.otherDeductionLines?.length
+          ? formatAdjLinesNote(entry.otherDeductionLines)
+          : '')
+      const bonusComment = formatAdjLinesComment(
+        entry.otherBonusLines || [],
+        entry.otherBonusNote || '',
+      )
+      const deductComment = formatAdjLinesComment(
+        entry.otherDeductionLines || [],
+        entry.otherDeductionNote || '',
+      )
+
+      const row = sheet.addRow([
         monthLabel,
         r.unitName,
         r.name,
-        r.standardBaseSalary.toFixed(2),
-        r.paidConfidentialityFee.toFixed(2),
-        r.paidPositionAllowance.toFixed(2),
-        r.standardPerformance.toFixed(2),
-        r.commission.toFixed(2),
-        r.attendanceHours.toFixed(2),
-        r.absenceHours.toFixed(2),
-        r.expectedAttendanceHours.toFixed(2),
-        r.score.toFixed(1),
-        r.paidBaseSalary.toFixed(2),
-        r.paidPerformance.toFixed(2),
-        (entry.otherBonus || 0).toFixed(2),
-        entry.otherBonusNote || '',
-        (entry.otherDeduction || 0).toFixed(2),
-        entry.otherDeductionNote || '',
-        r.payable.toFixed(2),
-        archive.socialEmployer.toFixed(2),
-        archive.socialPersonal.toFixed(2),
-        archive.housingEmployer.toFixed(2),
-        archive.housingPersonal.toFixed(2),
-        (r.specialAdditional || 0).toFixed(2),
-        (r.incomeTax || 0).toFixed(2),
-        (r.netPay || 0).toFixed(2),
-      ]
-        .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
-        .join(',')
+        Number(r.standardBaseSalary.toFixed(2)),
+        Number(r.paidConfidentialityFee.toFixed(2)),
+        Number(r.paidPositionAllowance.toFixed(2)),
+        Number(r.standardPerformance.toFixed(2)),
+        Number(r.commission.toFixed(2)),
+        Number(r.attendanceHours.toFixed(2)),
+        Number(r.absenceHours.toFixed(2)),
+        Number(r.expectedAttendanceHours.toFixed(2)),
+        Number(r.score.toFixed(1)),
+        Number(r.paidBaseSalary.toFixed(2)),
+        Number(r.paidPerformance.toFixed(2)),
+        Number((entry.otherBonus || 0).toFixed(2)),
+        bonusNote,
+        Number((entry.otherDeduction || 0).toFixed(2)),
+        deductNote,
+        Number(r.payable.toFixed(2)),
+        Number(archive.socialEmployer.toFixed(2)),
+        Number(archive.socialPersonal.toFixed(2)),
+        Number(archive.housingEmployer.toFixed(2)),
+        Number(archive.housingPersonal.toFixed(2)),
+        Number((r.specialAdditional || 0).toFixed(2)),
+        Number((r.incomeTax || 0).toFixed(2)),
+        Number((r.netPay || 0).toFixed(2)),
+      ])
+
+      if (bonusComment) {
+        row.getCell(bonusCol).note = bonusComment
+        // 有批注时浅底色，便于发现
+        row.getCell(bonusCol).fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFFFF7ED' },
+        }
+      }
+      if (deductComment) {
+        row.getCell(deductCol).note = deductComment
+        row.getCell(deductCol).fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFFEF2F2' },
+        }
+      }
     })
-    const bom = '\uFEFF'
-    const blob = new Blob([bom + [header.join(','), ...lines].join('\n')], {
-      type: 'text/csv;charset=utf-8',
+
+    sheet.columns.forEach((col) => {
+      let max = 10
+      col.eachCell?.({ includeEmpty: true }, (cell) => {
+        const len = String(cell.value ?? '').length
+        if (len > max) max = len
+      })
+      col.width = Math.min(Math.max(max + 2, 10), 28)
     })
+
     // 文件名：单位名称 + 月份（与筛选/导出内容一致）
     const unitNames = Array.from(new Set(rows.map((r) => r.unitName).filter(Boolean)))
     const hit = scopedUnits.find((u) => u.id === filterUnitId)
@@ -530,10 +584,15 @@ export default function Payroll() {
       .replace(/[\\/:*?"<>|]/g, '_')
       .replace(/\s+/g, '')
       .slice(0, 60) || '工资表'
+
+    const buffer = await workbook.xlsx.writeBuffer()
+    const blob = new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${safeUnit}_${monthLabel}.csv`
+    a.download = `${safeUnit}_${monthLabel}.xlsx`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -552,7 +611,8 @@ export default function Payroll() {
           <CardDescription>
             应发 = 提成 + 实发底薪 + 保密费 + 岗位补贴 + 实发绩效 + 其他加项 − 其他减项；月出勤系数{' '}
             21.75 × 7.5 = {PAYROLL_STANDARD_HOURS} 小时；未填缺勤按满勤（缺勤=0），未填考核分按 100 分。
-            加项/减项可点「明细」录入多行说明与金额；实发=应发−社保个人−公积金个人−本期个税。
+            加项/减项悬停金额可开「明细」录入多行；导出 Excel 时明细写入加项/减项单元格批注。
+            实发=应发−社保个人−公积金个人−本期个税。
             社保/公积金企业与个人固定取薪酬方案（可「去调整」/批量写入档案并记修改记录）；本期个税可改。人员关闭「内部员工」后只核算提成。
           </CardDescription>
         </CardHeader>
@@ -733,9 +793,9 @@ export default function Payroll() {
               <Save className="mr-1.5 h-3.5 w-3.5" />
               保存本月录入
             </Button>
-            <Button type="button" onClick={handleExportCsv}>
+            <Button type="button" onClick={() => void handleExportExcel()}>
               <FileSpreadsheet className="mr-1.5 h-3.5 w-3.5" />
-              导出 CSV
+              导出 Excel
             </Button>
             {entryMode === 'insurance' && canEditPersonnel && (
               <Button

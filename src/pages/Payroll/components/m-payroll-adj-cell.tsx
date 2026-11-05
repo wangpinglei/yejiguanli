@@ -14,6 +14,7 @@ import {
   sumAdjLines,
   type PayrollAdjLine,
 } from '@/lib/payrollCalc'
+import { cn } from '@/lib/utils'
 
 type Props = {
   kind: 'bonus' | 'deduction'
@@ -32,7 +33,7 @@ function emptyLine(): PayrollAdjLine {
 }
 
 /**
- * 工资表加减项单元格：金额 + 明细备注展示，弹层编辑多行明细
+ * 工资表加减项单元格：金额 + 明细备注展示；悬停金额时出现明细按钮
  */
 export default function MPayrollAdjCell({
   kind,
@@ -107,13 +108,17 @@ export default function MPayrollAdjCell({
 
   return (
     <div className="min-w-[132px] space-y-1 py-0.5">
-      <div className="flex items-center gap-1">
+      <div className="group/adj relative flex items-center gap-1">
         <Input
           type="number"
           className={`h-8 w-[88px] tabular-nums ${amountClass}`}
           value={amount || 0}
           onChange={(e) => handleAmountInput(e.target.value)}
-          title={lines.length > 0 ? '已有明细时改金额会清空明细行，可用「明细」重填' : undefined}
+          title={
+            lines.length > 0
+              ? '已有明细时改金额会清空明细行；悬停金额可打开明细'
+              : '悬停金额可打开多项明细'
+          }
         />
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>
@@ -121,7 +126,12 @@ export default function MPayrollAdjCell({
               type="button"
               variant="outline"
               size="sm"
-              className="h-8 shrink-0 px-2"
+              className={cn(
+                'h-8 shrink-0 px-2 transition-opacity',
+                open
+                  ? 'opacity-100'
+                  : 'opacity-0 group-hover/adj:opacity-100 focus-visible:opacity-100',
+              )}
               title={title}
             >
               <ListPlus className="h-3.5 w-3.5" />
@@ -131,7 +141,7 @@ export default function MPayrollAdjCell({
             <div className="space-y-1">
               <Label className="text-sm font-medium">{title}</Label>
               <p className="text-[11px] text-muted-foreground">
-                可填多行说明与金额；保存后合计写入工资表，备注会显示在金额下方。
+                可填多行说明与金额；保存后合计写入工资表，导出 Excel 时明细写入单元格批注。
               </p>
             </div>
 
