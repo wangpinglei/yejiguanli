@@ -396,12 +396,45 @@ export function getIitCycleBounds(yearMonth: string): {
   }
 }
 
-/** 本工资月在周期内的序号：12月=1 … 11月=12 */
-export function getIitCycleMonthIndex(yearMonth: string): number {
+/** 入职日期 → YYYY-MM；无法解析则 null */
+export function getHireYearMonth(hireDate?: string | null): string | null {
+  if (!hireDate) return null
+  const s = String(hireDate).trim()
+  const iso = s.match(/^(\d{4})-(\d{1,2})/)
+  if (iso) {
+    return `${iso[1]}-${String(Number(iso[2])).padStart(2, '0')}`
+  }
+  const slash = s.match(/^(\d{4})\/(\d{1,2})/)
+  if (slash) {
+    return `${slash[1]}-${String(Number(slash[2])).padStart(2, '0')}`
+  }
+  return null
+}
+
+/**
+ * 本工资月在个税周期内的序号 N（用于 5000×N）。
+ * - 周期：上年 12 月 → 本年 11 月；12 月起新周期 N 从 1 再计
+ * - 起算月 = max(本周期起点, 入职月)；无入职日期则从周期起点计（12月=1…11月=12）
+ * - 例：2026-06-28 入职 → 2026-06 N=1 … 2026-10 N=5 … 2026-11 N=6；2026-12 N=1
+ */
+export function getIitCycleMonthIndex(
+  yearMonth: string,
+  hireDate?: string | null,
+): number {
   if (!/^\d{4}-\d{2}$/.test(yearMonth)) return 1
-  const month = Number(yearMonth.slice(5, 7))
-  if (month === 12) return 1
-  return month + 1
+  const { startYm } = getIitCycleBounds(yearMonth)
+  const hireYm = getHireYearMonth(hireDate)
+  let startCountYm = startYm
+  if (hireYm && hireYm > startYm) {
+    startCountYm = hireYm
+  }
+  if (yearMonth < startCountYm) return 1
+  const y1 = Number(startCountYm.slice(0, 4))
+  const m1 = Number(startCountYm.slice(5, 7))
+  const y2 = Number(yearMonth.slice(0, 4))
+  const m2 = Number(yearMonth.slice(5, 7))
+  const n = (y2 - y1) * 12 + (m2 - m1) + 1
+  return Math.max(1, Math.min(12, n))
 }
 
 function shiftYearMonth(yearMonth: string, deltaMonths: number): string {

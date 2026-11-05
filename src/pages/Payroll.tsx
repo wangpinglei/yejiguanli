@@ -60,7 +60,6 @@ import {
 } from '@/lib/payrollTaxApply'
 import {
   getIitCycleBounds,
-  getIitCycleMonthIndex,
   getIitTaxBaseForA,
   IIT_SEED_THROUGH_YM,
   isIitOpeningEditMonth,
@@ -757,7 +756,6 @@ export default function Payroll() {
           )}
           {calcPhase === 'wizard' && entryMode === 'tax' && (() => {
             const cycle = getIitCycleBounds(yearMonth)
-            const n = getIitCycleMonthIndex(yearMonth)
             const useOpening = shouldUseIitCycleOpening(yearMonth)
             return (
               <p className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
@@ -765,11 +763,12 @@ export default function Payroll() {
                 <strong>
                   {cycle.startYm}～{cycle.endYm}
                 </strong>
-                （本月为第 {n} 月，减除费用 {MONTHLY_BASIC_DEDUCTION}×{n}）。
+                。N=本周期内自 max(周期起点, 入职月) 起算的月序（12 月起新周期从 1
+                再计；每人可能不同，见行内），减除费用 {MONTHLY_BASIC_DEDUCTION}×N。
                 累计扣税基数=上月应纳税所得额C（首月取期初）；
                 C=累计扣税基数+本月应发−个人社保−个人公积金−本月专项附加合计；
                 B=上月B+上月本期个税；
-                A=ROUND(MAX((C−{MONTHLY_BASIC_DEDUCTION}×{n})×{'{3,10,20,25,30,35,45}%'}−速算扣除数, 0), 2)；
+                A=ROUND(MAX((C−{MONTHLY_BASIC_DEDUCTION}×N)×{'{3,10,20,25,30,35,45}%'}−速算扣除数, 0), 2)；
                 本期个税=max(A−B, 0)。
                 {useOpening && (
                   <>
@@ -1601,6 +1600,10 @@ export default function Payroll() {
                                       {money(housing)}−{money(special)}={money(autoC)}
                                     </>
                                   )}
+                                </div>
+                                <div className="text-muted-foreground">
+                                  N={n}（入职月起算；减除 {MONTHLY_BASIC_DEDUCTION}×{n}=
+                                  {money(basicDeduct)}）
                                 </div>
                                 <div>
                                   A = ROUND(MAX((C−{money(basicDeduct)})×{ratePct}−

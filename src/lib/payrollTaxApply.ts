@@ -405,7 +405,7 @@ export function resolvePayrollTax(options: {
   )
 
   const cycle = getIitCycleBounds(yearMonth)
-  const monthsInYear = getIitCycleMonthIndex(yearMonth)
+  const monthsInYear = getIitCycleMonthIndex(yearMonth, person.hireDate)
   const opening = resolveOpening(profile, yearMonth)
   const throughYm = opening?.throughYm
 
