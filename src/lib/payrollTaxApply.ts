@@ -133,9 +133,27 @@ function readPriorMonthTaxableC(prevEntry: {
   return null
 }
 
+/** 拼上月 C：手工/快照优先；否则 = 上月税基 + 应发 − 社保 − 公积金 − 专项 */
+function resolvePriorMonthTaxableC(options: {
+  person: Personnel
+  prevYm: string
+  prevTaxBase: number
+  prevEntry: ReturnType<typeof loadPayrollEntries>[string] | undefined
+}): number {
+  const { prevTaxBase, prevEntry } = options
+  const frozenC = readPriorMonthTaxableC(prevEntry)
+  if (frozenC != null) return frozenC
+  if (!prevEntry) return 0
+  const prevPay = Number(prevEntry.payableSnapshot) || 0
+  const prevSocial = Number(prevEntry.socialInsurancePersonal) || 0
+  const prevHousing = Number(prevEntry.housingFundPersonal) || 0
+  const prevSpecial = Number(prevEntry.specialAdditional) || 0
+  return roundMoney(prevTaxBase + prevPay - prevSocial - prevHousing - prevSpecial)
+}
+
 /**
- * 本月累计扣税基数 = 上月应纳税所得额 C（优先读上月已保存快照/手工 C）。
- * 无上月快照时退回：期初税基 + Σ(应发−社保−公积金−专项附加)。
+ * 本月累计扣税基数 = 上月累计扣税基数 + 上月应纳税所得额 C。
+ * 例：11 月税基 = 10 月税基 + 10 月 C；首月（10 月）= 期初税基。
  */
 function resolveCumulativeTaxBaseFromPriorC(options: {
   person: Personnel
@@ -151,45 +169,19 @@ function resolveCumulativeTaxBaseFromPriorC(options: {
 
   const prevYm = priors[priors.length - 1]
   const prevEntry = loadPayrollEntries(prevYm)[person.id]
-  const frozenC = readPriorMonthTaxableC(prevEntry)
-  if (frozenC != null) return frozenC
-
-  // 上月有录入但尚未落 C 快照：用上月已存应发/代扣拼 C（不改写上月）
-  if (prevEntry) {
-    const prevPriors = listCarryPriorMonths(prevYm, opening ? throughYm : undefined)
-    let base = roundMoney(opening?.taxBase ?? 0)
-    if (prevPriors.length > 0) {
-      // 再上一月若有冻结 C，则作为上月税基
-      const earlierYm = prevPriors[prevPriors.length - 1]
-      const earlierEntry = loadPayrollEntries(earlierYm)[person.id]
-      const earlierC = readPriorMonthTaxableC(earlierEntry)
-      if (earlierC != null) base = earlierC
-    }
-    const prevPay = Number(prevEntry.payableSnapshot) || 0
-    const prevSocial = Number(prevEntry.socialInsurancePersonal) || 0
-    const prevHousing = Number(prevEntry.housingFundPersonal) || 0
-    const prevSpecial = Number(prevEntry.specialAdditional) || 0
-    return roundMoney(base + prevPay - prevSocial - prevHousing - prevSpecial)
-  }
-
-  // 上月无工资快照：用期初 + 已有月份累加（含专项附加）兜底
-  const prior = sumPriorFromSnapshots(
-    person.id,
-    yearMonth,
-    opening ? throughYm : undefined,
-  )
-  return opening
-    ? roundMoney(
-      opening.taxBase
-      + prior.cumulativeIncome
-      - prior.cumulativeSpecialDeduction
-      - prior.cumulativeSpecialAdditional,
-    )
-    : roundMoney(
-      prior.cumulativeIncome
-      - prior.cumulativeSpecialDeduction
-      - prior.cumulativeSpecialAdditional,
-    )
+  const prevTaxBase = resolveCumulativeTaxBaseFromPriorC({
+    person,
+    yearMonth: prevYm,
+    opening,
+    throughYm,
+  })
+  const prevC = resolvePriorMonthTaxableC({
+    person,
+    prevYm,
+    prevTaxBase,
+    prevEntry,
+  })
+  return roundMoney(prevTaxBase + prevC)
 }
 
 /**
@@ -341,7 +333,7 @@ export function resolvePayrollTax(options: {
     opening ? throughYm : undefined,
   )
 
-  // 累计扣税基数 = 上月应纳税所得额 C（首月=期初税基；只读上月快照）
+  // 累计扣税基数 = 上月税基 + 上月 C（首月=期初税基）
   const cumulativeTaxBase = resolveCumulativeTaxBaseFromPriorC({
     person,
     yearMonth,

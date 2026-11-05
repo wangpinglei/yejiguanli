@@ -119,7 +119,7 @@ export interface PayrollRowResult extends PayrollRowInput {
   iitCycleMonthIndex?: number
   iitCycleStartYm?: string
   iitCycleEndYm?: string
-  /** 累计扣税基数（=上月应纳税所得额 C；首月=期初） */
+  /** 累计扣税基数（=上月税基+上月 C；首月=期初） */
   cumulativeTaxBase?: number
   /** 本期应发（C 计算用） */
   payableForTax?: number
