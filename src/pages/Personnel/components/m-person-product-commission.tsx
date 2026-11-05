@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useData } from '@/context/DataContext'
 import { formatCurrency } from '@/lib/format'
@@ -131,6 +131,8 @@ type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
   canEdit: boolean
+  /** 打开时自动进入该产品编辑（工资提成明细跳转） */
+  initialProductId?: string | null
 }
 
 export default function MPersonProductCommission({
@@ -138,6 +140,7 @@ export default function MPersonProductCommission({
   open,
   onOpenChange,
   canEdit,
+  initialProductId,
 }: Props) {
   const {
     products,
@@ -158,6 +161,7 @@ export default function MPersonProductCommission({
   const [form, setForm] = useState({ ...EMPTY_FORM })
   const [addProductId, setAddProductId] = useState('')
   const [saving, setSaving] = useState(false)
+  const [autoOpenedProductId, setAutoOpenedProductId] = useState<string | null>(null)
 
   const unitName = useMemo(() => {
     if (!person) return ''
@@ -294,6 +298,18 @@ export default function MPersonProductCommission({
     setBatchProductIds([])
     setEditProductId(productId)
   }
+
+  // 从工资明细等入口带入产品：打开后自动弹出该产品提成编辑
+  useEffect(() => {
+    if (!open || !person || !initialProductId) {
+      setAutoOpenedProductId(null)
+      return
+    }
+    if (autoOpenedProductId === initialProductId) return
+    openEdit(initialProductId)
+    setAutoOpenedProductId(initialProductId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅跟随打开与目标产品
+  }, [open, person?.id, initialProductId, autoOpenedProductId])
 
   function openBatchEdit() {
     if (!person || selectedIds.length === 0) return

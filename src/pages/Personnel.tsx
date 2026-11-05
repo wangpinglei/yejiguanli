@@ -260,6 +260,20 @@ export default function PersonnelPage() {
     next.delete('focus')
     setSearchParams(next, { replace: true })
   }, [searchParams, personnel, setSearchParams])
+
+  /** 工资提成明细：/personnel?commission=人员ID&product=产品ID → 打开该人产品提成并编辑 */
+  useEffect(() => {
+    const commissionId = searchParams.get('commission')
+    if (!commissionId || personnel.length === 0) return
+    const person = personnel.find((p) => p.id === commissionId)
+    if (!person) return
+    setCommissionPerson(person)
+    setCommissionProductId(searchParams.get('product') || null)
+    const next = new URLSearchParams(searchParams)
+    next.delete('commission')
+    next.delete('product')
+    setSearchParams(next, { replace: true })
+  }, [searchParams, personnel, setSearchParams])
   const [editingAssignment, setEditingAssignment] = useState<PersonnelUnitAssignment | null>(null);
   const [editAssignmentUnitId, setEditAssignmentUnitId] = useState("");
   const [editAssignmentStart, setEditAssignmentStart] = useState("");
@@ -276,6 +290,7 @@ export default function PersonnelPage() {
     ReturnType<typeof personnelApi.unitDiagnosis>
   > | null>(null);
   const [commissionPerson, setCommissionPerson] = useState<Personnel | null>(null);
+  const [commissionProductId, setCommissionProductId] = useState<string | null>(null);
   const [salaryDetailPerson, setSalaryDetailPerson] = useState<Personnel | null>(null);
   const [salaryDetailMonth, setSalaryDetailMonth] = useState(new Date().toISOString().slice(0, 7));
 
@@ -1303,7 +1318,10 @@ export default function PersonnelPage() {
                         type="button"
                         size="sm"
                         className="h-8 shrink-0 bg-amber-500 hover:bg-amber-600"
-                        onClick={() => setCommissionPerson(person)}
+                        onClick={() => {
+                          setCommissionProductId(null);
+                          setCommissionPerson(person);
+                        }}
                       >
                         <Percent className="mr-1 h-3.5 w-3.5" />
                         去配置
@@ -1527,7 +1545,10 @@ export default function PersonnelPage() {
                                     ? "h-8 border-amber-400 text-amber-800 hover:bg-amber-50"
                                     : "h-8 border-violet-300 text-violet-700 hover:bg-violet-50"
                                 }
-                                onClick={() => setCommissionPerson(person)}
+                                onClick={() => {
+                                  setCommissionProductId(null);
+                                  setCommissionPerson(person);
+                                }}
                               >
                                 <Percent className="mr-1 h-3.5 w-3.5" />
                                 {needWarn ? "去配置" : "提成配置"}
@@ -1641,9 +1662,13 @@ export default function PersonnelPage() {
         person={commissionPerson}
         open={!!commissionPerson}
         onOpenChange={(open) => {
-          if (!open) setCommissionPerson(null);
+          if (!open) {
+            setCommissionPerson(null);
+            setCommissionProductId(null);
+          }
         }}
         canEdit={showActions && !isReadOnly && (canEditPersonnel || canEditCost)}
+        initialProductId={commissionProductId}
       />
 
       {/* Add/Edit Dialog */}

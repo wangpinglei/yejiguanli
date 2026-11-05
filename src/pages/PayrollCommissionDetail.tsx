@@ -226,7 +226,20 @@ export default function PayrollCommissionDetail() {
                     <TableCell className="text-right tabular-nums">
                       {formatCurrency(line.orderAmount)}
                     </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{line.rateLabel}</TableCell>
+                    <TableCell className="text-sm">
+                      {line.productId ? (
+                        <Link
+                          to={`/personnel?commission=${encodeURIComponent(personnelId)}&product=${encodeURIComponent(line.productId)}`}
+                          className="inline-flex items-center gap-1 text-violet-700 underline-offset-2 hover:underline"
+                          title="打开该产品提成配置"
+                        >
+                          {line.rateLabel}
+                          <ExternalLink className="h-3 w-3 shrink-0 opacity-70" />
+                        </Link>
+                      ) : (
+                        <span className="text-muted-foreground">{line.rateLabel}</span>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <MCommissionOrderAdjCell
                         adj={line.adj}
