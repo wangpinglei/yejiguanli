@@ -766,7 +766,7 @@ export default function Payroll() {
                   {cycle.startYm}～{cycle.endYm}
                 </strong>
                 （本月为第 {n} 月，减除费用 {MONTHLY_BASIC_DEDUCTION}×{n}）。
-                累计扣税基数=上月税基+上月应纳税所得额C（首月取期初）；
+                累计扣税基数=上月应纳税所得额C（首月取期初）；
                 C=累计扣税基数+本月应发−个人社保−个人公积金−本月专项附加合计；
                 B=上月B+上月本期个税；
                 A=ROUND(MAX((C−{MONTHLY_BASIC_DEDUCTION}×{n})×{'{3,10,20,25,30,35,45}%'}−速算扣除数, 0), 2)；
@@ -987,7 +987,7 @@ export default function Payroll() {
                       <TableHead className="min-w-[120px] bg-violet-50/80 text-right">
                         累计扣税基数
                         <div className="text-[10px] font-normal text-muted-foreground">
-                          上月税基+上月C
+                          上月应纳税所得额C
                         </div>
                       </TableHead>
                     )}
@@ -1484,15 +1484,15 @@ export default function Payroll() {
                                           className="text-right tabular-nums"
                                           title={
                                             carry
-                                              ? `${carry.priorYm}税基 ${money(carry.priorTaxBase)} + C ${money(carry.priorC)}`
-                                              : '上月税基 + 上月C'
+                                              ? `${carry.priorYm}应纳税所得额C ${money(carry.priorC)}`
+                                              : '上月应纳税所得额C'
                                           }
                                         >
                                           {money(row.cumulativeTaxBase || 0)}
                                           <div className="mt-1 text-[10px] text-muted-foreground leading-snug">
                                             {carry
-                                              ? `税基 ${money(carry.priorTaxBase)}+C ${money(carry.priorC)}`
-                                              : '上月税基+上月C'}
+                                              ? `${carry.priorYm.slice(5)}月C ${money(carry.priorC)}`
+                                              : '上月应纳税所得额C'}
                                           </div>
                                         </div>
                                       )

@@ -234,8 +234,8 @@ function resolveMonthTaxBase(options: {
 }
 
 /**
- * 本月累计扣税基数 = 上月累计扣税基数 + 上月应纳税所得额 C。
- * 例：11 月税基 = 10 月表「累计扣税基数」+ 10 月表「应纳税所得额 C」。
+ * 本月累计扣税基数 = 上月应纳税所得额 C。
+ * 例：11 月税基 = 10 月表「应纳税所得额 C」（首月=期初税基）。
  */
 function resolveCumulativeTaxBaseFromPriorC(options: {
   person: Personnel
@@ -251,7 +251,7 @@ function resolveCumulativeTaxBaseFromPriorC(options: {
 
   const prevYm = priors[priors.length - 1]
   const prevEntry = loadPayrollEntries(prevYm)[person.id]
-  // 优先直接对齐上月表当前展示（税基、C），避免脏 0 快照把结转打成「仅税基」
+  // 对齐上月表「应纳税所得额 C」（忽略脏 0 快照）
   if (prevEntry) {
     const prevPayable = Number(prevEntry.payableSnapshot) || 0
     const prevTax = resolvePayrollTax({
@@ -260,7 +260,7 @@ function resolveCumulativeTaxBaseFromPriorC(options: {
       payable: prevPayable,
       entry: prevEntry,
     })
-    return roundMoney(prevTax.cumulativeTaxBase + prevTax.taxable)
+    return roundMoney(prevTax.taxable)
   }
 
   const prevTaxBase = resolveMonthTaxBase({
@@ -269,13 +269,12 @@ function resolveCumulativeTaxBaseFromPriorC(options: {
     opening,
     throughYm,
   })
-  const prevC = resolvePriorMonthTaxableC({
+  return resolvePriorMonthTaxableC({
     person,
     prevYm,
     prevTaxBase,
     prevEntry,
   })
-  return roundMoney(prevTaxBase + prevC)
 }
 
 /**
@@ -427,7 +426,7 @@ export function resolvePayrollTax(options: {
     opening ? throughYm : undefined,
   )
 
-  // 累计扣税基数 = 上月税基 + 上月 C（首月=期初税基）
+  // 累计扣税基数 = 上月 C（首月=期初税基）
   const cumulativeTaxBase = resolveCumulativeTaxBaseFromPriorC({
     person,
     yearMonth,
@@ -505,7 +504,7 @@ export function resolvePayrollTax(options: {
   }
 }
 
-/** 结转拆解：上月 B/本期个税、上月税基/C（供 11 月等界面核对） */
+/** 结转拆解：上月 B/本期个税、上月 C（供 11 月等界面核对） */
 export function getIitCarryFromPriorMonth(options: {
   person: Personnel
   yearMonth: string
@@ -539,7 +538,7 @@ export function getIitCarryFromPriorMonth(options: {
     throughYm,
   })
   const priorPeriodTax = priorEntry ? getEffectiveIncomeTax(priorEntry) : 0
-  // 与结转公式同一口径：上月表税基 + 上月 C
+  // 与结转公式同一口径：本月税基 = 上月 C
   let priorTaxBase = 0
   let priorC = 0
   if (priorEntry) {

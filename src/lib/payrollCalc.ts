@@ -71,7 +71,7 @@ export interface PayrollMonthEntry {
   taxableIncomeSnapshot?: number
   /**
    * 保存时本月采用的累计扣税基数。
-   * 下月税基 = 此值 + 上月 C。
+   * 下月税基 = 上月应纳税所得额 C（见 taxableIncomeSnapshot）。
    */
   cumulativeTaxBaseSnapshot?: number
   /**
@@ -124,7 +124,7 @@ export interface PayrollRowResult extends PayrollRowInput {
   iitCycleMonthIndex?: number
   iitCycleStartYm?: string
   iitCycleEndYm?: string
-  /** 累计扣税基数（=上月税基+上月 C；首月=期初） */
+  /** 累计扣税基数（=上月应纳税所得额 C；首月=期初） */
   cumulativeTaxBase?: number
   /** 本期应发（C 计算用） */
   payableForTax?: number
