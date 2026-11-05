@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, ExternalLink } from 'lucide-react'
 
@@ -15,14 +15,19 @@ import {
 } from '@/components/ui/table'
 import { useData } from '@/context/DataContext'
 import { usePermissions } from '@/hooks/usePermissions'
+import {
+  saveCommissionOrderAdj,
+  type CommissionOrderAdj,
+} from '@/lib/commissionOrderAdj'
 import { formatCurrency } from '@/lib/format'
 import {
   buildPayrollCommissionDetail,
   buildSalesRecordsCheckHref,
 } from '@/lib/payrollCommissionDetail'
+import MCommissionOrderAdjCell from '@/pages/Payroll/components/m-commission-order-adj-cell'
 
 /**
- * 工资核算 → 个人业绩提成明细（对齐销售记录逐单核对）
+ * 工资核算 → 个人业绩提成明细（对齐销售记录逐单核对；可调单笔）
  */
 export default function PayrollCommissionDetail() {
   const [params] = useSearchParams()
@@ -40,9 +45,11 @@ export default function PayrollCommissionDetail() {
   const personnelId = params.get('personnelId') || ''
   const unitId = params.get('unitId') || ''
   const yearMonth = params.get('yearMonth') || ''
+  const [adjTick, setAdjTick] = useState(0)
 
   const detail = useMemo(() => {
     if (!personnelId || !unitId || !yearMonth) return null
+    void adjTick
     return buildPayrollCommissionDetail({
       personnelId,
       unitId,
@@ -68,6 +75,7 @@ export default function PayrollCommissionDetail() {
     teamMgmtCommissionRules,
     performanceTargets,
     unitProductSettlements,
+    adjTick,
   ])
 
   const salesHref = personnelId && unitId && yearMonth
@@ -75,6 +83,11 @@ export default function PayrollCommissionDetail() {
     : '/sales-records'
 
   const backHref = '/payroll'
+
+  function handleSaveAdj(saleId: string, next: CommissionOrderAdj | null) {
+    saveCommissionOrderAdj(yearMonth, personnelId, unitId, saleId, next)
+    setAdjTick((n) => n + 1)
+  }
 
   if (!personnelId || !unitId || !yearMonth) {
     return (
@@ -107,7 +120,7 @@ export default function PayrollCommissionDetail() {
     <div className="space-y-6">
       <PageHeader
         title={`业绩提成明细 · ${detail.personnelName}`}
-        description={`${detail.unitName} · ${detail.yearMonth} · 按销售记录逐单核对`}
+        description={`${detail.unitName} · ${detail.yearMonth} · 按销售记录逐单核对，可调整单笔提成`}
       />
 
       <div className="flex flex-wrap gap-2">
@@ -136,7 +149,9 @@ export default function PayrollCommissionDetail() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>个人提成</CardDescription>
+            <CardDescription>
+              个人提成{detail.hasOrderAdj ? '（已按明细调整）' : ''}
+            </CardDescription>
             <CardTitle className="text-xl text-orange-600">
               {formatCurrency(detail.personalTotal)}
             </CardTitle>
@@ -164,10 +179,13 @@ export default function PayrollCommissionDetail() {
         <CardHeader>
           <CardTitle className="text-base">销售明细核对</CardTitle>
           <CardDescription>
-            与销售记录一致：客户姓名、购买产品、订单金额；另附提成比例与提成。
-            {Math.abs(lineSum - detail.personalTotal) > 0.05 && (
+            与销售记录一致：客户、产品、订单金额；「调整」可改单笔业绩/比例/提成金额，保存后本行提成与工资表个人提成同步。
+            {!detail.hasOrderAdj
+              && Math.abs(lineSum - detail.systemPersonalTotal) > 0.05 && (
               <span className="ml-1 text-amber-700">
-                （行提成合计与个人提成差额 {formatCurrency(detail.personalTotal - lineSum)}，多为月门槛汇总口径）
+                （行提成合计与系统个人提成差额{' '}
+                {formatCurrency(detail.systemPersonalTotal - lineSum)}
+                ，多为月门槛汇总口径；一旦有单笔调整则以明细合计为准）
               </span>
             )}
           </CardDescription>
@@ -180,13 +198,14 @@ export default function PayrollCommissionDetail() {
                 <TableHead className="min-w-[160px]">购买产品</TableHead>
                 <TableHead className="text-right min-w-[100px]">订单金额</TableHead>
                 <TableHead className="min-w-[120px]">提成比例</TableHead>
+                <TableHead className="min-w-[140px]">调整</TableHead>
                 <TableHead className="text-right min-w-[100px]">提成</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {detail.lines.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
+                  <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
                     本月该单位暂无相关销售记录
                   </TableCell>
                 </TableRow>
@@ -201,8 +220,19 @@ export default function PayrollCommissionDetail() {
                       {formatCurrency(line.orderAmount)}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">{line.rateLabel}</TableCell>
+                    <TableCell>
+                      <MCommissionOrderAdjCell
+                        adj={line.adj}
+                        onSave={(next) => handleSaveAdj(line.saleId, next)}
+                      />
+                    </TableCell>
                     <TableCell className="text-right tabular-nums font-medium text-violet-700">
                       {formatCurrency(line.amount)}
+                      {line.adj && Math.abs(line.amount - line.systemAmount) > 0.005 && (
+                        <div className="text-[10px] font-normal text-muted-foreground">
+                          原 {formatCurrency(line.systemAmount)}
+                        </div>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))
@@ -213,6 +243,7 @@ export default function PayrollCommissionDetail() {
                   <TableCell className="text-right tabular-nums text-blue-700">
                     {formatCurrency(orderSum)}
                   </TableCell>
+                  <TableCell />
                   <TableCell />
                   <TableCell className="text-right tabular-nums text-violet-700">
                     {formatCurrency(lineSum)}

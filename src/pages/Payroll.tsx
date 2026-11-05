@@ -52,6 +52,7 @@ import MPayrollEntryLinks, {
 } from '@/pages/Payroll/components/m-payroll-entry-links'
 import MSpecialAdditionalDialog from '@/pages/Payroll/components/m-special-additional-dialog'
 import MPayPlanDialog from '@/pages/Personnel/components/m-pay-plan-dialog'
+import { resolvePayrollCommissionTotal } from '@/lib/payrollCommissionDetail'
 import { enrichPayrollRowWithTax, resolvePayrollTax } from '@/lib/payrollTaxApply'
 import {
   getIitCycleBounds,
@@ -360,10 +361,25 @@ export default function Payroll() {
           teamMgmtContext,
           unit.id,
         )
-        const commission =
-          (calc.personalCommission || 0) +
-          (calc.internalSalesCommission || 0) +
-          (calc.managementCommission || 0)
+        const commissionResolved = resolvePayrollCommissionTotal({
+          personnelId: person.id,
+          unitId: unit.id,
+          yearMonth,
+          personnel,
+          salesUnits,
+          salesRecords,
+          products,
+          productPersonCommissions,
+          teamMgmtRules: teamMgmtCommissionRules,
+          performanceTargets,
+          unitProductSettlements,
+          systemParts: {
+            personal: calc.personalCommission || 0,
+            internal: calc.internalSalesCommission || 0,
+            teamMgmt: calc.managementCommission || 0,
+          },
+        })
+        const commission = commissionResolved.total
 
         const rawEntry = entries[person.id] || createEmptyPayrollEntry(person.id)
         // 个人代扣/专项附加只认人员档案，不认本月录入覆盖

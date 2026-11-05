@@ -1,6 +1,13 @@
 /** 工资核算 → 个人业绩提成明细（按销售记录逐单核对） */
 
 import {
+  applyCommissionOrderAdj,
+  formatCommissionOrderAdjSummary,
+  hasCommissionOrderAdj,
+  loadCommissionOrderAdjMap,
+  type CommissionOrderAdj,
+} from '@/lib/commissionOrderAdj'
+import {
   calcSaleCommissionReward,
   calcSalePersonCommissionPreview,
   findProductPersonCommission,
@@ -36,7 +43,16 @@ export interface CommissionDetailLine {
   orderAmount: number
   /** 提成规则文案 */
   rateLabel: string
-  /** 本单提成预估（含特殊奖励；月门槛可能与合计有细微差） */
+  /** 原比例 %（fixed 为 0） */
+  baseRatePct: number
+  commissionType: 'percentage' | 'fixed'
+  /** 系统未调整提成 */
+  systemAmount: number
+  /** 单笔调整（无则空） */
+  adj: CommissionOrderAdj | null
+  /** 调整摘要 */
+  adjSummary: string
+  /** 最终提成（含调整；明细与工资个人提成对齐用） */
   amount: number
 }
 
@@ -46,12 +62,17 @@ export interface PayrollCommissionDetailResult {
   unitId: string
   unitName: string
   yearMonth: string
+  /** 系统个人提成（未含单笔调整） */
+  systemPersonalTotal: number
+  /** 个人提成（有调整时 = 明细行合计） */
   personalTotal: number
   internalTotal: number
   teamMgmtTotal: number
   /** 与工资表「业绩提成」一致 */
   commissionTotal: number
   personalSales: number
+  /** 是否存在任意单笔调整 */
+  hasOrderAdj: boolean
   lines: CommissionDetailLine[]
 }
 
@@ -88,8 +109,9 @@ function buildSaleRecordLines(options: {
   salesRecords: SalesRecord[]
   products: Product[]
   ppcList: ProductPersonCommission[]
+  adjMap: Record<string, CommissionOrderAdj>
 }): CommissionDetailLine[] {
-  const { person, unitId, yearMonth, salesRecords, products, ppcList } = options
+  const { person, unitId, yearMonth, salesRecords, products, ppcList, adjMap } = options
   const monthly = filterByMonth(salesRecords, yearMonth)
 
   const productNameOf = (id: string, fallback?: string) =>
@@ -113,6 +135,16 @@ function buildSaleRecordLines(options: {
     const ppc =
       findProductPersonCommission(ppcList, sale.productId, sale.salesUnitId, person.id)
       || findProductPersonCommission(ppcList, sale.productId, person.salesUnitId, person.id)
+
+    const commissionType: 'percentage' | 'fixed' =
+      ppc?.personalCommissionType === 'fixed' ? 'fixed' : 'percentage'
+    let baseRatePct = 0
+    if (ppc) {
+      baseRatePct =
+        commissionType === 'fixed' ? 0 : Number(ppc.personalCommissionRate) || 0
+    } else {
+      baseRatePct = Number(person.salary?.personalCommissionRate) || 0
+    }
 
     let rateLabel = '未配置（走人员默认）'
     if (ppc) {
@@ -144,26 +176,34 @@ function buildSaleRecordLines(options: {
       ppcList,
     )
     // 无产品配置时用默认比例估算本单
-    let amount = preview
-    if (amount <= 0 && !ppc) {
+    let systemAmount = preview
+    if (systemAmount <= 0 && !ppc) {
       const rate = person.salary?.personalCommissionRate || 0
       const th = person.salary?.personalCommissionThreshold || 0
       if (rate > 0 && orderAmount > th) {
-        // 行级不含月门槛分摊，仅作核对参考
-        amount = orderAmount * (rate / 100)
+        systemAmount = orderAmount * (rate / 100)
       }
     }
     if (ppc) {
-      amount = preview + 0 // reward already in preview
-      // 若 preview 按全单人员 id 配置，分业绩时按份额重算比例部分
+      systemAmount = preview
       if ((sale.collaborators || []).length > 0 && orderAmount > 0 && (sale.totalAmount || 0) > 0) {
         const fullPreview = calcSalePersonCommissionPreview(sale, ppcList)
         const reward = calcSaleCommissionReward(sale, ppc)
         const baseFull = Math.max(0, fullPreview - reward)
         const shareRatio = orderAmount / (sale.totalAmount || 1)
-        amount = baseFull * shareRatio + reward * shareRatio
+        systemAmount = baseFull * shareRatio + reward * shareRatio
       }
     }
+
+    systemAmount = roundMoney(systemAmount)
+    const adj = adjMap[sale.id] || null
+    const applied = applyCommissionOrderAdj({
+      orderAmount,
+      baseRatePct,
+      systemAmount,
+      commissionType,
+      adj,
+    })
 
     return {
       id: sale.id,
@@ -174,7 +214,12 @@ function buildSaleRecordLines(options: {
       productId: sale.productId,
       orderAmount: roundMoney(orderAmount),
       rateLabel,
-      amount: roundMoney(amount),
+      baseRatePct,
+      commissionType,
+      systemAmount,
+      adj: hasCommissionOrderAdj(adj) ? adj : null,
+      adjSummary: formatCommissionOrderAdjSummary(adj),
+      amount: applied.amount,
     }
   })
 }
@@ -228,10 +273,11 @@ export function buildPayrollCommissionDetail(options: {
     teamMgmtContext,
     unitId,
   )
-  const personalTotal = roundMoney(calc.personalCommission || 0)
+  const systemPersonalTotal = roundMoney(calc.personalCommission || 0)
   const internalTotal = roundMoney(calc.internalSalesCommission || 0)
   const teamMgmtTotal = roundMoney(calc.managementCommission || 0)
 
+  const adjMap = loadCommissionOrderAdjMap(yearMonth, personnelId, unitId)
   const lines = buildSaleRecordLines({
     person,
     unitId,
@@ -239,7 +285,13 @@ export function buildPayrollCommissionDetail(options: {
     salesRecords,
     products,
     ppcList: productPersonCommissions,
+    adjMap,
   })
+
+  const hasOrderAdj = lines.some((l) => hasCommissionOrderAdj(l.adj))
+  const lineSum = roundMoney(lines.reduce((s, l) => s + l.amount, 0))
+  // 有单笔调整时：个人提成与明细行合计对齐；否则沿用系统月汇总
+  const personalTotal = hasOrderAdj ? lineSum : systemPersonalTotal
 
   return {
     personnelId,
@@ -247,12 +299,77 @@ export function buildPayrollCommissionDetail(options: {
     unitId,
     unitName,
     yearMonth,
+    systemPersonalTotal,
     personalTotal,
     internalTotal,
     teamMgmtTotal,
     commissionTotal: roundMoney(personalTotal + internalTotal + teamMgmtTotal),
     personalSales: roundMoney(getPersonalSales(personnelId, unitScopedSales, person.name)),
+    hasOrderAdj,
     lines,
+  }
+}
+
+/**
+ * 工资表用：个人提成在有单笔调整时改为明细合计，再加内部销售+团队管理
+ */
+export function resolvePayrollCommissionTotal(options: {
+  personnelId: string
+  unitId: string
+  yearMonth: string
+  personnel: Personnel[]
+  salesUnits: { id: string; name: string }[]
+  salesRecords: SalesRecord[]
+  products: Product[]
+  productPersonCommissions: ProductPersonCommission[]
+  teamMgmtRules: TeamMgmtCommissionRule[]
+  performanceTargets: PerformanceTarget[]
+  unitProductSettlements: UnitProductSettlement[]
+  /** 系统已算好的三块提成（避免重复重算时可传入） */
+  systemParts?: {
+    personal: number
+    internal: number
+    teamMgmt: number
+  }
+}): {
+  personal: number
+  internal: number
+  teamMgmt: number
+  total: number
+  hasOrderAdj: boolean
+} {
+  const adjMap = loadCommissionOrderAdjMap(
+    options.yearMonth,
+    options.personnelId,
+    options.unitId,
+  )
+  const p = options.systemParts
+  if (Object.keys(adjMap).length === 0 && p) {
+    return {
+      personal: p.personal || 0,
+      internal: p.internal || 0,
+      teamMgmt: p.teamMgmt || 0,
+      total: roundMoney((p.personal || 0) + (p.internal || 0) + (p.teamMgmt || 0)),
+      hasOrderAdj: false,
+    }
+  }
+
+  const detail = buildPayrollCommissionDetail(options)
+  if (!detail) {
+    return {
+      personal: p?.personal || 0,
+      internal: p?.internal || 0,
+      teamMgmt: p?.teamMgmt || 0,
+      total: roundMoney((p?.personal || 0) + (p?.internal || 0) + (p?.teamMgmt || 0)),
+      hasOrderAdj: false,
+    }
+  }
+  return {
+    personal: detail.personalTotal,
+    internal: detail.internalTotal,
+    teamMgmt: detail.teamMgmtTotal,
+    total: detail.commissionTotal,
+    hasOrderAdj: detail.hasOrderAdj,
   }
 }
 
