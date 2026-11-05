@@ -390,9 +390,16 @@ export default function Payroll() {
       }
     }
 
-    return list.sort((a, b) =>
-      `${a.unitName}-${a.name}`.localeCompare(`${b.unitName}-${b.name}`, 'zh-CN'),
-    )
+    // 内部员工在前，非内部（仅提成）沉底；同组内按单位、姓名
+    return list.sort((a, b) => {
+      const aExt = a.commissionOnly ? 1 : 0
+      const bExt = b.commissionOnly ? 1 : 0
+      if (aExt !== bExt) return aExt - bExt
+      return `${a.unitName}-${a.name}`.localeCompare(
+        `${b.unitName}-${b.name}`,
+        'zh-CN',
+      )
+    })
   }, [
     scopedUnits,
     filterUnitId,
