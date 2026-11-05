@@ -2755,10 +2755,10 @@ export default function PersonnelPage() {
               <div className="space-y-2">
                 <Label>目标部门 *</Label>
                 <Select value={transferUnitId || undefined} onValueChange={setTransferUnitId}>
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full">
                     <SelectValue placeholder="选择目标部门" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="max-h-[min(16rem,var(--radix-select-content-available-height))]">
                     {salesUnits
                       .filter((u) => u.id !== transferPerson.salesUnitId)
                       .map((u) => (
@@ -2945,10 +2945,10 @@ export default function PersonnelPage() {
                 value={editAssignmentUnitId || undefined}
                 onValueChange={setEditAssignmentUnitId}
               >
-                <SelectTrigger>
+                <SelectTrigger className="w-full">
                   <SelectValue placeholder="选择单位" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="max-h-[min(16rem,var(--radix-select-content-available-height))]">
                   {salesUnits.map((u) => (
                     <SelectItem key={u.id} value={u.id}>
                       {u.name}
