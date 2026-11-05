@@ -987,7 +987,7 @@ export default function Payroll() {
                       <TableHead className="min-w-[120px] bg-violet-50/80 text-right">
                         累计扣税基数
                         <div className="text-[10px] font-normal text-muted-foreground">
-                          上月应纳税所得额C
+                          =上月应纳税所得额C
                         </div>
                       </TableHead>
                     )}

@@ -251,24 +251,13 @@ function resolveCumulativeTaxBaseFromPriorC(options: {
 
   const prevYm = priors[priors.length - 1]
   const prevEntry = loadPayrollEntries(prevYm)[person.id]
-  // 对齐上月表「应纳税所得额 C」（忽略脏 0 快照）
-  if (prevEntry) {
-    const prevPayable = Number(prevEntry.payableSnapshot) || 0
-    const prevTax = resolvePayrollTax({
-      person,
-      yearMonth: prevYm,
-      payable: prevPayable,
-      entry: prevEntry,
-    })
-    return roundMoney(prevTax.taxable)
-  }
-
   const prevTaxBase = resolveMonthTaxBase({
     person,
     yearMonth: prevYm,
     opening,
     throughYm,
   })
+  // 只取上月 C（手工/快照优先，脏 0 快照会回退重算）
   return resolvePriorMonthTaxableC({
     person,
     prevYm,
@@ -539,32 +528,18 @@ export function getIitCarryFromPriorMonth(options: {
   })
   const priorPeriodTax = priorEntry ? getEffectiveIncomeTax(priorEntry) : 0
   // 与结转公式同一口径：本月税基 = 上月 C
-  let priorTaxBase = 0
-  let priorC = 0
-  if (priorEntry) {
-    const priorPayable = Number(priorEntry.payableSnapshot) || 0
-    const priorTax = resolvePayrollTax({
-      person,
-      yearMonth: priorYm,
-      payable: priorPayable,
-      entry: priorEntry,
-    })
-    priorTaxBase = priorTax.cumulativeTaxBase
-    priorC = priorTax.taxable
-  } else {
-    priorTaxBase = resolveMonthTaxBase({
-      person,
-      yearMonth: priorYm,
-      opening,
-      throughYm,
-    })
-    priorC = resolvePriorMonthTaxableC({
-      person,
-      prevYm: priorYm,
-      prevTaxBase: priorTaxBase,
-      prevEntry: priorEntry,
-    })
-  }
+  const priorTaxBase = resolveMonthTaxBase({
+    person,
+    yearMonth: priorYm,
+    opening,
+    throughYm,
+  })
+  const priorC = resolvePriorMonthTaxableC({
+    person,
+    prevYm: priorYm,
+    prevTaxBase: priorTaxBase,
+    prevEntry: priorEntry,
+  })
   return {
     priorYm,
     priorB: roundMoney(priorB),
