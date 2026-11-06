@@ -1071,9 +1071,8 @@ export default function CostManagement() {
                     other: acc.other + d.otherBonus - d.otherDeduction,
                   }), { base: 0, conf: 0, perf: 0, pos: 0, mgmt: 0, personal: 0, internal: 0, leave: 0, other: 0 });
                   return (
-                    <>
+                    <Fragment key={unit.unitId}>
                       <TableRow
-                        key={unit.unitId}
                         className="cursor-pointer hover:bg-accent/50"
                         onClick={() => toggleSalaryRow(unit.unitId)}
                       >
@@ -1111,99 +1110,105 @@ export default function CostManagement() {
                           {formatCurrency(unit.totalCost)}
                         </TableCell>
                       </TableRow>
-                      {isExpanded && (
-                        <TableRow key={unit.unitId + "-detail"} className="bg-blue-50/30">
-                          <TableCell colSpan={17} className="py-3">
-                            <div className="ml-8 space-y-2">
-                              {unit.details.map((d) => {
-                                const personMeta = personnel.find((p) => p.id === d.personId);
-                                const isDistributionPerson = Boolean(personMeta?.highCommissionFrom);
-                                const allocPct = d.costAllocationRatio != null
-                                  ? Math.round(d.costAllocationRatio * 1000) / 10
-                                  : null
-                                const allocMode = personMeta?.costAllocation?.mode === 'fixedAmount'
-                                  ? '金额'
-                                  : '比例'
-                                return (
-                                <div
-                                  key={d.personId}
-                                  className="overflow-x-auto rounded-lg border bg-card px-4 py-2 text-sm"
-                                >
-                                  <div className="flex min-w-[1160px] items-center gap-x-4 gap-y-1">
-                                    <div className="flex w-44 shrink-0 items-center gap-1.5">
-                                      <span className="truncate font-medium">{d.name}</span>
-                                      {allocPct != null ? (
-                                        <Badge
-                                          variant="outline"
-                                          className="shrink-0 border-sky-300 px-1 py-0 text-[10px] text-sky-700"
-                                          title={
-                                            allocMode === '金额'
-                                              ? '固定成本按固定金额分摊到本单位'
-                                              : '固定成本按比例分摊到本单位'
-                                          }
-                                        >
-                                          {allocMode} {allocPct}%
-                                        </Badge>
-                                      ) : null}
-                                      {isDistributionPerson ? (
-                                        <Badge
-                                          variant="outline"
-                                          className="shrink-0 border-violet-200 px-1 py-0 text-[10px] text-violet-700"
-                                        >
-                                          分销
-                                        </Badge>
-                                      ) : null}
-                                    </div>
-                                    <span className="w-24 shrink-0 truncate text-muted-foreground">
-                                      {d.position || '-'}
-                                    </span>
-                                    <span className="shrink-0 whitespace-nowrap text-gray-600">
-                                      底薪 {formatCurrency(d.baseSalary)}
-                                    </span>
-                                    <span className="shrink-0 whitespace-nowrap text-slate-700">
-                                      保密费 {formatCurrency(d.confidentialityFee || 0)}
-                                    </span>
-                                    <span className="shrink-0 whitespace-nowrap text-blue-600">
-                                      绩效 {formatCurrency(d.performance)}
-                                    </span>
-                                    <span className="shrink-0 whitespace-nowrap text-amber-600">
-                                      个人 {formatCurrency(d.personalCommission)}
-                                    </span>
-                                    <span className="shrink-0 whitespace-nowrap text-sky-600">
-                                      分销奖金 {formatCurrency(d.internalSalesCommission)}
-                                    </span>
-                                    <span className="shrink-0 whitespace-nowrap text-emerald-600">
-                                      团队 {formatCurrency(d.managementCommission)}
-                                    </span>
-                                    <span className="shrink-0 whitespace-nowrap text-red-600">
-                                      请假扣 {formatCurrency(d.leaveDeduction)}
-                                    </span>
-                                    <span className="shrink-0 whitespace-nowrap text-amber-600">
-                                      其他 {formatCurrency(d.otherBonus - d.otherDeduction)}
-                                    </span>
-                                    <span className="shrink-0 whitespace-nowrap text-red-600">
-                                      社保 {formatCurrency(d.socialInsurance)}
-                                    </span>
-                                    <span className="shrink-0 whitespace-nowrap text-cyan-600">
-                                      公积金 {formatCurrency(d.housingFund)}
-                                    </span>
-                                    <span className="shrink-0 whitespace-nowrap text-blue-600">
-                                      薪酬 {formatCurrency(d.salaryTotal)}
-                                    </span>
-                                    <span className="ml-auto shrink-0 whitespace-nowrap font-bold text-blue-700">
-                                      合计 {formatCurrency(d.total)}
-                                    </span>
-                                  </div>
-                                </div>
-                              )})}
-                              {unit.details.length === 0 && (
-                                <p className="text-center text-sm text-muted-foreground py-2">该单位暂无在职人员</p>
-                              )}
-                            </div>
+                      {isExpanded && unit.details.length === 0 && (
+                        <TableRow className="bg-muted/20">
+                          <TableCell colSpan={17} className="py-3 text-center text-sm text-muted-foreground">
+                            该单位暂无在职人员
                           </TableCell>
                         </TableRow>
                       )}
-                    </>
+                      {isExpanded && unit.details.map((d) => {
+                        const personMeta = personnel.find((p) => p.id === d.personId);
+                        const isDistributionPerson = Boolean(personMeta?.highCommissionFrom);
+                        const allocPct = d.costAllocationRatio != null
+                          ? Math.round(d.costAllocationRatio * 1000) / 10
+                          : null
+                        const allocMode = personMeta?.costAllocation?.mode === 'fixedAmount'
+                          ? '金额'
+                          : '比例'
+                        const otherAdj = d.otherBonus - d.otherDeduction
+                        const socialHousing = d.socialInsurance + d.housingFund
+                        return (
+                          <TableRow
+                            key={`${unit.unitId}-${d.personId}`}
+                            className="border-t bg-muted/15 text-sm hover:bg-muted/30"
+                          >
+                            <TableCell className="w-8" />
+                            <TableCell className="pl-6">
+                              <div className="flex min-w-0 items-center gap-1.5">
+                                <span className="truncate font-medium">{d.name}</span>
+                                {allocPct != null ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="shrink-0 border-sky-300 px-1 py-0 text-[10px] text-sky-700"
+                                    title={
+                                      allocMode === '金额'
+                                        ? '固定成本按固定金额分摊到本单位'
+                                        : '固定成本按比例分摊到本单位'
+                                    }
+                                  >
+                                    {allocMode} {allocPct}%
+                                  </Badge>
+                                ) : null}
+                                {isDistributionPerson ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="shrink-0 border-violet-200 px-1 py-0 text-[10px] text-violet-700"
+                                  >
+                                    分销
+                                  </Badge>
+                                ) : null}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right text-muted-foreground">
+                              {d.position || '-'}
+                            </TableCell>
+                            <TableCell className="text-right text-gray-600">
+                              {formatCurrency(d.baseSalary)}
+                            </TableCell>
+                            <TableCell className="text-right text-slate-700">
+                              {formatCurrency(d.confidentialityFee || 0)}
+                            </TableCell>
+                            <TableCell className="text-right text-blue-600">
+                              {formatCurrency(d.performance)}
+                            </TableCell>
+                            <TableCell className="text-right text-violet-600">
+                              {formatCurrency(d.positionAllowance)}
+                            </TableCell>
+                            <TableCell className="text-right text-emerald-600">
+                              {formatCurrency(d.managementCommission)}
+                            </TableCell>
+                            <TableCell className="text-right text-amber-600">
+                              {formatCurrency(d.personalCommission)}
+                            </TableCell>
+                            <TableCell className="text-right text-sky-600">
+                              {formatCurrency(d.internalSalesCommission)}
+                            </TableCell>
+                            <TableCell className="text-right text-red-600">
+                              -{formatCurrency(d.leaveDeduction)}
+                            </TableCell>
+                            <TableCell className="text-right text-amber-600">
+                              {otherAdj >= 0 ? '+' : ''}{formatCurrency(otherAdj)}
+                            </TableCell>
+                            <TableCell className="text-right text-red-600">
+                              {formatCurrency(d.socialInsurance)}
+                            </TableCell>
+                            <TableCell className="text-right text-cyan-600">
+                              {formatCurrency(d.housingFund)}
+                            </TableCell>
+                            <TableCell className="text-right font-medium text-blue-600">
+                              {formatCurrency(d.salaryTotal)}
+                            </TableCell>
+                            <TableCell className="text-right font-medium text-red-600">
+                              {formatCurrency(socialHousing)}
+                            </TableCell>
+                            <TableCell className="text-right font-bold text-blue-700">
+                              {formatCurrency(d.total)}
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </Fragment>
                   );
                 })}
                 {salaryCosts.units.length === 0 && (
