@@ -58,17 +58,46 @@ export function normalizeCostAllocationShares(
   }))
 }
 
-/** 配置是否有效（可启用分摊） */
+/** 配置是否有效（可启用分摊）；允许仅 1 个单位（如成本全在 B=100%） */
 export function isValidCostAllocationShares(
   shares: CostAllocationShare[],
   mode: CostAllocationMode = 'ratio',
 ): boolean {
-  if (shares.length < 2) return false
+  if (shares.length < 1) return false
   if (mode === 'fixedAmount') {
     return shares.every((r) => (Number(r.amount) || 0) > 0)
   }
   const sum = shares.reduce((s, r) => s + (Number(r.ratio) || 0), 0)
-  return Math.abs(sum - 100) <= RATIO_SUM_TOLERANCE
+  return (
+    shares.every((r) => (Number(r.ratio) || 0) > 0)
+    && Math.abs(sum - 100) <= RATIO_SUM_TOLERANCE
+  )
+}
+
+/** 校验失败时的中文原因（通过则返回空串） */
+export function getCostAllocationSharesInvalidReason(
+  shares: CostAllocationShare[],
+  mode: CostAllocationMode = 'ratio',
+): string {
+  if (shares.length < 1) {
+    return mode === 'fixedAmount'
+      ? '固定金额分摊至少配置 1 个单位，且金额 > 0'
+      : '比例分摊至少配置 1 个单位，且合计 100%'
+  }
+  if (mode === 'fixedAmount') {
+    if (shares.some((r) => (Number(r.amount) || 0) <= 0)) {
+      return '固定金额分摊每行金额须 > 0（不要填 0）'
+    }
+    return ''
+  }
+  if (shares.some((r) => (Number(r.ratio) || 0) <= 0)) {
+    return '比例分摊每行比例须 > 0（不要填 0）'
+  }
+  const sum = shares.reduce((s, r) => s + (Number(r.ratio) || 0), 0)
+  if (Math.abs(sum - 100) > RATIO_SUM_TOLERANCE) {
+    return '比例分摊合计须为 100%（可只配成本单位 100%）'
+  }
+  return ''
 }
 
 export function parsePersonnelCostAllocation(
@@ -187,12 +216,14 @@ export function hasCostAllocation(
 
 /**
  * 把固定金额配置换成各单位权重（合计 1）。
- * - 配置金额之和 ≤ 总成本：各单位拿配置额，剩余归主单位
- * - 配置金额之和 > 总成本：按配置额等比缩放到总成本
+ * 只在已配置单位之间分配，保证摊完：
+ * - 配置合计 ≠ 总成本：按配置额等比缩放（放大或缩小）到总成本
+ * - 不再把差额静默塞给主单位
+ * @param _primaryUnitId 保留参数兼容旧调用，不再用于剩余归属
  */
 export function buildFixedAmountWeights(
   shares: CostAllocationShare[],
-  primaryUnitId: string,
+  _primaryUnitId: string,
   totalFixed: number,
 ): Map<string, number> {
   const weights = new Map<string, number>()
@@ -205,33 +236,13 @@ export function buildFixedAmountWeights(
   }
   if (sumConfigured <= 0) return weights
 
-  const assigned = new Map<string, number>()
-  if (sumConfigured > t) {
-    const scale = t / sumConfigured
-    for (const row of shares) {
-      const amt = (Number(row.amount) || 0) * scale
-      assigned.set(
-        row.salesUnitId,
-        (assigned.get(row.salesUnitId) || 0) + amt,
-      )
-    }
-  } else {
-    for (const row of shares) {
-      const amt = Number(row.amount) || 0
-      assigned.set(
-        row.salesUnitId,
-        (assigned.get(row.salesUnitId) || 0) + amt,
-      )
-    }
-    const remainder = t - sumConfigured
-    if (remainder > 0.0001) {
-      const primary = primaryUnitId || shares[0].salesUnitId
-      assigned.set(primary, (assigned.get(primary) || 0) + remainder)
-    }
-  }
-
-  for (const [unitId, amt] of assigned) {
-    weights.set(unitId, amt / t)
+  const scale = t / sumConfigured
+  for (const row of shares) {
+    const amt = (Number(row.amount) || 0) * scale
+    weights.set(
+      row.salesUnitId,
+      (weights.get(row.salesUnitId) || 0) + amt / t,
+    )
   }
   return weights
 }
@@ -259,10 +270,9 @@ export function getCostAllocationRatioForUnit(
   }
   const t = Number(totalFixed)
   if (!Number.isFinite(t) || t < 0) {
-    // 尚不知总成本时：有配置额则先当作「有份额」占位（>0），真正拆分时再算
+    // 尚不知总成本时：仅已配置单位占位，不把主单位算进来
     const row = resolved.shares.find((s) => s.salesUnitId === unitId)
     if (row && (Number(row.amount) || 0) > 0) return 0.000001
-    if (unitId === resolved.primaryUnitId) return 0.000001
     return 0
   }
   const weights = buildFixedAmountWeights(
@@ -282,11 +292,7 @@ export function getCostAllocationUnitIds(
 ): string[] {
   const resolved = resolveCostAllocation(person, yearMonth)
   if (!resolved) return []
-  const ids = new Set(resolved.shares.map((s) => s.salesUnitId))
-  if (resolved.mode === 'fixedAmount' && resolved.primaryUnitId) {
-    ids.add(resolved.primaryUnitId)
-  }
-  return Array.from(ids)
+  return Array.from(new Set(resolved.shares.map((s) => s.salesUnitId)))
 }
 
 /** 固定成本合计（用于固定金额权重） */

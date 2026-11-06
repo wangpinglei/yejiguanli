@@ -18,6 +18,8 @@ import {
   MONTHLY_STANDARD_HOURS,
 } from "@/lib/salary";
 import {
+  getCostAllocationSharesInvalidReason,
+  getFixedCostTotalForAllocation,
   isValidCostAllocationShares,
   normalizeCostAllocationMode,
   normalizeCostAllocationShares,
@@ -659,13 +661,31 @@ export default function PersonnelPage() {
       ? normalizeCostAllocationShares(costAllocationShares, mode)
       : []
     const effectiveFrom = String(costAllocationEffectiveFrom || '').slice(0, 7)
-    if (isInternal && shares.length > 0 && !isValidCostAllocationShares(shares, mode)) {
-      alert(
-        mode === 'fixedAmount'
-          ? '固定金额分摊需至少 2 个单位，且每行金额 > 0'
-          : '比例分摊需至少 2 个单位，且比例合计为 100%',
-      )
-      return
+    if (isInternal && shares.length > 0) {
+      const reason = getCostAllocationSharesInvalidReason(shares, mode)
+      if (reason) {
+        alert(reason)
+        return
+      }
+      if (mode === 'fixedAmount') {
+        const estimate = getFixedCostTotalForAllocation({
+          baseSalary: Number(salary.baseSalary) || 0,
+          confidentialityFee: Number(salary.confidentialityFee) || 0,
+          performance: Number(salary.performance) || 0,
+          positionAllowance: Number(salary.positionAllowance) || 0,
+          leaveDeduction: 0,
+          socialInsurance: Number(form.socialInsurance) || 0,
+          housingFund: Number(form.housingFund) || 0,
+        })
+        const amountSum = shares.reduce((s, r) => s + (Number(r.amount) || 0), 0)
+        if (estimate > 0.5 && Math.abs(amountSum - estimate) > 1) {
+          alert(
+            `固定金额合计 ¥${amountSum.toFixed(0)} 须等于人员固定成本 ¥${estimate.toFixed(0)}`
+            + '（成本全在某单位时，只配该单位并填全额即可）',
+          )
+          return
+        }
+      }
     }
     if (isInternal && shares.length > 0 && !/^\d{4}-\d{2}$/.test(effectiveFrom)) {
       alert('请填写成本分摊的生效月份')
@@ -691,11 +711,8 @@ export default function PersonnelPage() {
         && normalized.length > 0
         && !isValidCostAllocationShares(normalized, mMode)
       ) {
-        alert(
-          mMode === 'fixedAmount'
-            ? `月度分摊 ${m.yearMonth}：固定金额需至少 2 个单位且每行金额 > 0`
-            : `月度分摊 ${m.yearMonth}：比例需至少 2 个单位且合计 100%`,
-        )
+        const reason = getCostAllocationSharesInvalidReason(normalized, mMode)
+        alert(`月度分摊 ${m.yearMonth}：${reason || '配置无效'}`)
         return
       }
     }
@@ -2122,11 +2139,27 @@ export default function PersonnelPage() {
                       : (Number(r.ratio) || 0)),
                     0,
                   )
+                  const fixedCostEstimate = getFixedCostTotalForAllocation({
+                    baseSalary: Number(form.salary.baseSalary) || 0,
+                    confidentialityFee: Number(form.salary.confidentialityFee) || 0,
+                    performance: Number(form.salary.performance) || 0,
+                    positionAllowance: Number(form.salary.positionAllowance) || 0,
+                    leaveDeduction: 0,
+                    socialInsurance: Number(form.socialInsurance) || 0,
+                    housingFund: Number(form.housingFund) || 0,
+                  })
                   const sharesOk =
                     form.costAllocationShares.length === 0
-                    || isValidCostAllocationShares(
-                      normalizeCostAllocationShares(form.costAllocationShares, mode),
-                      mode,
+                    || (
+                      isValidCostAllocationShares(
+                        normalizeCostAllocationShares(form.costAllocationShares, mode),
+                        mode,
+                      )
+                      && (
+                        !isFixed
+                        || fixedCostEstimate <= 0.5
+                        || Math.abs(shareSum - fixedCostEstimate) <= 1
+                      )
                     )
                   return (
                     <div className="space-y-3 rounded-lg border border-sky-200 bg-sky-50/30 p-4">
@@ -2146,6 +2179,9 @@ export default function PersonnelPage() {
                             ? '未启用 · 按调岗天数'
                             : isFixed
                               ? `合计 ¥${shareSum.toFixed(0)}`
+                                + (fixedCostEstimate > 0.5
+                                  ? ` / 成本 ¥${fixedCostEstimate.toFixed(0)}`
+                                  : '')
                               : `合计 ${shareSum.toFixed(1)}%`}
                         </Badge>
                       </div>
@@ -2196,8 +2232,9 @@ export default function PersonnelPage() {
                         从生效月份（含）起按下方规则分摊；更早月份仍按调岗天数。
                         底薪、保密费、绩效、岗位补贴、社保/公积金企业部分计入各单位；提成仍跟成交单位。
                         {isFixed
-                          ? ' 固定金额：合计不足时剩余归主单位，超出则等比缩放。'
-                          : ' 按比例：至少 2 个单位且合计 100%。'}
+                          ? ' 固定金额：各行合计须等于人员固定成本（可只配成本单位并填全额）；'
+                            + '与实际月成本不一致时按配置比例缩放摊完，不再把差额塞给主单位。'
+                          : ' 按比例：至少 1 个单位且合计 100%（成本全在某单位时填该单位 100% 即可）。'}
                         「月度覆盖」可单独改某一个月。
                       </p>
                       <div className="space-y-2">
@@ -2313,25 +2350,13 @@ export default function PersonnelPage() {
                                 ? [
                                   {
                                     salesUnitId: form.salesUnitId || '',
-                                    amount: 0,
-                                  },
-                                  {
-                                    salesUnitId: salesUnits.find(
-                                      (u) => u.id !== form.salesUnitId,
-                                    )?.id || '',
-                                    amount: 0,
+                                    amount: fixedCostEstimate > 0 ? fixedCostEstimate : 0,
                                   },
                                 ]
                                 : [
                                   {
                                     salesUnitId: form.salesUnitId || '',
-                                    ratio: 50,
-                                  },
-                                  {
-                                    salesUnitId: salesUnits.find(
-                                      (u) => u.id !== form.salesUnitId,
-                                    )?.id || '',
-                                    ratio: 50,
+                                    ratio: 100,
                                   },
                                 ]
                               setForm({
@@ -2341,7 +2366,7 @@ export default function PersonnelPage() {
                                   {
                                     yearMonth: ym,
                                     mode,
-                                    shares: form.costAllocationShares.length >= 2
+                                    shares: form.costAllocationShares.length >= 1
                                       ? form.costAllocationShares.map((s) => ({ ...s }))
                                       : fallbackShares,
                                   },
