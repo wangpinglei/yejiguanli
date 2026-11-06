@@ -100,6 +100,8 @@ export default function ProfitAnalysis() {
   const [expandedIncomeRows, setExpandedIncomeRows] = useState<Set<string>>(new Set());
   // 成本明细展开状态
   const [expandedCostRows, setExpandedCostRows] = useState<Set<string>>(new Set());
+  // 各单位盈亏明细展开
+  const [expandedUnitPlRows, setExpandedUnitPlRows] = useState<Set<string>>(new Set());
   // 结算调整弹窗
   const [settlementDialog, setSettlementDialog] = useState<{
     unitId: string
@@ -393,14 +395,28 @@ unitIds,
       );
       const commission = unitSalary.grandSalesCommission;
       const productProfit = settlementIncome - commission;
-      const otherIncome = monthlyIncomeRecords
-        .filter((r) => r.salesUnitId === unit.id)
-        .reduce((sum, r) => sum + r.totalAmount, 0)
+      const unitIncomeRecords = monthlyIncomeRecords.filter(
+        (r) => r.salesUnitId === unit.id,
+      );
+      const otherIncome = unitIncomeRecords.reduce(
+        (sum, r) => sum + r.totalAmount,
+        0,
+      );
+      const settlement = costSettlements.find(
+        (r) => r.salesUnitId === unit.id && r.yearMonth === selectedMonth,
+      );
       const manualCost = getEffectiveManualCost(
         costSettlements,
         costRecords,
         unit.id,
         selectedMonth,
+        unit,
+      );
+      const costLines = buildCostConfirmLines(
+        costRecords,
+        unit.id,
+        selectedMonth,
+        settlement?.actualAmount,
         unit,
       );
       const salaryCost = unitSalary.grandTotal;
@@ -419,6 +435,13 @@ unitIds,
         cost,
         profit,
         margin,
+        manualCost,
+        salaryCost,
+        salaryBase: unitSalary.grandSalary,
+        socialHousing: unitSalary.grandSocialHousingFund,
+        costLines,
+        unitIncomeRecords,
+        salesCount: unitSales.length,
       };
     }).sort((a, b) => b.profit - a.profit);
   }, [
@@ -725,6 +748,15 @@ unitIds,
 
   function toggleCostRow(unitId: string) {
     setExpandedCostRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(unitId)) next.delete(unitId);
+      else next.add(unitId);
+      return next;
+    });
+  }
+
+  function toggleUnitPlRow(unitId: string) {
+    setExpandedUnitPlRows((prev) => {
       const next = new Set(prev);
       if (next.has(unitId)) next.delete(unitId);
       else next.add(unitId);
@@ -1222,8 +1254,8 @@ unitIds,
           <CardTitle className="text-base">各单位盈亏明细</CardTitle>
           <CardDescription>
             {isAllFilterUnits
-              ? "按销售单位对比营收、成本与利润（当前：全部单位）"
-              : `仅显示所选单位：${filterUnitLabel}`}
+              ? "按销售单位对比营收、成本与利润（当前：全部单位）；点击行可展开明细"
+              : `仅显示所选单位：${filterUnitLabel}；点击行可展开明细`}
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -1231,6 +1263,7 @@ unitIds,
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10"></TableHead>
                   <TableHead>排名</TableHead>
                   <TableHead>销售单位</TableHead>
                   <TableHead className="text-right">实收金额</TableHead>
@@ -1244,37 +1277,217 @@ unitIds,
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {unitComparison.map((unit, index) => (
-                  <TableRow key={unit.name}>
-                    <TableCell>
-                      <div className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${
-                        index === 0 ? "bg-amber-100 text-amber-700" :
-                        index === 1 ? "bg-gray-100 text-gray-600" :
-                        index === 2 ? "bg-orange-100 text-orange-700" :
-                        "bg-muted text-muted-foreground"
-                      }`}>
-                        {index + 1}
-                      </div>
-                    </TableCell>
-                    <TableCell className="font-medium">{unit.name}</TableCell>
-                    <TableCell className="text-right text-blue-600">{formatCurrency(unit.salesAmount)}</TableCell>
-                    <TableCell className="text-right text-cyan-600 font-medium">{formatCurrency(unit.settlementIncome)}</TableCell>
-                    <TableCell className="text-right text-emerald-600">{formatCurrency(unit.otherIncome || 0)}</TableCell>
-                    <TableCell className="text-right text-violet-600">{formatCurrency(unit.commission)}</TableCell>
-                    <TableCell className="text-right font-semibold text-emerald-600">{formatCurrency(unit.productProfit)}</TableCell>
-                    <TableCell className="text-right text-orange-600">{formatCurrency(unit.cost)}</TableCell>
-                    <TableCell className={`text-right font-bold ${unit.profit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                      {formatCurrency(unit.profit)}
-                    </TableCell>
-                    <TableCell>
-                      {unit.profit >= 0 ? (
-                        <Badge className="bg-emerald-50 text-emerald-700">盈利</Badge>
-                      ) : (
-                        <Badge className="bg-red-50 text-red-700">亏损</Badge>
+                {unitComparison.map((unit, index) => {
+                  const isExp = expandedUnitPlRows.has(unit.id);
+                  return (
+                    <Fragment key={unit.id}>
+                      <TableRow
+                        className="cursor-pointer hover:bg-accent/50"
+                        onClick={() => toggleUnitPlRow(unit.id)}
+                      >
+                        <TableCell>
+                          <button
+                            type="button"
+                            className="flex h-6 w-6 items-center justify-center rounded"
+                            aria-label={isExp ? "收起明细" : "展开明细"}
+                          >
+                            {isExp ? (
+                              <ChevronDown className="h-4 w-4" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4" />
+                            )}
+                          </button>
+                        </TableCell>
+                        <TableCell>
+                          <div className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${
+                            index === 0 ? "bg-amber-100 text-amber-700" :
+                            index === 1 ? "bg-gray-100 text-gray-600" :
+                            index === 2 ? "bg-orange-100 text-orange-700" :
+                            "bg-muted text-muted-foreground"
+                          }`}>
+                            {index + 1}
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-medium">{unit.name}</TableCell>
+                        <TableCell className="text-right text-blue-600">{formatCurrency(unit.salesAmount)}</TableCell>
+                        <TableCell className="text-right text-cyan-600 font-medium">{formatCurrency(unit.settlementIncome)}</TableCell>
+                        <TableCell className="text-right text-emerald-600">{formatCurrency(unit.otherIncome || 0)}</TableCell>
+                        <TableCell className="text-right text-violet-600">{formatCurrency(unit.commission)}</TableCell>
+                        <TableCell className="text-right font-semibold text-emerald-600">{formatCurrency(unit.productProfit)}</TableCell>
+                        <TableCell className="text-right text-orange-600">{formatCurrency(unit.cost)}</TableCell>
+                        <TableCell className={`text-right font-bold ${unit.profit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                          {formatCurrency(unit.profit)}
+                        </TableCell>
+                        <TableCell>
+                          {unit.profit >= 0 ? (
+                            <Badge className="bg-emerald-50 text-emerald-700">盈利</Badge>
+                          ) : (
+                            <Badge className="bg-red-50 text-red-700">亏损</Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                      {isExp && (
+                        <TableRow className="bg-muted/20 hover:bg-muted/20">
+                          <TableCell colSpan={11} className="py-3">
+                            <div className="ml-4 grid gap-4 lg:grid-cols-2">
+                              <div className="space-y-2 rounded-lg border bg-card p-3">
+                                <p className="text-sm font-medium text-emerald-700">收入构成</p>
+                                <div className="space-y-1.5 text-sm">
+                                  <div className="flex justify-between gap-4">
+                                    <span className="text-muted-foreground">
+                                      实收金额（{unit.salesCount} 笔销售）
+                                    </span>
+                                    <span className="tabular-nums text-blue-600">
+                                      {formatCurrency(unit.salesAmount)}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between gap-4">
+                                    <span className="text-muted-foreground">结算收入</span>
+                                    <span className="tabular-nums font-medium text-cyan-600">
+                                      {formatCurrency(unit.settlementIncome)}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between gap-4">
+                                    <span className="text-muted-foreground">
+                                      其他收入（{unit.unitIncomeRecords.length} 条）
+                                    </span>
+                                    <span className="tabular-nums text-emerald-600">
+                                      {formatCurrency(unit.otherIncome || 0)}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between gap-4 border-t pt-1.5 font-medium">
+                                    <span>收入合计（结算+其他）</span>
+                                    <span className="tabular-nums text-emerald-700">
+                                      {formatCurrency(
+                                        unit.settlementIncome + (unit.otherIncome || 0),
+                                      )}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between gap-4">
+                                    <span className="text-muted-foreground">
+                                      销售提成（产品利润=结算−提成）
+                                    </span>
+                                    <span className="tabular-nums text-violet-600">
+                                      {formatCurrency(unit.commission)}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between gap-4">
+                                    <span className="text-muted-foreground">产品利润</span>
+                                    <span className="tabular-nums font-semibold text-emerald-600">
+                                      {formatCurrency(unit.productProfit)}
+                                    </span>
+                                  </div>
+                                </div>
+                                {unit.unitIncomeRecords.length > 0 && (
+                                  <div className="mt-2 space-y-1 border-t pt-2">
+                                    <p className="text-xs text-muted-foreground">其他收入明细</p>
+                                    {unit.unitIncomeRecords.map((r) => (
+                                      <div
+                                        key={r.id}
+                                        className="flex items-center justify-between gap-2 text-xs"
+                                      >
+                                        <span className="truncate text-muted-foreground">
+                                          {formatDate(r.date)}
+                                          {r.items?.[0]?.category
+                                            ? ` · ${r.items[0].category}`
+                                            : ""}
+                                          {r.remark ? ` · ${r.remark}` : ""}
+                                        </span>
+                                        <span className="shrink-0 tabular-nums text-emerald-600">
+                                          {formatCurrency(r.totalAmount)}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="space-y-2 rounded-lg border bg-card p-3">
+                                <p className="text-sm font-medium text-orange-700">运营成本构成</p>
+                                <div className="space-y-1.5 text-sm">
+                                  <div className="flex justify-between gap-4">
+                                    <span className="text-muted-foreground">手工成本（录入/确认）</span>
+                                    <span className="tabular-nums text-orange-600">
+                                      {formatCurrency(unit.manualCost)}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between gap-4">
+                                    <span className="text-muted-foreground">
+                                      薪酬成本（含提成等，不含社保公积金）
+                                    </span>
+                                    <span className="tabular-nums text-orange-600">
+                                      {formatCurrency(unit.salaryBase)}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between gap-4">
+                                    <span className="text-muted-foreground">社保公积金成本</span>
+                                    <span className="tabular-nums text-orange-600">
+                                      {formatCurrency(unit.socialHousing)}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between gap-4 text-xs text-muted-foreground">
+                                    <span>其中销售提成（已含在薪酬成本）</span>
+                                    <span className="tabular-nums">
+                                      {formatCurrency(unit.commission)}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between gap-4 border-t pt-1.5 font-medium">
+                                    <span>运营成本合计</span>
+                                    <span className="tabular-nums text-orange-700">
+                                      {formatCurrency(unit.cost)}
+                                    </span>
+                                  </div>
+                                  <div className={`flex justify-between gap-4 font-bold ${
+                                    unit.profit >= 0 ? "text-emerald-700" : "text-red-700"
+                                  }`}>
+                                    <span>净利润</span>
+                                    <span className="tabular-nums">
+                                      {formatCurrency(unit.profit)}
+                                    </span>
+                                  </div>
+                                </div>
+                                {unit.costLines.length > 0 ? (
+                                  <div className="mt-2 space-y-1 border-t pt-2">
+                                    <p className="text-xs text-muted-foreground">手工成本明细</p>
+                                    {unit.costLines.map((line) => (
+                                      <div
+                                        key={line.key}
+                                        className="flex items-center justify-between gap-2 text-xs"
+                                      >
+                                        <span className="truncate text-muted-foreground">
+                                          {line.category}
+                                          {line.description ? ` · ${line.description}` : ""}
+                                          {line.isRecurring ? " · 月度固定" : ""}
+                                        </span>
+                                        <span className="shrink-0 tabular-nums text-orange-600">
+                                          {formatCurrency(line.actual)}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p className="mt-2 border-t pt-2 text-xs text-muted-foreground">
+                                    本月暂无手工成本明细
+                                    {unit.manualCost > 0 || unit.salaryCost > 0
+                                      ? "（成本主要来自薪酬/社保或已确认总额）"
+                                      : ""}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          </TableCell>
+                        </TableRow>
                       )}
+                    </Fragment>
+                  );
+                })}
+                {unitComparison.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={11} className="py-12 text-center text-muted-foreground">
+                      暂无数据
                     </TableCell>
                   </TableRow>
-                ))}
+                )}
               </TableBody>
             </Table>
           </div>
