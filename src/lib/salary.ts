@@ -238,6 +238,51 @@ export function isPayrollCommissionOnly(
   return getFixedPayRatioInMonth(person, yearMonth) <= 0;
 }
 
+const SALARY_COST_DETAIL_EPS = 0.005;
+
+/**
+ * 人力成本明细是否展示该人。
+ * 非内部/仅提成：无本单位业绩、无提成、无其他金额时默认不显示。
+ */
+export function shouldIncludeInUnitSalaryCostDetail(
+  person: Personnel,
+  detail: {
+    personalCommission?: number;
+    internalSalesCommission?: number;
+    managementCommission?: number;
+    productCommission?: number;
+    otherBonus?: number;
+    otherDeduction?: number;
+    salaryTotal?: number;
+    total?: number;
+  },
+  options: { yearMonth?: string; personalSales?: number } = {},
+): boolean {
+  const yearMonth = options.yearMonth || "";
+  const commissionOnly = yearMonth
+    ? isPayrollCommissionOnly(person, yearMonth)
+    : !isInternalEmployeePerson(person);
+  if (!commissionOnly) return true;
+
+  const commission =
+    (Number(detail.personalCommission) || 0)
+    + (Number(detail.internalSalesCommission) || 0)
+    + (Number(detail.managementCommission) || 0)
+    + (Number(detail.productCommission) || 0);
+  if (Math.abs(commission) > SALARY_COST_DETAIL_EPS) return true;
+  if ((Number(options.personalSales) || 0) > SALARY_COST_DETAIL_EPS) return true;
+  if (
+    Math.abs(
+      (Number(detail.otherBonus) || 0) - (Number(detail.otherDeduction) || 0),
+    ) > SALARY_COST_DETAIL_EPS
+  ) {
+    return true;
+  }
+  if (Math.abs(Number(detail.salaryTotal) || 0) > SALARY_COST_DETAIL_EPS) return true;
+  if (Math.abs(Number(detail.total) || 0) > SALARY_COST_DETAIL_EPS) return true;
+  return false;
+}
+
 /**
  * 是否应作为「销售相关岗位」进入战报名单
  * 规则：含「销售」→ 是；命中非销售词 → 否；否则必须命中销售相关词
@@ -1050,11 +1095,13 @@ export function getUnitSalaryCost(
   });
   const activeMembers = Array.from(memberMap.values());
 
-  const details = activeMembers.map((p) => {
+  const unitSalesRecords = buildUnitScopedSalesRecords(salesRecords, unitId, personnel);
+  const monthlyUnitSales = filterByMonth(unitSalesRecords, yearMonth);
+
+  const rawDetails = activeMembers.map((p) => {
     const adj = monthlyAdjustments.find(
       (a) => a.personnelId === p.id && a.yearMonth === yearMonth
     );
-    const unitSalesRecords = buildUnitScopedSalesRecords(salesRecords, unitId, personnel);
     const alloc = resolveCostAllocation(p, yearMonth);
     const useAllocSplit = alloc != null;
 
@@ -1163,6 +1210,15 @@ export function getUnitSalaryCost(
     };
   });
 
+  const details = rawDetails.filter((d) => {
+    const person = memberMap.get(d.personId);
+    if (!person) return false;
+    return shouldIncludeInUnitSalaryCostDetail(person, d, {
+      yearMonth,
+      personalSales: getPersonalSales(d.personId, monthlyUnitSales, d.name),
+    });
+  });
+
   const totalSalary = details.reduce((sum, d) => sum + d.salaryTotal, 0);
   const totalSocialInsurance = details.reduce((sum, d) => sum + d.socialInsurance, 0);
   const totalHousingFund = details.reduce((sum, d) => sum + d.housingFund, 0);
@@ -1177,7 +1233,7 @@ export function getUnitSalaryCost(
 
   return {
     unitId,
-    activeCount: activeMembers.length,
+    activeCount: details.length,
     totalSalary,
     totalSocialInsurance,
     totalHousingFund,
