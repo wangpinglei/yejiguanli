@@ -8,6 +8,34 @@ import { loadPayrollEntries, type PayrollMonthEntry } from '@/lib/payrollCalc'
 
 export const PAYROLL_TAX_PROFILE_KEY = 'pm_personnel_tax_profiles'
 
+/** 住房租金城市档次（元/月） */
+export type HousingRentTier = 'tier1500' | 'tier1100' | 'tier800'
+
+/** 住房租金三档：直辖市/省会等 1500；户籍人口超100万市 1100；其他 800 */
+export const HOUSING_RENT_TIER_OPTIONS = [
+  {
+    key: 'tier1500' as const,
+    amount: 1500,
+    label: '直辖市/省会/计划单列市等',
+  },
+  {
+    key: 'tier1100' as const,
+    amount: 1100,
+    label: '市辖区户籍人口超过100万',
+  },
+  {
+    key: 'tier800' as const,
+    amount: 800,
+    label: '市辖区户籍人口不超过100万',
+  },
+] as const
+
+export const HOUSING_RENT_TIER_AMOUNT: Record<HousingRentTier, number> = {
+  tier1500: 1500,
+  tier1100: 1100,
+  tier800: 800,
+}
+
 /** 专项附加扣除固定标准（元/月，除非另行说明） */
 export const SPECIAL_ADDITIONAL_STANDARDS = {
   childEducationPerChild: 2000,
@@ -15,6 +43,7 @@ export const SPECIAL_ADDITIONAL_STANDARDS = {
   elderOnlyChild: 3000,
   elderNonOnlyChildMax: 1500,
   housingLoanInterest: 1000,
+  /** @deprecated 请用 HOUSING_RENT_TIER_AMOUNT；保留兼容旧展示 */
   housingRent: 1100,
   continuingEduDegree: 400,
   continuingEduQualificationYear: 3600,
@@ -33,9 +62,27 @@ export interface SpecialAdditionalDeduction {
   elderSupportAmount: number
   housingLoanEnabled: boolean
   housingRentEnabled: boolean
+  /** 住房租金城市档：1500 / 1100 / 800；缺省按 1100 */
+  housingRentTier: HousingRentTier
   continuingEduMode: ContinuingEduMode
   /** 大病医疗本月摊销（一期手工） */
   seriousIllnessMonthly: number
+}
+
+export function normalizeHousingRentTier(raw: unknown): HousingRentTier {
+  if (raw === 'tier1500' || raw === 'tier1100' || raw === 'tier800') return raw
+  const n = Number(raw)
+  if (n === 1500) return 'tier1500'
+  if (n === 800) return 'tier800'
+  return 'tier1100'
+}
+
+export function getHousingRentMonthlyAmount(
+  special: Pick<SpecialAdditionalDeduction, 'housingRentEnabled' | 'housingRentTier'>,
+): number {
+  if (!special.housingRentEnabled) return 0
+  const tier = normalizeHousingRentTier(special.housingRentTier)
+  return HOUSING_RENT_TIER_AMOUNT[tier]
 }
 
 export type TaxProfileChangeLog = {
@@ -172,6 +219,7 @@ export function createEmptySpecialAdditional(): SpecialAdditionalDeduction {
     elderSupportAmount: 0,
     housingLoanEnabled: false,
     housingRentEnabled: false,
+    housingRentTier: 'tier1100',
     continuingEduMode: 'none',
     seriousIllnessMonthly: 0,
   }
@@ -211,7 +259,7 @@ export function calcSpecialAdditionalMonthly(special: SpecialAdditionalDeduction
   }
   // 房贷与租金互斥：同时勾选时优先房贷
   if (special.housingLoanEnabled) total += s.housingLoanInterest
-  else if (special.housingRentEnabled) total += s.housingRent
+  else total += getHousingRentMonthlyAmount(special)
 
   if (special.continuingEduMode === 'degree') total += s.continuingEduDegree
   else if (special.continuingEduMode === 'qualification') {
@@ -256,10 +304,16 @@ export function loadTaxProfile(
     return {
       ...empty,
       ...serverProfile,
-      special: {
-        ...createEmptySpecialAdditional(),
-        ...(serverProfile.special || {}),
-      },
+      special: (() => {
+        const merged = {
+          ...createEmptySpecialAdditional(),
+          ...(serverProfile.special || {}),
+        }
+        return {
+          ...merged,
+          housingRentTier: normalizeHousingRentTier(merged.housingRentTier),
+        }
+      })(),
       personnelId,
       socialInsurancePersonal:
         serverProfile.socialInsurancePersonal != null

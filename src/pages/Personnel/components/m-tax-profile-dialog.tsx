@@ -25,9 +25,12 @@ import {
   calcSpecialAdditionalMonthly,
   clearLocalTaxProfile,
   createEmptySpecialAdditional,
+  getHousingRentMonthlyAmount,
+  HOUSING_RENT_TIER_OPTIONS,
   loadTaxProfile,
   SPECIAL_ADDITIONAL_STANDARDS as S,
   type ContinuingEduMode,
+  type HousingRentTier,
   type PersonnelTaxProfile,
   type SpecialAdditionalDeduction,
 } from '@/lib/payrollTax'
@@ -321,17 +324,39 @@ export default function MTaxProfileDialog({ person, open, onOpenChange }: Props)
                         <Checkbox
                           checked={special.housingRentEnabled}
                           onCheckedChange={(v) =>
-                            patchSpecial({ housingRentEnabled: Boolean(v) })
+                            patchSpecial({
+                              housingRentEnabled: Boolean(v),
+                              ...(v ? { housingLoanEnabled: false } : {}),
+                            })
                           }
                         />
                       </TableCell>
                       <TableCell>住房租金</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">与房贷互斥</TableCell>
-                      <TableCell className="text-right text-muted-foreground">
-                        {formatCurrency(S.housingRent)}
+                      <TableCell>
+                        <Select
+                          value={special.housingRentTier || 'tier1100'}
+                          disabled={!special.housingRentEnabled}
+                          onValueChange={(v) =>
+                            patchSpecial({ housingRentTier: v as HousingRentTier })
+                          }
+                        >
+                          <SelectTrigger className="h-8 w-[220px]">
+                            <SelectValue placeholder="选择城市档次" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {HOUSING_RENT_TIER_OPTIONS.map((opt) => (
+                              <SelectItem key={opt.key} value={opt.key}>
+                                {opt.amount} 元 · {opt.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell className="text-right text-muted-foreground text-xs">
+                        1500 / 1100 / 800（与房贷互斥）
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {formatCurrency(special.housingRentEnabled ? S.housingRent : 0)}
+                        {formatCurrency(getHousingRentMonthlyAmount(special))}
                       </TableCell>
                     </TableRow>
                     <TableRow>

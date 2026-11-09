@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>工资核算 · 个税/专项附加扣除 · 界面示意（未开发）</title>
+  <style>
+    :root {
+      --bg: #f4f6f8;
+      --card: #fff;
+      --border: #e5e7eb;
+      --text: #111827;
+      --muted: #6b7280;
+      --primary: #2563eb;
+      --violet: #6d28d9;
+      --emerald: #047857;
+      --amber: #b45309;
+      --rose: #be123c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.45;
+    }
+    .banner {
+      background: #fff7ed;
+      border-bottom: 1px solid #fed7aa;
+      color: #9a3412;
+      padding: 10px 20px;
+      font-size: 13px;
+    }
+    .wrap { max-width: 1280px; margin: 0 auto; padding: 20px; }
+    h1 { font-size: 22px; margin: 0 0 6px; }
+    .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+    .tab {
+      border: 1px solid var(--border);
+      background: #fff;
+      padding: 8px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .tab.active {
+      background: #eff6ff;
+      border-color: #93c5fd;
+      color: var(--primary);
+      font-weight: 600;
+    }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 2px rgba(0,0,0,.04);
+    }
+    .card h2 { font-size: 16px; margin: 0 0 4px; }
+    .card .desc { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+    input, select {
+      height: 34px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0 10px;
+      font-size: 13px;
+      min-width: 120px;
+    }
+    input[type="number"] { width: 110px; }
+    input[type="checkbox"] { width: 16px; height: 16px; min-width: 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--border);
+      padding: 8px 10px;
+      text-align: left;
+      white-space: nowrap;
+    }
+    th { background: #f9fafb; color: #374151; font-weight: 600; }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .muted { color: var(--muted); }
+    .pill {
+      display: inline-block;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #eef2ff;
+      color: #3730a3;
+    }
+    .pill.warn { background: #fff7ed; color: #9a3412; }
+    .pill.ok { background: #ecfdf5; color: #047857; }
+    .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+    button {
+      height: 34px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #fff;
+      padding: 0 12px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    button.primary {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #fff;
+    }
+    .highlight {
+      outline: 2px solid #f59e0b;
+      outline-offset: -2px;
+      background: #fffbeb !important;
+    }
+    .note {
+      font-size: 12px;
+      color: var(--amber);
+      background: #fffbeb;
+      border: 1px dashed #fcd34d;
+      border-radius: 8px;
+      padding: 8px 10px;
+      margin-top: 10px;
+    }
+    .formula {
+      font-size: 12px;
+      color: var(--muted);
+      background: #f8fafc;
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+    .formula strong { color: var(--text); }
+    .scroll { overflow-x: auto; }
+    .sum {
+      display: flex; gap: 16px; flex-wrap: wrap;
+      font-size: 13px; margin-top: 12px;
+      padding: 10px 12px; background: #f8fafc; border-radius: 8px;
+    }
+    .sum b.emerald { color: var(--emerald); }
+    .sum b.rose { color: var(--rose); }
+    .checkline { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="banner">
+    这是<strong>界面示意页</strong>（未接真实数据 / 未开发）。用于确认「专项附加扣除录入」与「工资表代扣个税」的呈现方式。看完告诉我哪里要改，再正式开发。
+  </div>
+  <div class="wrap">
+    <h1>工资核算 · 个税与代扣（示意）</h1>
+    <p class="sub">示例人员：韩柳 · 东部服务中心 · 2026年11月</p>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="payroll">① 工资表（含代扣/个税/实发）</button>
+      <button class="tab" data-tab="special">② 专项附加扣除录入（人员档案）</button>
+      <button class="tab" data-tab="defaults">③ 社保公积金个人默认</button>
+    </div>
+
+    <!-- 工资表 -->
+    <div id="payroll" class="panel active">
+      <div class="card">
+        <h2>本期公式（示意）</h2>
+        <div class="formula">
+          <div><strong>应发</strong> = 提成 + 实发底薪 + 保密费 + 岗位补贴 + 实发绩效 + 加项 − 减项</div>
+          <div style="margin-top:6px"><strong>实发</strong> = 应发 − 社保个人 − 公积金个人 − 本期个税</div>
+          <div style="margin-top:6px">本期个税按「累计预扣」自动算，可手工改；专项附加来自人员档案勾选合计。</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>工资表示意 <span class="pill warn">黄框 = 新增列</span></h2>
+        <p class="desc">横向滚动查看新增的代扣与个税列。</p>
+        <div class="scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>姓名</th>
+                <th class="num">应发</th>
+                <th class="num highlight">社保个人</th>
+                <th class="num highlight">公积金个人</th>
+                <th class="num highlight">专项附加</th>
+                <th class="num highlight">累计收入</th>
+                <th class="num highlight">累计已扣税</th>
+                <th class="num highlight">本期个税</th>
+                <th class="num highlight">实发</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>韩柳</td>
+                <td class="num">¥5,000.00</td>
+                <td class="num highlight"><input type="number" value="450" step="0.01" /></td>
+                <td class="num highlight"><input type="number" value="101" step="0.01" /></td>
+                <td class="num highlight">¥3,000.00 <span class="pill">档案带入</span></td>
+                <td class="num highlight">¥55,000.00</td>
+                <td class="num highlight">¥1,280.00</td>
+                <td class="num highlight"><input type="number" value="92.40" step="0.01" title="可改" /></td>
+                <td class="num highlight"><b class="emerald" style="color:#047857">¥4,356.60</b></td>
+              </tr>
+              <tr>
+                <td>示例乙</td>
+                <td class="num">¥8,200.00</td>
+                <td class="num highlight"><input type="number" value="620" step="0.01" /></td>
+                <td class="num highlight"><input type="number" value="246" step="0.01" /></td>
+                <td class="num highlight">¥4,100.00</td>
+                <td class="num highlight">¥90,200.00</td>
+                <td class="num highlight">¥3,560.00</td>
+                <td class="num highlight"><input type="number" value="186.00" step="0.01" /></td>
+                <td class="num highlight"><b style="color:#047857">¥7,148.00</b></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="sum">
+          <span>应发合计 <b>¥13,200.00</b></span>
+          <span>代扣合计 <b class="rose">¥1,695.40</b></span>
+          <span>实发合计 <b class="emerald">¥11,504.60</b></span>
+        </div>
+        <div class="note">示意：社保/公积金个人默认从人员档案带入，可按月改；本期个税可覆盖；专项附加一般只读（点姓名进档案改）。</div>
+        <div class="actions">
+          <button class="primary">保存本月录入（示意）</button>
+          <button>导出 CSV（示意）</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 专项附加 -->
+    <div id="special" class="panel">
+      <div class="card">
+        <h2>专项附加扣除 · 韩柳 <span class="pill ok">固定标准自动带金额</span></h2>
+        <p class="desc">按税务常见标准预填；只勾选/填人数。房贷与租金互斥。大病医疗一期可手工月摊。</p>
+        <div class="scroll">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:40px">启用</th>
+                <th>项目</th>
+                <th>录入</th>
+                <th class="num">标准/月</th>
+                <th class="num">本月金额</th>
+                <th>备注</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><input type="checkbox" checked /></td>
+                <td>子女教育</td>
+                <td>子女人数 <input type="number" value="1" min="0" style="width:70px" /></td>
+                <td class="num">¥2,000 × 人</td>
+                <td class="num">¥2,000.00</td>
+                <td class="muted">—</td>
+              </tr>
+              <tr>
+                <td><input type="checkbox" /></td>
+                <td>3岁以下婴幼儿照护</td>
+                <td>人数 <input type="number" value="0" min="0" style="width:70px" /></td>
+                <td class="num">¥2,000 × 人</td>
+                <td class="num">¥0.00</td>
+                <td class="muted">—</td>
+              </tr>
+              <tr>
+                <td><input type="checkbox" checked /></td>
+                <td>赡养老人</td>
+                <td class="checkline"><input type="checkbox" checked /> 独生子女</td>
+                <td class="num">独生 ¥3,000 / 非独生 ≤¥1,500</td>
+                <td class="num">¥3,000.00</td>
+                <td class="muted">非独生时填本人分摊</td>
+              </tr>
+              <tr>
+                <td><input type="checkbox" /></td>
+                <td>住房贷款利息</td>
+                <td class="muted">与租金互斥</td>
+                <td class="num">¥1,000</td>
+                <td class="num">¥0.00</td>
+                <td class="muted">—</td>
+              </tr>
+              <tr>
+                <td><input type="checkbox" /></td>
+                <td>住房租金</td>
+                <td>
+                  <select>
+                    <option>1500 · 直辖市/省会等</option>
+                    <option selected>1100 · 户籍人口超100万</option>
+                    <option>800 · 其他城市</option>
+                  </select>
+                </td>
+                <td class="num">¥1,500 / 1,100 / 800</td>
+                <td class="num">¥0.00</td>
+                <td class="muted">与房贷互斥</td>
+              </tr>
+              <tr>
+                <td><input type="checkbox" /></td>
+                <td>继续教育</td>
+                <td>
+                  <select>
+                    <option>学历教育 400/月</option>
+                    <option>职业资格 3600/年</option>
+                  </select>
+                </td>
+                <td class="num">¥400 或 ¥3,600/年</td>
+                <td class="num">¥0.00</td>
+                <td class="muted">年扣可摊到获证年各月</td>
+              </tr>
+              <tr>
+                <td><input type="checkbox" /></td>
+                <td>大病医疗</td>
+                <td>本月摊销 <input type="number" value="0" style="width:90px" /></td>
+                <td class="num">超额部分年限额</td>
+                <td class="num">¥0.00</td>
+                <td><span class="pill warn">二期再做自动规则</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="sum">
+          <span>本月专项附加合计 <b class="emerald">¥5,000.00</b></span>
+          <span class="muted">（示例：子女教育 2000 + 赡养老人 3000）</span>
+        </div>
+        <div class="actions">
+          <button class="primary">保存档案（示意）</button>
+          <button>恢复标准默认</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 默认代扣 -->
+    <div id="defaults" class="panel">
+      <div class="card">
+        <h2>社保 / 公积金 · 个人与单位拆分（示意）</h2>
+        <p class="desc">第一期：用现有档案金额同时预填「个人代扣」与「单位成本」，可分别改。</p>
+        <div class="row" style="margin-bottom:12px">
+          <div>
+            <label>社保 · 个人缴纳（工资代扣默认）</label>
+            <input type="number" value="450" step="0.01" />
+          </div>
+          <div>
+            <label>社保 · 单位部分（成本用）</label>
+            <input type="number" value="696" step="0.01" />
+          </div>
+          <div>
+            <label>公积金 · 个人缴纳（工资代扣默认）</label>
+            <input type="number" value="101" step="0.01" />
+          </div>
+          <div>
+            <label>公积金 · 单位部分（成本用）</label>
+            <input type="number" value="101" step="0.01" />
+          </div>
+        </div>
+        <div class="note">工资表每月可覆盖个人代扣；成本管理继续用单位部分。不把个税/专项附加计入单位成本。</div>
+        <div class="actions">
+          <button class="primary">保存默认（示意）</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    document.querySelectorAll('.tab').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'))
+        document.querySelectorAll('.panel').forEach((p) => p.classList.remove('active'))
+        btn.classList.add('active')
+        document.getElementById(btn.dataset.tab).classList.add('active')
+      })
+    })
+  </script>
+</body>
+</html>
