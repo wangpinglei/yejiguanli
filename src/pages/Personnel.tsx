@@ -24,6 +24,7 @@ import {
   normalizeCostAllocationMode,
   normalizeCostAllocationShares,
   parsePersonnelCostAllocation,
+  resolveCostAllocation,
 } from "@/lib/costAllocation";
 import { loadPayrollScopeUnitIds } from "@/lib/payrollCalc";
 import { isOnDutyPerson } from "@/lib/personnelDuty";
@@ -178,6 +179,39 @@ const RANGE_LABELS: Record<SalesRange, string> = {
   custom: "自定义",
 };
 
+function shortUnitName(name: string): string {
+  const n = (name || "").trim();
+  return n.replace(/运营中心$/u, "").trim() || n || "-";
+}
+
+/** 列表用：当前月有效成本分摊摘要 */
+function getPersonCostAllocationLabel(
+  person: Personnel,
+  yearMonth: string,
+  resolveUnitName: (id: string) => string,
+): {
+  modeLabel: string
+  summary: string
+  hasMonthOverride: boolean
+} | null {
+  const resolved = resolveCostAllocation(person, yearMonth)
+  if (!resolved || resolved.shares.length === 0) return null
+  const hasMonthOverride = Boolean(
+    person.costAllocation?.monthOverrides?.some((m) => m.yearMonth === yearMonth),
+  )
+  const isFixed = resolved.mode === "fixedAmount"
+  const parts = resolved.shares.map((s) => {
+    const unit = shortUnitName(resolveUnitName(s.salesUnitId))
+    if (isFixed) return `${unit} ¥${Math.round(Number(s.amount) || 0)}`
+    return `${unit} ${Number(s.ratio) || 0}%`
+  })
+  return {
+    modeLabel: isFixed ? "分摊·金额" : "分摊",
+    summary: parts.join(" · "),
+    hasMonthOverride,
+  }
+}
+
 export default function PersonnelPage() {
   const { addPersonnel, updatePersonnel, deletePersonnel, mergePersonnel, transferPersonnel, refreshAll, products, monthlyAdjustments, productPersonCommissions, teamMgmtCommissionRules, performanceTargets, unitProductSettlements } = useData();
   const teamMgmtContext = useMemo(() => ({
@@ -195,6 +229,13 @@ export default function PersonnelPage() {
   const [filterInternal, setFilterInternal] = useState<"all" | "internal" | "external">("all");
   /** all | missing — 缺产品提成配置筛选（仅工资核算已纳入单位） */
   const [filterCommission, setFilterCommission] = useState<"all" | "missing">("all");
+  /** 仅看已配置成本分摊 */
+  const [filterCostAllocation, setFilterCostAllocation] = useState(false);
+  const [scrollToCostAllocation, setScrollToCostAllocation] = useState(false);
+  const costAllocationViewYm = useMemo(
+    () => new Date().toISOString().slice(0, 7),
+    [],
+  );
   /** 工资核算「纳入核算单位」名单（本机）；名单外单位不催配销售提成 */
   const [payrollScopeUnitIds, setPayrollScopeUnitIds] = useState<string[]>(() =>
     loadPayrollScopeUnitIds(),
@@ -426,7 +467,17 @@ export default function PersonnelPage() {
         || (filterInternal === "external" && !isInternal);
       const missing = commissionStatusByPersonId[p.id]?.missingCount || 0;
       const matchCommission = filterCommission === "all" || missing > 0;
-      return matchSearch && matchUnit && matchStatus && matchInternal && matchCommission;
+      const matchAlloc =
+        !filterCostAllocation
+        || resolveCostAllocation(p, costAllocationViewYm) != null;
+      return (
+        matchSearch
+        && matchUnit
+        && matchStatus
+        && matchInternal
+        && matchCommission
+        && matchAlloc
+      );
     });
   }, [
     personnel,
@@ -435,6 +486,8 @@ export default function PersonnelPage() {
     filterStatus,
     filterInternal,
     filterCommission,
+    filterCostAllocation,
+    costAllocationViewYm,
     commissionStatusByPersonId,
   ]);
 
@@ -560,8 +613,23 @@ export default function PersonnelPage() {
     setDialogOpen(true);
   };
 
-  const openEdit = (person: Personnel) => {
+  useEffect(() => {
+    if (!dialogOpen || !scrollToCostAllocation) return
+    const timer = window.setTimeout(() => {
+      document
+        .getElementById("personnel-cost-allocation")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" })
+      setScrollToCostAllocation(false)
+    }, 120)
+    return () => window.clearTimeout(timer)
+  }, [dialogOpen, scrollToCostAllocation])
+
+  const openEdit = (
+    person: Personnel,
+    options?: { focusCostAllocation?: boolean },
+  ) => {
     setEditingPerson(person);
+    setScrollToCostAllocation(Boolean(options?.focusCostAllocation))
     const internal =
       person.isInternalEmployee === false
         ? false
@@ -1216,6 +1284,20 @@ export default function PersonnelPage() {
         </Select>
         <Button
           type="button"
+          variant={filterCostAllocation ? "default" : "outline"}
+          size="sm"
+          className={
+            filterCostAllocation
+              ? "h-9 border-sky-500 bg-sky-600 hover:bg-sky-700"
+              : "h-9 border-sky-300 text-sky-800 hover:bg-sky-50"
+          }
+          onClick={() => setFilterCostAllocation((prev) => !prev)}
+          title={`按 ${costAllocationViewYm} 有效分摊配置筛选`}
+        >
+          {filterCostAllocation ? "仅看已分摊 ✓" : "仅看已分摊"}
+        </Button>
+        <Button
+          type="button"
           variant={filterCommission === "missing" ? "default" : "outline"}
           size="sm"
           className={
@@ -1394,7 +1476,7 @@ export default function PersonnelPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>姓名</TableHead>
-                  <TableHead>所属单位</TableHead>
+                  <TableHead className="min-w-[160px]">人事单位 / 成本承担</TableHead>
                   <TableHead>职位</TableHead>
                   <TableHead className="text-right">底薪</TableHead>
                   <TableHead className="text-right">固定月薪</TableHead>
@@ -1440,6 +1522,11 @@ export default function PersonnelPage() {
                   const sales = getPersonnelSales(person.id);
                   const isInternal = isInternalEmployeePerson(person);
                   const fixed = isInternal ? getFixedSalary(person.salary) : 0;
+                  const allocLabel = getPersonCostAllocationLabel(
+                    person,
+                    costAllocationViewYm,
+                    getUnitName,
+                  );
                   return (
                     <TableRow
                       key={person.id}
@@ -1449,7 +1536,7 @@ export default function PersonnelPage() {
                           : 'bg-violet-50/70 hover:bg-violet-100/80'
                       }
                     >
-                      <TableCell className="max-w-[160px]">
+                      <TableCell className="max-w-[200px]">
                         <div className="flex items-center gap-2">
                           <Avatar className="h-8 w-8 shrink-0">
                             <AvatarFallback
@@ -1482,6 +1569,23 @@ export default function PersonnelPage() {
                               非内部
                             </Badge>
                           )}
+                          {allocLabel && (
+                            <Badge
+                              variant="outline"
+                              className="shrink-0 cursor-pointer border-sky-300 bg-sky-50 px-1.5 py-0 text-[10px] text-sky-800 hover:bg-sky-100"
+                              title={`${allocLabel.summary}（点击编辑分摊）`}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                if (!canEditPersonnel) {
+                                  alert('无人员管理编辑权限，无法调整成本分摊')
+                                  return
+                                }
+                                openEdit(person, { focusCostAllocation: true })
+                              }}
+                            >
+                              {allocLabel.modeLabel}
+                            </Badge>
+                          )}
                           {duplicateNameSet.has((person.name || "").trim()) && (
                             <Badge
                               variant="outline"
@@ -1492,7 +1596,30 @@ export default function PersonnelPage() {
                           )}
                         </div>
                       </TableCell>
-                      <TableCell>{getUnitName(person.salesUnitId)}</TableCell>
+                      <TableCell>
+                        <div className="space-y-0.5">
+                          <div className="text-sm">{getUnitName(person.salesUnitId)}</div>
+                          {allocLabel ? (
+                            <button
+                              type="button"
+                              className="max-w-[220px] truncate text-left text-[11px] text-sky-700 hover:underline"
+                              title={allocLabel.summary}
+                              onClick={() => {
+                                if (!canEditPersonnel) {
+                                  alert('无人员管理编辑权限，无法调整成本分摊')
+                                  return
+                                }
+                                openEdit(person, { focusCostAllocation: true })
+                              }}
+                            >
+                              承担：{allocLabel.summary}
+                              {allocLabel.hasMonthOverride ? ' · 本月覆盖' : ''}
+                            </button>
+                          ) : (
+                            <div className="text-[11px] text-muted-foreground">承担：同人事单位</div>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell>{person.position}</TableCell>
                       <TableCell className="text-right text-muted-foreground">
                         {isInternal
@@ -2162,7 +2289,10 @@ export default function PersonnelPage() {
                       )
                     )
                   return (
-                    <div className="space-y-3 rounded-lg border border-sky-200 bg-sky-50/30 p-4">
+                    <div
+                      id="personnel-cost-allocation"
+                      className="scroll-mt-4 space-y-3 rounded-lg border border-sky-200 bg-sky-50/30 p-4"
+                    >
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <h4 className="text-sm font-semibold">成本分摊（多单位）</h4>
                         <Badge
