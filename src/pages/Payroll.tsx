@@ -195,8 +195,14 @@ export default function Payroll() {
     canEdit,
     canEditPersonnel,
   } = usePermissions()
-  /** 档案调整：有人员编辑或工资核算编辑权即可（避免只有工资权时看不到「去调整」） */
+  /** 档案调整：有人员编辑或工资核算编辑权才可真正改写 */
   const canAdjustPayrollArchive = canEditPersonnel || canEdit('payroll')
+
+  function ensureCanAdjustPayrollArchive(actionLabel: string): boolean {
+    if (canAdjustPayrollArchive) return true
+    alert(`无该编辑权限，无法${actionLabel}。请联系管理员开通「人员管理」或「工资核算」编辑权限。`)
+    return false
+  }
 
   const [yearMonth, setYearMonth] = useState(() => new Date().toISOString().slice(0, 7))
   const [scopeUnitIds, setScopeUnitIds] = useState<string[]>(() => loadPayrollScopeUnitIds())
@@ -832,23 +838,29 @@ export default function Payroll() {
               <FileSpreadsheet className="mr-1.5 h-3.5 w-3.5" />
               导出 Excel
             </Button>
-            {entryMode === 'insurance' && canAdjustPayrollArchive && (
+            {entryMode === 'insurance' && (
               <Button
                 type="button"
                 variant="secondary"
                 disabled={rows.length === 0}
-                onClick={() => setInsuranceAdjust({ mode: 'batch', person: null })}
+                onClick={() => {
+                  if (!ensureCanAdjustPayrollArchive('批量调整社保公积金')) return
+                  setInsuranceAdjust({ mode: 'batch', person: null })
+                }}
               >
                 <Pencil className="mr-1.5 h-3.5 w-3.5" />
                 批量调整社保公积金
               </Button>
             )}
-            {entryMode === 'otherDeduct' && canAdjustPayrollArchive && (
+            {entryMode === 'otherDeduct' && (
               <Button
                 type="button"
                 variant="secondary"
                 disabled={rows.length === 0}
-                onClick={() => setSpecialAdjust({ mode: 'batch', person: null })}
+                onClick={() => {
+                  if (!ensureCanAdjustPayrollArchive('批量调整专项附加')) return
+                  setSpecialAdjust({ mode: 'batch', person: null })
+                }}
               >
                 <Pencil className="mr-1.5 h-3.5 w-3.5" />
                 批量调整专项附加
@@ -1308,18 +1320,19 @@ export default function Payroll() {
                                     <span className="text-xs text-muted-foreground">合作方不缴纳</span>
                                   ) : (
                                     <div className="flex flex-wrap items-center gap-1">
-                                      {canAdjustPayrollArchive && person && (
+                                      {person && (
                                         <Button
                                           type="button"
                                           variant="outline"
                                           size="sm"
                                           className="h-7 px-2 text-xs"
-                                          onClick={() =>
+                                          onClick={() => {
+                                            if (!ensureCanAdjustPayrollArchive('调整社保公积金')) return
                                             setInsuranceAdjust({
                                               mode: 'single',
                                               person,
                                             })
-                                          }
+                                          }}
                                         >
                                           去调整
                                         </Button>
@@ -1355,18 +1368,19 @@ export default function Payroll() {
                               {entryMode === 'otherDeduct' && (
                                 <TableCell className="bg-orange-50/40">
                                   <div className="flex flex-wrap items-center gap-1">
-                                    {canAdjustPayrollArchive && person && (
+                                    {person && (
                                       <Button
                                         type="button"
                                         variant="outline"
                                         size="sm"
                                         className="h-7 px-2 text-xs"
-                                        onClick={() =>
+                                        onClick={() => {
+                                          if (!ensureCanAdjustPayrollArchive('调整专项附加')) return
                                           setSpecialAdjust({
                                             mode: 'single',
                                             person,
                                           })
-                                        }
+                                        }}
                                       >
                                         去调整
                                       </Button>
