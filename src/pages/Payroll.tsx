@@ -29,7 +29,11 @@ import {
 } from '@/components/ui/table'
 import { useData } from '@/context/DataContext'
 import { usePermissions } from '@/hooks/usePermissions'
-import { formatCurrency, formatDisplayPersonName } from '@/lib/format'
+import {
+  payrollEntriesApi,
+  type PayrollEntriesMonthPayload,
+} from '@/lib/api'
+import { formatCurrency, formatDateTime, formatDisplayPersonName } from '@/lib/format'
 import {
   calcPayrollRow,
   createEmptyPayrollEntry,
@@ -37,6 +41,7 @@ import {
   formatAdjLinesNote,
   loadPayrollEntries,
   loadPayrollScopeUnitIds,
+  normalizePayrollEntry,
   PAYROLL_STANDARD_HOURS,
   savePayrollEntries,
   savePayrollScopeUnitIds,
@@ -175,8 +180,8 @@ function getPersonnelPayHref(
 }
 
 /**
- * 工资核算 · 本地原型
- * - 纳入单位名单、出勤、考核分存 localStorage
+ * 工资核算
+ * - 纳入单位名单、出勤、考核等录入存服务端（本机 localStorage 作缓存）
  * - 底薪/保密费/岗位补贴/绩效标准、业绩提成读系统现有数据
  */
 export default function Payroll() {
@@ -213,6 +218,10 @@ export default function Payroll() {
   const [calcPhase, setCalcPhase] = useState<PayrollCalcPhase>('idle')
   const [entryMode, setEntryMode] = useState<PayrollEntryMode>('all')
   const [savedTip, setSavedTip] = useState('')
+  const [syncLoading, setSyncLoading] = useState(false)
+  const [syncSaving, setSyncSaving] = useState(false)
+  const [syncSummary, setSyncSummary] = useState<PayrollEntriesMonthPayload['summary'] | null>(null)
+  const [canMigrateLocal, setCanMigrateLocal] = useState(false)
   const [insuranceAdjust, setInsuranceAdjust] = useState<{
     mode: 'single' | 'batch'
     person: Personnel | null
@@ -255,8 +264,67 @@ export default function Payroll() {
     }
   }, [scopedUnits, filterUnitId])
 
+  function applyScopeFromPayload(payload: PayrollEntriesMonthPayload) {
+    if (Array.isArray(payload.scopeUnitIds) && payload.scopeUnitIds.length > 0) {
+      setScopeUnitIds(payload.scopeUnitIds)
+      setDraftScopeIds(payload.scopeUnitIds)
+      savePayrollScopeUnitIds(payload.scopeUnitIds)
+      window.dispatchEvent(new Event('payroll-scope-changed'))
+    }
+  }
+
+  function applyMonthPayload(
+    payload: PayrollEntriesMonthPayload,
+    options?: { mirrorLocal?: boolean },
+  ) {
+    const next: Record<string, PayrollMonthEntry> = {}
+    for (const [pid, raw] of Object.entries(payload.entries || {})) {
+      next[pid] = normalizePayrollEntry(pid, raw as Partial<PayrollMonthEntry>)
+    }
+    setEntries(next)
+    if (options?.mirrorLocal !== false) {
+      savePayrollEntries(payload.yearMonth, next)
+    }
+    applyScopeFromPayload(payload)
+    setSyncSummary(payload.summary || null)
+  }
+
   useEffect(() => {
-    setEntries(loadPayrollEntries(yearMonth))
+    let cancelled = false
+    async function loadMonth() {
+      setSyncLoading(true)
+      setCanMigrateLocal(false)
+      try {
+        const payload = await payrollEntriesApi.getMonth(yearMonth)
+        if (cancelled) return
+        const serverCount = Object.keys(payload.entries || {}).length
+        const local = loadPayrollEntries(yearMonth)
+        if (serverCount === 0 && Object.keys(local).length > 0) {
+          // 服务端尚空：保留本机数据并提示上传，避免误清缓存
+          setEntries(local)
+          applyScopeFromPayload(payload)
+          setSyncSummary(payload.summary || null)
+          setCanMigrateLocal(true)
+          return
+        }
+        applyMonthPayload(payload)
+        setCanMigrateLocal(false)
+      } catch (err) {
+        if (cancelled) return
+        // 服务端失败时回退本机缓存，避免页面空白
+        const local = loadPayrollEntries(yearMonth)
+        setEntries(local)
+        setSyncSummary(null)
+        setCanMigrateLocal(Object.keys(local).length > 0)
+        console.error(err)
+      } finally {
+        if (!cancelled) setSyncLoading(false)
+      }
+    }
+    void loadMonth()
+    return () => {
+      cancelled = true
+    }
   }, [yearMonth])
 
   function handleToggleDraftUnit(unitId: string, checked: boolean) {
@@ -278,6 +346,19 @@ export default function Payroll() {
     setFilterUnitId(draftScopeIds[0])
     setCalcPhase('wizard')
     setEntryMode('attendance')
+    void payrollEntriesApi
+      .saveMonth({
+        yearMonth,
+        entries,
+        scopeUnitIds: draftScopeIds,
+      })
+      .then((payload) => {
+        applyMonthPayload(payload)
+      })
+      .catch((err) => {
+        console.error(err)
+        alert(err instanceof Error ? err.message : '纳入单位同步失败，请稍后重试保存')
+      })
     window.setTimeout(() => {
       document.getElementById('payroll-month-table')?.scrollIntoView({
         behavior: 'smooth',
@@ -296,7 +377,7 @@ export default function Payroll() {
     })
   }
 
-  function handleSaveEntries() {
+  async function handleSaveEntries() {
     const next: Record<string, PayrollMonthEntry> = { ...entries }
     for (const row of rows) {
       const person = personnel.find((p) => p.id === row.personnelId)
@@ -323,8 +404,58 @@ export default function Payroll() {
     }
     setEntries(next)
     savePayrollEntries(yearMonth, next)
-    setSavedTip(`${yearMonth} 出勤/考核/代扣个税已保存（本机）`)
-    window.setTimeout(() => setSavedTip(''), 2000)
+    setSyncSaving(true)
+    try {
+      const payload = await payrollEntriesApi.saveMonth({
+        yearMonth,
+        entries: next,
+        scopeUnitIds: scopeUnitIds.length > 0 ? scopeUnitIds : draftScopeIds,
+      })
+      applyMonthPayload(payload)
+      const who = payload.summary?.updatedBy || '已同步'
+      const when = payload.summary?.updatedAt
+        ? formatDateTime(payload.summary.updatedAt)
+        : ''
+      setSavedTip(
+        `${yearMonth} 已同步到服务器${who ? ` · ${who}` : ''}${when ? ` · ${when}` : ''}`,
+      )
+      setCanMigrateLocal(false)
+    } catch (err) {
+      console.error(err)
+      setSavedTip(`${yearMonth} 已存本机缓存，服务器同步失败`)
+      alert(err instanceof Error ? err.message : '同步服务器失败')
+    } finally {
+      setSyncSaving(false)
+      window.setTimeout(() => setSavedTip(''), 4000)
+    }
+  }
+
+  async function handleMigrateLocalToServer() {
+    const local = loadPayrollEntries(yearMonth)
+    if (Object.keys(local).length === 0) {
+      alert('本机没有可上传的录入')
+      return
+    }
+    if (!confirm(`将本机 ${yearMonth} 的 ${Object.keys(local).length} 人录入上传到服务器？`)) {
+      return
+    }
+    setSyncSaving(true)
+    try {
+      const payload = await payrollEntriesApi.saveMonth({
+        yearMonth,
+        entries: local,
+        scopeUnitIds: scopeUnitIds.length > 0 ? scopeUnitIds : loadPayrollScopeUnitIds(),
+      })
+      applyMonthPayload(payload)
+      setSavedTip(`${yearMonth} 本机数据已上传服务器`)
+      setCanMigrateLocal(false)
+    } catch (err) {
+      console.error(err)
+      alert(err instanceof Error ? err.message : '上传失败')
+    } finally {
+      setSyncSaving(false)
+      window.setTimeout(() => setSavedTip(''), 4000)
+    }
   }
 
   async function handleSaveIitOpening(
@@ -830,10 +961,25 @@ export default function Payroll() {
                 仅显示上方已选单位；默认第一个，可在此切换
               </p>
             </div>
-            <Button type="button" variant="outline" onClick={handleSaveEntries}>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={syncSaving || syncLoading}
+              onClick={() => void handleSaveEntries()}
+            >
               <Save className="mr-1.5 h-3.5 w-3.5" />
-              保存本月录入
+              {syncSaving ? '同步中…' : '保存本月录入'}
             </Button>
+            {canMigrateLocal && (
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={syncSaving || syncLoading}
+                onClick={() => void handleMigrateLocalToServer()}
+              >
+                上传本机数据
+              </Button>
+            )}
             <Button type="button" onClick={() => void handleExportExcel()}>
               <FileSpreadsheet className="mr-1.5 h-3.5 w-3.5" />
               导出 Excel
@@ -869,6 +1015,22 @@ export default function Payroll() {
             <Badge variant="secondary" className="h-8 px-3">
               {rows.length} 人
             </Badge>
+            {syncLoading && (
+              <span className="self-center text-xs text-muted-foreground">正在从服务器拉取…</span>
+            )}
+            {savedTip && (
+              <span className="self-center text-sm text-emerald-700">{savedTip}</span>
+            )}
+            {!savedTip && syncSummary?.updatedAt && (
+              <span className="self-center text-xs text-muted-foreground">
+                最近修改：{syncSummary.updatedBy || '—'}
+                {' · '}
+                {formatDateTime(syncSummary.updatedAt)}
+                {syncSummary.uploadedAt
+                  ? ` · 首次上传 ${formatDateTime(syncSummary.uploadedAt)}`
+                  : ''}
+              </span>
+            )}
           </div>
 
           {scopedUnits.length === 0 ? (

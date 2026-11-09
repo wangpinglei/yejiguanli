@@ -16,6 +16,7 @@ import hrProfilesRoutes from "./routes/hrProfiles";
 import laborCompaniesRoutes from "./routes/laborCompanies";
 import extraRoutes from "./routes/extra";
 import financeNoticeRoutes from "./routes/financeNotice";
+import payrollEntriesRoutes from "./routes/payrollEntries";
 import { startFinanceNoticeScheduler, migrateFinanceNoticeTextColumn } from "./services/financeNotice";
 
 const app = express();
@@ -82,6 +83,8 @@ app.use("/api", syncOrdersRoutes);
 app.use("/api", battleReportRoutes);
 
 app.use("/api", financeNoticeRoutes);
+
+app.use("/api", payrollEntriesRoutes);
 
 app.use("/api", extraRoutes);
 

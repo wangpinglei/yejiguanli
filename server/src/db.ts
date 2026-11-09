@@ -477,6 +477,27 @@ function initSchema() {
       created_at TEXT NOT NULL,
       created_by TEXT DEFAULT ''
     );
+
+    CREATE TABLE IF NOT EXISTS payroll_month_entries (
+      id TEXT PRIMARY KEY,
+      year_month TEXT NOT NULL,
+      personnel_id TEXT NOT NULL,
+      entry_json TEXT NOT NULL DEFAULT '{}',
+      updated_by TEXT DEFAULT '',
+      updated_by_id TEXT DEFAULT '',
+      updated_at TEXT DEFAULT (datetime('now')),
+      uploaded_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(year_month, personnel_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS payroll_month_scopes (
+      year_month TEXT PRIMARY KEY,
+      unit_ids_json TEXT NOT NULL DEFAULT '[]',
+      updated_by TEXT DEFAULT '',
+      updated_by_id TEXT DEFAULT '',
+      updated_at TEXT DEFAULT (datetime('now')),
+      uploaded_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   ensureColumns("sales_units", [
@@ -2646,6 +2667,30 @@ export function rowToMonthlyAdjustment(row: any) {
     note: row.note || "",
     createdAt: row.created_at,
     createdBy: row.created_by || undefined,
+  };
+}
+
+export function rowToPayrollMonthEntry(row: any) {
+  return {
+    id: row.id,
+    yearMonth: row.year_month,
+    personnelId: row.personnel_id,
+    entry: parseJsonField(row.entry_json, {}),
+    updatedBy: row.updated_by || "",
+    updatedById: row.updated_by_id || "",
+    updatedAt: row.updated_at || "",
+    uploadedAt: row.uploaded_at || "",
+  };
+}
+
+export function rowToPayrollMonthScope(row: any) {
+  return {
+    yearMonth: row.year_month,
+    unitIds: parseJsonField(row.unit_ids_json, []),
+    updatedBy: row.updated_by || "",
+    updatedById: row.updated_by_id || "",
+    updatedAt: row.updated_at || "",
+    uploadedAt: row.uploaded_at || "",
   };
 }
 

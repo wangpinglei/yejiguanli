@@ -14,11 +14,14 @@ import {
   isPersonnelOnDutyInMonth,
   filterByMonth,
 } from "@/lib/salary";
+import { payrollEntriesApi } from "@/lib/api";
 import {
   calcPayrollRow,
   createEmptyPayrollEntry,
   hasPayrollEntriesForMonth,
   loadPayrollEntries,
+  normalizePayrollEntry,
+  savePayrollEntries,
   sumPayrollPayableByUnit,
 } from "@/lib/payrollCalc";
 import { personBelongsToUnitInMonth } from "@/lib/unitAssignment";
@@ -128,6 +131,33 @@ export default function CostManagement() {
 
   /** 预测=满勤；工资表=以工资核算应发为准 */
   const [salaryCostMode, setSalaryCostMode] = useState<"forecast" | "payroll">("forecast");
+  /** 服务端工资录入拉取后刷新本机缓存依赖 */
+  const [payrollSyncTick, setPayrollSyncTick] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    async function pullPayrollEntries() {
+      try {
+        const payload = await payrollEntriesApi.getMonth(selectedMonth)
+        if (cancelled) return
+        const next: Record<string, ReturnType<typeof createEmptyPayrollEntry>> = {}
+        for (const [pid, raw] of Object.entries(payload.entries || {})) {
+          next[pid] = normalizePayrollEntry(pid, raw as never)
+        }
+        // 服务端为空时不覆盖本机缓存（可能尚未迁移）
+        if (Object.keys(next).length > 0) {
+          savePayrollEntries(selectedMonth, next)
+          setPayrollSyncTick((n) => n + 1)
+        }
+      } catch {
+        // 保持本机缓存，不打断成本页
+      }
+    }
+    void pullPayrollEntries()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedMonth])
 
   const isSuperadmin = role === "superadmin";
 
@@ -222,6 +252,7 @@ export default function CostManagement() {
     products,
     productPersonCommissions,
     teamMgmtContext,
+    payrollSyncTick,
   ]);
 
   const payrollAvailable =

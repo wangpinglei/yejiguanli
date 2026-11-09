@@ -386,6 +386,39 @@ export const monthlyAdjustmentsApi = {
   delete: (id: string) => api.delete(`/monthly-adjustments/${id}`),
 };
 
+export type PayrollEntryAudit = {
+  updatedBy: string
+  updatedById: string
+  updatedAt: string
+  uploadedAt: string
+}
+
+export type PayrollEntriesMonthPayload = {
+  yearMonth: string
+  scopeUnitIds: string[]
+  entries: Record<string, any>
+  audits: Record<string, PayrollEntryAudit>
+  scopeAudit: PayrollEntryAudit | null
+  summary: {
+    entryCount: number
+    updatedBy: string
+    updatedAt: string
+    uploadedAt: string
+  }
+}
+
+export const payrollEntriesApi = {
+  getMonth: (yearMonth: string) =>
+    api.get<PayrollEntriesMonthPayload>(
+      `/payroll-entries?yearMonth=${encodeURIComponent(yearMonth)}`,
+    ),
+  saveMonth: (data: {
+    yearMonth: string
+    entries: Record<string, unknown>
+    scopeUnitIds?: string[]
+  }) => api.put<PayrollEntriesMonthPayload>('/payroll-entries', data),
+};
+
 export const performanceTargetsApi = {
   list: () => api.get<any[]>("/performance-targets"),
   upsert: (data: any) => api.post<any>("/performance-targets/upsert", data),
