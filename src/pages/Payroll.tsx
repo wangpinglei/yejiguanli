@@ -192,8 +192,11 @@ export default function Payroll() {
     visibleSalesUnits: salesUnits,
     visiblePersonnel: personnel,
     visibleSalesRecords: salesRecords,
+    canEdit,
     canEditPersonnel,
   } = usePermissions()
+  /** 档案调整：有人员编辑或工资核算编辑权即可（避免只有工资权时看不到「去调整」） */
+  const canAdjustPayrollArchive = canEditPersonnel || canEdit('payroll')
 
   const [yearMonth, setYearMonth] = useState(() => new Date().toISOString().slice(0, 7))
   const [scopeUnitIds, setScopeUnitIds] = useState<string[]>(() => loadPayrollScopeUnitIds())
@@ -745,13 +748,13 @@ export default function Payroll() {
           )}
           {calcPhase === 'wizard' && entryMode === 'insurance' && (
             <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              步骤 3/5 社保公积金录入 — 企业/个人按人员档案固定展示；不对时点「去调整」或「批量调整」写入薪酬方案/个税档案（有修改记录）。
+              步骤 3/5 社保公积金录入 — 企业/个人按人员档案固定展示；不对时点上方「批量调整社保公积金」或行内「去调整」写入薪酬方案/个税档案（有修改记录）。
             </p>
           )}
           {calcPhase === 'wizard' && entryMode === 'otherDeduct' && (
             <p className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-900">
               步骤 4/5 其他预扣项目 — 先核对业绩提成（可点进明细修正），再录入加项/减项明细与金额；
-              专项附加按个税档案展示，不对时点「去调整」或「批量调整」。
+              专项附加按个税档案展示，不对时点上方「批量调整专项附加」或右侧操作列「去调整」。
             </p>
           )}
           {calcPhase === 'wizard' && entryMode === 'tax' && (() => {
@@ -829,7 +832,7 @@ export default function Payroll() {
               <FileSpreadsheet className="mr-1.5 h-3.5 w-3.5" />
               导出 Excel
             </Button>
-            {entryMode === 'insurance' && canEditPersonnel && (
+            {entryMode === 'insurance' && canAdjustPayrollArchive && (
               <Button
                 type="button"
                 variant="secondary"
@@ -840,7 +843,7 @@ export default function Payroll() {
                 批量调整社保公积金
               </Button>
             )}
-            {entryMode === 'otherDeduct' && canEditPersonnel && (
+            {entryMode === 'otherDeduct' && canAdjustPayrollArchive && (
               <Button
                 type="button"
                 variant="secondary"
@@ -1305,7 +1308,7 @@ export default function Payroll() {
                                     <span className="text-xs text-muted-foreground">合作方不缴纳</span>
                                   ) : (
                                     <div className="flex flex-wrap items-center gap-1">
-                                      {canEditPersonnel && person && (
+                                      {canAdjustPayrollArchive && person && (
                                         <Button
                                           type="button"
                                           variant="outline"
@@ -1352,7 +1355,7 @@ export default function Payroll() {
                               {entryMode === 'otherDeduct' && (
                                 <TableCell className="bg-orange-50/40">
                                   <div className="flex flex-wrap items-center gap-1">
-                                    {canEditPersonnel && person && (
+                                    {canAdjustPayrollArchive && person && (
                                       <Button
                                         type="button"
                                         variant="outline"
