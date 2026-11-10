@@ -279,42 +279,6 @@ export default function PayrollCommissionDetail() {
             打开销售记录核对
           </Link>
         </Button>
-        <Button
-          size="sm"
-          onClick={() => void handleSaveOnline()}
-          disabled={syncSaving || syncLoading}
-        >
-          <Save className="mr-1.5 h-3.5 w-3.5" />
-          {syncSaving ? '同步中…' : '保存到线上'}
-        </Button>
-        {canMigrateLocal && (
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => void handleMigrateLocal()}
-            disabled={syncSaving}
-          >
-            <CloudUpload className="mr-1.5 h-3.5 w-3.5" />
-            上传本机数据
-          </Button>
-        )}
-        {dirtyLocal && (
-          <span className="text-xs text-amber-700">本机有未同步修改</span>
-        )}
-        {syncLoading && (
-          <span className="text-xs text-muted-foreground">正在拉取线上调整…</span>
-        )}
-        {savedTip && (
-          <span className="text-xs text-emerald-700">{savedTip}</span>
-        )}
-        {audit?.updatedAt && !savedTip && (
-          <span className="text-xs text-muted-foreground">
-            线上：{audit.updatedBy || '—'} · {formatDateTime(audit.updatedAt)}
-            {audit.uploadedAt
-              ? ` · 首次上传 ${formatDateTime(audit.uploadedAt)}`
-              : ''}
-          </span>
-        )}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -355,19 +319,62 @@ export default function PayrollCommissionDetail() {
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">销售明细核对</CardTitle>
-          <CardDescription>
-            与销售记录一致：客户、产品、活动、订单金额；「调整」改后先存本机，点上方「保存到线上」后全员可见。
-            {!detail.hasOrderAdj
-              && Math.abs(lineSum - detail.systemPersonalTotal) > 0.05 && (
-              <span className="ml-1 text-amber-700">
-                （行提成合计与系统个人提成差额{' '}
-                {formatCurrency(detail.systemPersonalTotal - lineSum)}
-                ，多为月门槛汇总口径；一旦有单笔调整则以明细合计为准）
-              </span>
+        <CardHeader className="gap-3 space-y-0 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 space-y-1.5">
+            <CardTitle className="text-base">销售明细核对</CardTitle>
+            <CardDescription>
+              与销售记录一致：客户、产品、活动、订单金额；「调整」改后先存本机，点右侧「保存到线上」后全员可见。
+              {!detail.hasOrderAdj
+                && Math.abs(lineSum - detail.systemPersonalTotal) > 0.05 && (
+                <span className="ml-1 text-amber-700">
+                  （行提成合计与系统个人提成差额{' '}
+                  {formatCurrency(detail.systemPersonalTotal - lineSum)}
+                  ，多为月门槛汇总口径；一旦有单笔调整则以明细合计为准）
+                </span>
+              )}
+            </CardDescription>
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              {dirtyLocal && (
+                <span className="text-xs text-amber-700">本机有未同步修改</span>
+              )}
+              {syncLoading && (
+                <span className="text-xs text-muted-foreground">正在拉取线上调整…</span>
+              )}
+              {savedTip && (
+                <span className="text-xs text-emerald-700">{savedTip}</span>
+              )}
+              {audit?.updatedAt && !savedTip && (
+                <span className="text-xs text-muted-foreground">
+                  线上：{audit.updatedBy || '—'} · {formatDateTime(audit.updatedAt)}
+                  {audit.uploadedAt
+                    ? ` · 首次上传 ${formatDateTime(audit.uploadedAt)}`
+                    : ''}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            {canMigrateLocal && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void handleMigrateLocal()}
+                disabled={syncSaving}
+              >
+                <CloudUpload className="mr-1.5 h-3.5 w-3.5" />
+                上传本机数据
+              </Button>
             )}
-          </CardDescription>
+            <Button
+              size="sm"
+              className="bg-sky-600 hover:bg-sky-700"
+              onClick={() => void handleSaveOnline()}
+              disabled={syncSaving || syncLoading}
+            >
+              <Save className="mr-1.5 h-3.5 w-3.5" />
+              {syncSaving ? '同步中…' : '保存到线上'}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="overflow-x-auto p-0">
           <Table>
