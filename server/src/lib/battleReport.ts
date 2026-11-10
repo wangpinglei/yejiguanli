@@ -1,6 +1,6 @@
 /**
  * 单位战报计算（服务端）
- * 业绩唯一凭证：销售记录；订单分业绩按份额计入对应单位/人员（支持跨单位）
+ * 业绩唯一凭证：销售记录；按成交日当天销售人员的人事归属单位归集（与转岗时间轴一致）
  * 团队总业绩 = 本单位各人个人业绩之和
  */
 
@@ -216,14 +216,29 @@ function getPersonShareAmount(sale: BattleSale, personId: string): number {
   return (Number(sale.totalAmount) || 0) * (Number(hit.sharePercent) || 0) / 100
 }
 
+/** 成交日当天该人的业绩归属单位；无档案时回退订单/分摊单位 */
+function resolvePerformanceUnitId(
+  person: BattlePerson | undefined,
+  saleDate: string,
+  fallbackUnitId: string,
+): string {
+  if (person) {
+    const uid = resolveUnitIdAt(person, saleDate || '')
+    if (uid) return uid
+  }
+  return fallbackUnitId || ''
+}
+
 function shareBelongsToUnit(
   c: BattleSaleCollaborator,
   person: BattlePerson | undefined,
   salesUnitId: string,
-  yearMonth: string,
+  saleDate: string,
 ): boolean {
+  if (person) {
+    return resolvePerformanceUnitId(person, saleDate, '') === salesUnitId
+  }
   if (c.salesUnitId) return c.salesUnitId === salesUnitId
-  if (person) return personBelongsToUnitInMonth(person, salesUnitId, yearMonth)
   return false
 }
 
@@ -267,14 +282,16 @@ function aggregateSalesByPerson(
   }
 
   function addFullOrderToPrimary(r: BattleSale) {
-    if (r.salesUnitId !== salesUnitId) return
-    if (!isProductInPerformance(excludedKeys, r.productId, salesUnitId)) return
     const amount = Number(r.totalAmount) || 0
     const pid = (r.personnelId || '').trim()
     const sname = (r.salesPersonName || '').trim()
+    const saleDate = r.saleDate || ''
     const byId = pid ? personnelById.get(pid) : undefined
 
     if (byId) {
+      const attrUnit = resolvePerformanceUnitId(byId, saleDate, r.salesUnitId)
+      if (attrUnit !== salesUnitId) return
+      if (!isProductInPerformance(excludedKeys, r.productId, salesUnitId)) return
       add(
         {
           personId: byId.id,
@@ -288,8 +305,16 @@ function aggregateSalesByPerson(
     }
 
     if (sname) {
-      const byName = findPersonByName(sname, personnel, salesUnitId, yearMonth)
+      const hits = personnel.filter((p) => (p.name || '').trim() === sname)
+      const byName =
+        hits.find(
+          (p) => resolvePerformanceUnitId(p, saleDate, '') === salesUnitId,
+        )
+        || findPersonByName(sname, personnel, salesUnitId, yearMonth)
       if (byName) {
+        const attrUnit = resolvePerformanceUnitId(byName, saleDate, r.salesUnitId)
+        if (attrUnit !== salesUnitId) return
+        if (!isProductInPerformance(excludedKeys, r.productId, salesUnitId)) return
         add(
           {
             personId: byName.id,
@@ -300,6 +325,8 @@ function aggregateSalesByPerson(
           amount,
         )
       } else {
+        if (r.salesUnitId !== salesUnitId) return
+        if (!isProductInPerformance(excludedKeys, r.productId, salesUnitId)) return
         add(
           {
             personId: `ext_${sname}`,
@@ -313,6 +340,8 @@ function aggregateSalesByPerson(
       return
     }
 
+    if (r.salesUnitId !== salesUnitId) return
+    if (!isProductInPerformance(excludedKeys, r.productId, salesUnitId)) return
     add(
       {
         personId: UNATTRIBUTED_ID,
@@ -332,9 +361,8 @@ function aggregateSalesByPerson(
         if (!pid) continue
         const amount = getPersonShareAmount(r, pid)
         const person = personnelById.get(pid)
-        if (!shareBelongsToUnit(c, person, salesUnitId, yearMonth)) continue
-        const shareUnitId = c.salesUnitId || r.salesUnitId
-        if (!isProductInPerformance(excludedKeys, r.productId, shareUnitId)) continue
+        if (!shareBelongsToUnit(c, person, salesUnitId, r.saleDate || '')) continue
+        if (!isProductInPerformance(excludedKeys, r.productId, salesUnitId)) continue
         if (person) {
           add(
             {

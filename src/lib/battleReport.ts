@@ -1,6 +1,6 @@
 /**
  * 单位战报计算
- * 业绩唯一凭证：销售记录；订单分业绩按份额计入对应单位/人员（支持跨单位）
+ * 业绩唯一凭证：销售记录；按成交日当天销售人员的人事归属单位归集（与转岗时间轴一致）
  * 团队总业绩 = 本单位各人个人业绩之和
  */
 import {
@@ -13,7 +13,10 @@ import {
   getPersonShareAmount,
   getSaleShares,
 } from '@/lib/saleCollaborators'
-import { personBelongsToUnitInMonth } from '@/lib/unitAssignment'
+import {
+  personBelongsToUnitInMonth,
+  resolveUnitIdAt,
+} from '@/lib/unitAssignment'
 import type { Personnel, PerformanceTarget, SalesRecord, SaleCollaborator, UnitProductSettlement } from '@/types'
 import { isProductInPerformance } from '@/lib/teamMgmtCommission'
 
@@ -85,22 +88,37 @@ function findPersonByName(
   return inUnit || hits[0]
 }
 
-/** 该分摊份额是否计入本单位战报 */
+/** 成交日当天该人的业绩归属单位；无档案时回退订单/分摊单位 */
+function resolvePerformanceUnitId(
+  person: Personnel | undefined,
+  saleDate: string,
+  fallbackUnitId: string,
+): string {
+  if (person) {
+    const uid = resolveUnitIdAt(person, saleDate || '')
+    if (uid) return uid
+  }
+  return fallbackUnitId || ''
+}
+
+/** 该分摊份额是否计入本单位战报（按成交日人事归属） */
 function shareBelongsToUnit(
   c: SaleCollaborator,
   person: Personnel | undefined,
   salesUnitId: string,
-  yearMonth: string,
+  saleDate: string,
 ): boolean {
+  if (person) {
+    return resolvePerformanceUnitId(person, saleDate, '') === salesUnitId
+  }
   if (c.salesUnitId) return c.salesUnitId === salesUnitId
-  if (person) return personBelongsToUnitInMonth(person, salesUnitId, yearMonth)
   return false
 }
 
 /**
- * 按销售记录归集到人（含订单分业绩 / 跨单位）：
- * - 有分摊：按每人份额计入其所属单位战报
- * - 无分摊：仍按订单 salesUnitId 整单归主责/姓名
+ * 按销售记录归集到人（含订单分业绩）：
+ * - 有分摊：每人份额按成交日当天人事归属计入对应单位
+ * - 无分摊：整单按主责人成交日人事归属计入；无档案则回退订单销售单位
  */
 function aggregateSalesByPerson(
   monthSales: SalesRecord[],
@@ -123,14 +141,16 @@ function aggregateSalesByPerson(
   }
 
   function addFullOrderToPrimary(r: SalesRecord) {
-    if (r.salesUnitId !== salesUnitId) return
-    if (!isProductInPerformance(upsList, r.productId, salesUnitId)) return
     const amount = Number(r.totalAmount) || 0
     const pid = (r.personnelId || '').trim()
     const sname = (r.salesPersonName || '').trim()
+    const saleDate = r.saleDate || ''
     const byId = pid ? personnelById.get(pid) : undefined
 
     if (byId) {
+      const attrUnit = resolvePerformanceUnitId(byId, saleDate, r.salesUnitId)
+      if (attrUnit !== salesUnitId) return
+      if (!isProductInPerformance(upsList, r.productId, salesUnitId)) return
       add(
         {
           personId: byId.id,
@@ -144,8 +164,16 @@ function aggregateSalesByPerson(
     }
 
     if (sname) {
-      const byName = findPersonByName(sname, personnel, salesUnitId, yearMonth)
+      const hits = personnel.filter((p) => (p.name || '').trim() === sname)
+      const byName =
+        hits.find(
+          (p) => resolvePerformanceUnitId(p, saleDate, '') === salesUnitId,
+        )
+        || findPersonByName(sname, personnel, salesUnitId, yearMonth)
       if (byName) {
+        const attrUnit = resolvePerformanceUnitId(byName, saleDate, r.salesUnitId)
+        if (attrUnit !== salesUnitId) return
+        if (!isProductInPerformance(upsList, r.productId, salesUnitId)) return
         add(
           {
             personId: byName.id,
@@ -156,6 +184,9 @@ function aggregateSalesByPerson(
           amount,
         )
       } else {
+        // 系统无此人：回退订单销售单位
+        if (r.salesUnitId !== salesUnitId) return
+        if (!isProductInPerformance(upsList, r.productId, salesUnitId)) return
         add(
           {
             personId: `ext_${sname}`,
@@ -169,6 +200,8 @@ function aggregateSalesByPerson(
       return
     }
 
+    if (r.salesUnitId !== salesUnitId) return
+    if (!isProductInPerformance(upsList, r.productId, salesUnitId)) return
     add(
       {
         personId: UNATTRIBUTED_ID,
@@ -188,9 +221,8 @@ function aggregateSalesByPerson(
         if (!pid) continue
         const amount = getPersonShareAmount(r, pid)
         const person = personnelById.get(pid)
-        if (!shareBelongsToUnit(c, person, salesUnitId, yearMonth)) continue
-        const shareUnitId = c.salesUnitId || r.salesUnitId
-        if (!isProductInPerformance(upsList, r.productId, shareUnitId)) continue
+        if (!shareBelongsToUnit(c, person, salesUnitId, r.saleDate || '')) continue
+        if (!isProductInPerformance(upsList, r.productId, salesUnitId)) continue
 
         if (person) {
           add(

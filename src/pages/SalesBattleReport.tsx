@@ -94,7 +94,7 @@ export default function SalesBattleReport() {
     [salesUnits, unitId],
   );
 
-  // 业绩以销售记录为唯一凭证（与推送 API 同口径）
+  // 业绩以销售记录为唯一凭证；按成交日人事归属归集（与推送 API 同口径）
   const unitReport = useMemo(() => {
     if (!unitId || !selectedUnit) return null;
     return buildUnitBattleReport({
@@ -310,7 +310,7 @@ export default function SalesBattleReport() {
       <div>
         <PageHeader
           title="销售单位战报"
-          description="按月份和单位实时跟踪业绩目标完成情况"
+          description="按成交日当天人事归属归集业绩（与转岗时间轴一致）"
         />
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
@@ -328,7 +328,7 @@ export default function SalesBattleReport() {
     <div className="space-y-4">
       <PageHeader
         title="销售单位战报"
-        description="按月份和单位实时跟踪业绩目标完成情况；人员实时薪资请在「成本管理」中查看"
+        description="按成交日当天人事归属归集业绩（与转岗时间轴一致）；人员实时薪资请在「成本管理」中查看"
       />
 
       {/* 筛选区 */}
@@ -453,7 +453,7 @@ export default function SalesBattleReport() {
       {/* 战报表格 */}
       <Card className="overflow-hidden">
         <div className="border-b bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
-          业绩以本单位当月销售记录为唯一凭证：团队总业绩 = 销售记录合计 = 表内个人业绩之和。
+          业绩按成交日人事归属计入本单位：团队总业绩 = 表内个人业绩之和（订单上的销售单位仅作开单/同步来源，不单独决定战报归属）。
           按人员ID归集；ID无效时按销售员姓名；仍无法匹配则记为外援/未归集。销售岗无成交也会展示以便录入目标。
         </div>
         <div className="overflow-x-auto">
