@@ -37,10 +37,15 @@ import {
   type SaleNameMaps,
 } from "@/lib/salesDuplicate";
 import { salesRecordsApi } from "@/lib/api";
+import {
+  buildSalesReconcileExportRows,
+  buildSalesReconcilePersonSummary,
+  downloadSalesOrderReconcileExcel,
+} from "@/lib/salesOrderReconcileExport";
 import type { SalesRecord } from "@/types";
 import {
   Plus, Search, Pencil, Trash2, RefreshCw, CloudDownload, Upload, FileSpreadsheet,
-  CheckCircle2, AlertCircle, ChevronLeft, ChevronRight, Users, ZoomIn,
+  CheckCircle2, AlertCircle, ChevronLeft, ChevronRight, Users, ZoomIn, Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1326,6 +1331,79 @@ export default function SalesRecords() {
     0,
   );
 
+  const filterHintWeak = filterUnit === "all" && !dateFrom && !dateTo;
+
+  async function handleExportReconcile() {
+    if (filteredRecords.length === 0) {
+      alert("当前筛选没有可导出的订单，请先调整筛选条件");
+      return;
+    }
+    if (filterHintWeak) {
+      const ok = window.confirm(
+        `尚未选择单位或成交日期，将导出当前筛选的 ${filteredRecords.length} 笔。\n建议先选单位和月份再对账。是否继续导出？`,
+      );
+      if (!ok) return;
+    } else {
+      const ok = window.confirm(
+        `将导出当前筛选结果：${filteredRecords.length} 笔，计入口径合计 ${formatCurrency(totalRevenue)}。\n确认导出订单核对表？`,
+      );
+      if (!ok) return;
+    }
+    try {
+      const rows = buildSalesReconcileExportRows({
+        records: filteredRecords,
+        personnel,
+        products,
+        salesUnits,
+        getAttributedAmount: getFilteredShareAmount,
+      });
+      const personSummary = buildSalesReconcilePersonSummary(filteredRecords, personnel);
+      const unitName = filterUnit === "all"
+        ? "全部单位"
+        : (salesUnits.find((u) => u.id === filterUnit)?.name || filterUnit);
+      const personName = filterPerson === "all"
+        ? "全部人员"
+        : (personnel.find((p) => p.id === filterPerson)?.name || filterPerson);
+      const sourceLabel = filterSync === "synced"
+        ? "仅同步"
+        : filterSync === "manual"
+          ? "仅手动"
+          : "全部来源";
+      const domainLabel = filterDomain === "all"
+        ? ""
+        : filterDomain === UNCATEGORIZED
+          ? UNCATEGORIZED_LABEL
+          : filterDomain;
+      const duplicateLabel = filterDuplicate === "duplicate"
+        ? "仅确定重复"
+        : filterDuplicate === "similar"
+          ? "仅疑似相似"
+          : filterDuplicate === "unique"
+            ? "仅非重复"
+            : "";
+      await downloadSalesOrderReconcileExcel({
+        rows,
+        personSummary,
+        attributedTotal: totalRevenue,
+        filterMeta: {
+          unitId: filterUnit,
+          unitName,
+          personId: filterPerson,
+          personName,
+          dateFrom,
+          dateTo,
+          search,
+          sourceLabel,
+          domainLabel,
+          duplicateLabel,
+        },
+      });
+    } catch (err) {
+      console.error(err);
+      alert(err instanceof Error ? err.message : "导出失败");
+    }
+  }
+
   // ===================== 批量导入逻辑 =====================
 
   const parseImportText = (text: string): ImportRow[] => {
@@ -1669,174 +1747,200 @@ export default function SalesRecords() {
         </div>
       )}
 
-      {/* Filters */}
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-[16rem] max-w-sm">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="搜索人员/产品/客户/订单号..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-10 pl-10 text-base"
-          />
-        </div>
-        <Select value={filterUnit} onValueChange={(v) => { setFilterUnit(v); setFilterPerson("all"); }}>
-          <SelectTrigger className="h-10 w-44 text-base">
-            <SelectValue placeholder="筛选单位" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部单位</SelectItem>
-            {salesUnits.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={filterPerson} onValueChange={setFilterPerson}>
-          <SelectTrigger className="h-10 w-44 text-base">
-            <SelectValue placeholder="筛选人员" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部人员</SelectItem>
-            {renderPersonnelSelectItems(availablePersonnel)}
-          </SelectContent>
-        </Select>
-        <label className="flex h-10 cursor-pointer items-center gap-2 whitespace-nowrap text-sm text-muted-foreground">
-          <Checkbox
-            checked={showResignedPersonnel}
-            onCheckedChange={(v) => setShowResignedPersonnel(v === true)}
-          />
-          显示离职
-        </label>
-        <Select value={filterSync} onValueChange={setFilterSync}>
-          <SelectTrigger className="h-10 w-40 text-base">
-            <SelectValue placeholder="数据来源" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部来源</SelectItem>
-            <SelectItem value="synced">仅同步</SelectItem>
-            <SelectItem value="manual">仅手动</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={filterDomain} onValueChange={setFilterDomain}>
-          <SelectTrigger className="h-10 w-44 text-base">
-            <SelectValue placeholder="业务域" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部业务域</SelectItem>
-            {domainOptions.map((d) => (
-              <SelectItem key={d} value={d}>
-                {d === UNCATEGORIZED ? UNCATEGORIZED_LABEL : d}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select
-          value={filterDuplicate}
-          onValueChange={(v) =>
-            setFilterDuplicate(v as "all" | "duplicate" | "similar" | "unique")
-          }
-        >
-          <SelectTrigger className="h-10 w-44 text-base">
-            <SelectValue placeholder="重复信息" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部记录</SelectItem>
-            <SelectItem value="duplicate">仅确定重复</SelectItem>
-            <SelectItem value="similar">仅疑似相似</SelectItem>
-            <SelectItem value="unique">仅非重复</SelectItem>
-          </SelectContent>
-        </Select>
-        <div className="flex items-center gap-1.5">
-          <span className="text-sm text-muted-foreground whitespace-nowrap">成交日期</span>
-          <Input
-            type="date"
-            value={dateFrom}
-            max={dateTo || undefined}
-            onChange={(e) => setDateFrom(e.target.value)}
-            className="h-10 w-[150px] text-base"
-          />
-          <span className="text-sm text-muted-foreground">至</span>
-          <Input
-            type="date"
-            value={dateTo}
-            min={dateFrom || undefined}
-            onChange={(e) => setDateTo(e.target.value)}
-            className="h-10 w-[150px] text-base"
-          />
-          {(dateFrom || dateTo) && (
+      {/* 核对筛选条：先筛后导 */}
+      <div className="mb-4 space-y-3 rounded-xl border border-sky-200 bg-sky-50/40 p-3 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-sm font-medium text-sky-900">
+            订单核对筛选
+            <span className="ml-2 font-normal text-sky-800/80">
+              先选单位/人员/成交日期，再导出与销售对账
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge className="h-8 bg-white px-3 text-sm text-sky-900 border border-sky-200">
+              已筛选 {filteredRecords.length} 笔
+            </Badge>
+            <Badge
+              className="h-8 px-3 text-sm bg-blue-100 text-blue-800 border border-blue-200"
+              title={
+                filterPerson !== "all"
+                  ? "按当前人员份额合计（分业绩只计本人）"
+                  : filterUnit !== "all"
+                    ? "按当前单位份额合计（分业绩只计本单位，不含其他单位分摊）"
+                    : "当前列表实收合计"
+              }
+            >
+              {filterPerson !== "all"
+                ? "本人份额 "
+                : filterUnit !== "all"
+                  ? "本单位份额 "
+                  : "合计 "}
+              {formatCurrency(totalRevenue)}
+            </Badge>
+            <Badge
+              className="h-8 px-3 text-sm bg-violet-100 text-violet-800 border border-violet-200"
+              title="按人员管理「人×产品」个人提成+特殊奖励预估（比例不含月门槛）"
+            >
+              提成预估 {formatCurrency(totalCommission)}
+            </Badge>
             <Button
               type="button"
-              variant="ghost"
-              size="sm"
-              className="h-10 px-3 text-sm"
-              onClick={() => { setDateFrom(""); setDateTo(""); }}
+              className="h-9 bg-sky-600 hover:bg-sky-700"
+              onClick={() => void handleExportReconcile()}
+              disabled={filteredRecords.length === 0}
             >
-              清除
+              <Download className="mr-1.5 h-4 w-4" />
+              导出订单核对
+            </Button>
+          </div>
+        </div>
+        {filterHintWeak && (
+          <p className="text-xs text-amber-800">
+            尚未选择单位或成交日期，导出范围可能过大；建议先筛再对账。
+          </p>
+        )}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative flex-1 min-w-[16rem] max-w-sm">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="搜索人员/产品/客户/订单号..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="h-10 border-sky-200 bg-white pl-10 text-base"
+            />
+          </div>
+          <Select value={filterUnit} onValueChange={(v) => { setFilterUnit(v); setFilterPerson("all"); }}>
+            <SelectTrigger className="h-10 w-44 border-sky-200 bg-white text-base font-medium">
+              <SelectValue placeholder="筛选单位" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部单位</SelectItem>
+              {salesUnits.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={filterPerson} onValueChange={setFilterPerson}>
+            <SelectTrigger className="h-10 w-44 border-sky-200 bg-white text-base font-medium">
+              <SelectValue placeholder="筛选人员" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部人员</SelectItem>
+              {renderPersonnelSelectItems(availablePersonnel)}
+            </SelectContent>
+          </Select>
+          <label className="flex h-10 cursor-pointer items-center gap-2 whitespace-nowrap text-sm text-muted-foreground">
+            <Checkbox
+              checked={showResignedPersonnel}
+              onCheckedChange={(v) => setShowResignedPersonnel(v === true)}
+            />
+            显示离职
+          </label>
+          <Select value={filterSync} onValueChange={setFilterSync}>
+            <SelectTrigger className="h-10 w-40 border-sky-200 bg-white text-base">
+              <SelectValue placeholder="数据来源" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部来源</SelectItem>
+              <SelectItem value="synced">仅同步</SelectItem>
+              <SelectItem value="manual">仅手动</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={filterDomain} onValueChange={setFilterDomain}>
+            <SelectTrigger className="h-10 w-44 border-sky-200 bg-white text-base">
+              <SelectValue placeholder="业务域" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部业务域</SelectItem>
+              {domainOptions.map((d) => (
+                <SelectItem key={d} value={d}>
+                  {d === UNCATEGORIZED ? UNCATEGORIZED_LABEL : d}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={filterDuplicate}
+            onValueChange={(v) =>
+              setFilterDuplicate(v as "all" | "duplicate" | "similar" | "unique")
+            }
+          >
+            <SelectTrigger className="h-10 w-44 border-sky-200 bg-white text-base">
+              <SelectValue placeholder="重复信息" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部记录</SelectItem>
+              <SelectItem value="duplicate">仅确定重复</SelectItem>
+              <SelectItem value="similar">仅疑似相似</SelectItem>
+              <SelectItem value="unique">仅非重复</SelectItem>
+            </SelectContent>
+          </Select>
+          <div className="flex items-center gap-1.5 rounded-md border border-sky-200 bg-white px-2 py-0.5">
+            <span className="text-sm font-medium text-sky-900 whitespace-nowrap">成交日期</span>
+            <Input
+              type="date"
+              value={dateFrom}
+              max={dateTo || undefined}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="h-9 w-[150px] border-0 shadow-none text-base"
+            />
+            <span className="text-sm text-muted-foreground">至</span>
+            <Input
+              type="date"
+              value={dateTo}
+              min={dateFrom || undefined}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="h-9 w-[150px] border-0 shadow-none text-base"
+            />
+            {(dateFrom || dateTo) && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-9 px-3 text-sm"
+                onClick={() => { setDateFrom(""); setDateTo(""); }}
+              >
+                清除
+              </Button>
+            )}
+          </div>
+          {duplicateCountInFilters > 0 && (
+            <Button
+              type="button"
+              variant={filterDuplicate === "duplicate" ? "default" : "outline"}
+              size="sm"
+              className={
+                filterDuplicate === "duplicate"
+                  ? "h-10 rounded-full bg-orange-500 hover:bg-orange-600 text-white border-orange-500 text-sm"
+                  : "h-10 rounded-full border-orange-300 bg-orange-100 text-orange-800 hover:bg-orange-200 cursor-pointer text-sm"
+              }
+              onClick={handleToggleDuplicateFilter}
+              title={filterDuplicate === "duplicate" ? "点击取消重复筛选" : "点击筛选重复记录并批量操作"}
+            >
+              确定重复 {duplicateCountInFilters} 笔
+              {filterDuplicate === "duplicate" ? " · 已筛选" : " · 点击筛选"}
+            </Button>
+          )}
+          {similarCountInFilters > 0 && (
+            <Button
+              type="button"
+              variant={filterDuplicate === "similar" ? "default" : "outline"}
+              size="sm"
+              className={
+                filterDuplicate === "similar"
+                  ? "h-10 rounded-full bg-amber-500 hover:bg-amber-600 text-white border-amber-500 text-sm"
+                  : "h-10 rounded-full border-amber-300 bg-amber-100 text-amber-800 hover:bg-amber-200 cursor-pointer text-sm"
+              }
+              onClick={handleToggleSimilarFilter}
+              title={
+                filterDuplicate === "similar"
+                  ? "点击取消疑似相似筛选"
+                  : "客户/产品/实收/销售/成交日相同，单位或订单类型可能不同"
+              }
+            >
+              疑似相似 {similarCountInFilters} 笔
+              {filterDuplicate === "similar" ? " · 已筛选" : " · 点击筛选"}
             </Button>
           )}
         </div>
-        <Badge variant="secondary" className="h-8 px-3 text-sm">
-          {filteredRecords.length} 笔
-        </Badge>
-        {duplicateCountInFilters > 0 && (
-          <Button
-            type="button"
-            variant={filterDuplicate === "duplicate" ? "default" : "outline"}
-            size="sm"
-            className={
-              filterDuplicate === "duplicate"
-                ? "h-10 rounded-full bg-orange-500 hover:bg-orange-600 text-white border-orange-500 text-sm"
-                : "h-10 rounded-full border-orange-300 bg-orange-100 text-orange-800 hover:bg-orange-200 cursor-pointer text-sm"
-            }
-            onClick={handleToggleDuplicateFilter}
-            title={filterDuplicate === "duplicate" ? "点击取消重复筛选" : "点击筛选重复记录并批量操作"}
-          >
-            确定重复 {duplicateCountInFilters} 笔
-            {filterDuplicate === "duplicate" ? " · 已筛选" : " · 点击筛选"}
-          </Button>
-        )}
-        {similarCountInFilters > 0 && (
-          <Button
-            type="button"
-            variant={filterDuplicate === "similar" ? "default" : "outline"}
-            size="sm"
-            className={
-              filterDuplicate === "similar"
-                ? "h-10 rounded-full bg-amber-500 hover:bg-amber-600 text-white border-amber-500 text-sm"
-                : "h-10 rounded-full border-amber-300 bg-amber-100 text-amber-800 hover:bg-amber-200 cursor-pointer text-sm"
-            }
-            onClick={handleToggleSimilarFilter}
-            title={
-              filterDuplicate === "similar"
-                ? "点击取消疑似相似筛选"
-                : "客户/产品/实收/销售/成交日相同，单位或订单类型可能不同"
-            }
-          >
-            疑似相似 {similarCountInFilters} 笔
-            {filterDuplicate === "similar" ? " · 已筛选" : " · 点击筛选"}
-          </Button>
-        )}
-        <Badge
-          className="h-8 px-3 text-sm bg-blue-50 text-blue-700"
-          title={
-            filterPerson !== "all"
-              ? "按当前人员份额合计（分业绩只计本人）"
-              : filterUnit !== "all"
-                ? "按当前单位份额合计（分业绩只计本单位，不含其他单位分摊）"
-                : "当前列表实收合计"
-          }
-        >
-          {filterPerson !== "all"
-            ? "本人份额 "
-            : filterUnit !== "all"
-              ? "本单位份额 "
-              : "合计 "}
-          {formatCurrency(totalRevenue)}
-        </Badge>
-        <Badge
-          className="h-8 px-3 text-sm bg-violet-50 text-violet-700"
-          title="按人员管理「人×产品」个人提成+特殊奖励预估（比例不含月门槛）"
-        >
-          提成预估 {formatCurrency(totalCommission)}
-        </Badge>
       </div>
 
       {filterDuplicate === "similar" && (
