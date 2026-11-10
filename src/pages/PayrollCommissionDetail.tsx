@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, ExternalLink } from 'lucide-react'
+import { ArrowLeft, CloudUpload, ExternalLink, Save } from 'lucide-react'
 
 import { PageHeader } from '@/components/PageHeader'
 import { Button } from '@/components/ui/button'
@@ -16,10 +16,16 @@ import {
 import { useData } from '@/context/DataContext'
 import { usePermissions } from '@/hooks/usePermissions'
 import {
+  commissionOrderAdjApi,
+  type CommissionOrderAdjAudit,
+} from '@/lib/api'
+import {
+  loadCommissionOrderAdjMap,
+  replaceCommissionOrderAdjMap,
   saveCommissionOrderAdj,
   type CommissionOrderAdj,
 } from '@/lib/commissionOrderAdj'
-import { formatCurrency } from '@/lib/format'
+import { formatCurrency, formatDateTime } from '@/lib/format'
 import {
   buildPayrollCommissionDetail,
   buildSalesRecordsCheckHref,
@@ -28,6 +34,7 @@ import MCommissionOrderAdjCell from '@/pages/Payroll/components/m-commission-ord
 
 /**
  * 工资核算 → 个人业绩提成明细（对齐销售记录逐单核对；可调单笔）
+ * 改一行先写本机；「保存到线上」同步当前人×单位×月份整份调整。
  */
 export default function PayrollCommissionDetail() {
   const [params] = useSearchParams()
@@ -39,13 +46,24 @@ export default function PayrollCommissionDetail() {
     performanceTargets,
     unitProductSettlements,
   } = useData()
-  const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleSalesRecords: salesRecords } =
-    usePermissions()
+  const {
+    visibleSalesUnits: salesUnits,
+    visiblePersonnel: personnel,
+    visibleSalesRecords: salesRecords,
+    canEdit,
+  } = usePermissions()
+  const canSaveOnline = canEdit('payroll')
 
   const personnelId = params.get('personnelId') || ''
   const unitId = params.get('unitId') || ''
   const yearMonth = params.get('yearMonth') || ''
   const [adjTick, setAdjTick] = useState(0)
+  const [syncLoading, setSyncLoading] = useState(false)
+  const [syncSaving, setSyncSaving] = useState(false)
+  const [canMigrateLocal, setCanMigrateLocal] = useState(false)
+  const [audit, setAudit] = useState<CommissionOrderAdjAudit | null>(null)
+  const [savedTip, setSavedTip] = useState('')
+  const [dirtyLocal, setDirtyLocal] = useState(false)
 
   const detail = useMemo(() => {
     if (!personnelId || !unitId || !yearMonth) return null
@@ -78,6 +96,50 @@ export default function PayrollCommissionDetail() {
     adjTick,
   ])
 
+  useEffect(() => {
+    if (!personnelId || !unitId || !yearMonth) return
+    let cancelled = false
+    async function loadScope() {
+      setSyncLoading(true)
+      setCanMigrateLocal(false)
+      setDirtyLocal(false)
+      try {
+        const payload = await commissionOrderAdjApi.getScope(
+          yearMonth,
+          personnelId,
+          unitId,
+        )
+        if (cancelled) return
+        const serverAdj = payload.adjustments || {}
+        const serverCount = Object.keys(serverAdj).length
+        const local = loadCommissionOrderAdjMap(yearMonth, personnelId, unitId)
+        if (serverCount === 0 && Object.keys(local).length > 0) {
+          setAudit(null)
+          setCanMigrateLocal(true)
+          setAdjTick((n) => n + 1)
+          return
+        }
+        replaceCommissionOrderAdjMap(yearMonth, personnelId, unitId, serverAdj)
+        setAudit(payload.audit)
+        setCanMigrateLocal(false)
+        setAdjTick((n) => n + 1)
+      } catch (err) {
+        if (cancelled) return
+        console.error(err)
+        const local = loadCommissionOrderAdjMap(yearMonth, personnelId, unitId)
+        setAudit(null)
+        setCanMigrateLocal(Object.keys(local).length > 0)
+        setAdjTick((n) => n + 1)
+      } finally {
+        if (!cancelled) setSyncLoading(false)
+      }
+    }
+    void loadScope()
+    return () => {
+      cancelled = true
+    }
+  }, [personnelId, unitId, yearMonth])
+
   const salesHref = personnelId && unitId && yearMonth
     ? buildSalesRecordsCheckHref({ personnelId, unitId, yearMonth })
     : '/sales-records'
@@ -86,7 +148,88 @@ export default function PayrollCommissionDetail() {
 
   function handleSaveAdj(saleId: string, next: CommissionOrderAdj | null) {
     saveCommissionOrderAdj(yearMonth, personnelId, unitId, saleId, next)
+    setDirtyLocal(true)
     setAdjTick((n) => n + 1)
+  }
+
+  async function handleSaveOnline() {
+    if (!canSaveOnline) {
+      alert('无工资核算编辑权限，无法保存到线上')
+      return
+    }
+    const adjustments = loadCommissionOrderAdjMap(yearMonth, personnelId, unitId)
+    setSyncSaving(true)
+    try {
+      const payload = await commissionOrderAdjApi.saveScope({
+        yearMonth,
+        personnelId,
+        unitId,
+        adjustments,
+      })
+      replaceCommissionOrderAdjMap(
+        yearMonth,
+        personnelId,
+        unitId,
+        payload.adjustments || {},
+      )
+      setAudit(payload.audit)
+      setCanMigrateLocal(false)
+      setDirtyLocal(false)
+      setAdjTick((n) => n + 1)
+      const who = payload.summary?.updatedBy || '已同步'
+      const when = payload.summary?.updatedAt
+        ? formatDateTime(payload.summary.updatedAt)
+        : ''
+      setSavedTip(`已同步到服务器 · ${who}${when ? ` · ${when}` : ''}`)
+    } catch (err) {
+      console.error(err)
+      setSavedTip('已存本机，服务器同步失败')
+      alert(err instanceof Error ? err.message : '同步服务器失败')
+    } finally {
+      setSyncSaving(false)
+      window.setTimeout(() => setSavedTip(''), 4000)
+    }
+  }
+
+  async function handleMigrateLocal() {
+    if (!canSaveOnline) {
+      alert('无工资核算编辑权限，无法上传')
+      return
+    }
+    const local = loadCommissionOrderAdjMap(yearMonth, personnelId, unitId)
+    if (Object.keys(local).length === 0) {
+      alert('本机没有可上传的调整')
+      return
+    }
+    if (!confirm(`将本机 ${Object.keys(local).length} 笔订单调整上传到服务器？`)) {
+      return
+    }
+    setSyncSaving(true)
+    try {
+      const payload = await commissionOrderAdjApi.saveScope({
+        yearMonth,
+        personnelId,
+        unitId,
+        adjustments: local,
+      })
+      replaceCommissionOrderAdjMap(
+        yearMonth,
+        personnelId,
+        unitId,
+        payload.adjustments || {},
+      )
+      setAudit(payload.audit)
+      setCanMigrateLocal(false)
+      setDirtyLocal(false)
+      setAdjTick((n) => n + 1)
+      setSavedTip('本机调整已上传服务器')
+    } catch (err) {
+      console.error(err)
+      alert(err instanceof Error ? err.message : '上传失败')
+    } finally {
+      setSyncSaving(false)
+      window.setTimeout(() => setSavedTip(''), 4000)
+    }
   }
 
   if (!personnelId || !unitId || !yearMonth) {
@@ -123,7 +266,7 @@ export default function PayrollCommissionDetail() {
         description={`${detail.unitName} · ${detail.yearMonth} · 按销售记录逐单核对，可调整单笔提成`}
       />
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Button variant="outline" size="sm" asChild>
           <Link to={backHref}>
             <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
@@ -136,6 +279,42 @@ export default function PayrollCommissionDetail() {
             打开销售记录核对
           </Link>
         </Button>
+        <Button
+          size="sm"
+          onClick={() => void handleSaveOnline()}
+          disabled={syncSaving || syncLoading}
+        >
+          <Save className="mr-1.5 h-3.5 w-3.5" />
+          {syncSaving ? '同步中…' : '保存到线上'}
+        </Button>
+        {canMigrateLocal && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => void handleMigrateLocal()}
+            disabled={syncSaving}
+          >
+            <CloudUpload className="mr-1.5 h-3.5 w-3.5" />
+            上传本机数据
+          </Button>
+        )}
+        {dirtyLocal && (
+          <span className="text-xs text-amber-700">本机有未同步修改</span>
+        )}
+        {syncLoading && (
+          <span className="text-xs text-muted-foreground">正在拉取线上调整…</span>
+        )}
+        {savedTip && (
+          <span className="text-xs text-emerald-700">{savedTip}</span>
+        )}
+        {audit?.updatedAt && !savedTip && (
+          <span className="text-xs text-muted-foreground">
+            线上：{audit.updatedBy || '—'} · {formatDateTime(audit.updatedAt)}
+            {audit.uploadedAt
+              ? ` · 首次上传 ${formatDateTime(audit.uploadedAt)}`
+              : ''}
+          </span>
+        )}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -179,7 +358,7 @@ export default function PayrollCommissionDetail() {
         <CardHeader>
           <CardTitle className="text-base">销售明细核对</CardTitle>
           <CardDescription>
-            与销售记录一致：客户、产品、活动、订单金额；「调整」可改单笔业绩/比例/提成金额，保存后本行提成与工资表个人提成同步。
+            与销售记录一致：客户、产品、活动、订单金额；「调整」改后先存本机，点上方「保存到线上」后全员可见。
             {!detail.hasOrderAdj
               && Math.abs(lineSum - detail.systemPersonalTotal) > 0.05 && (
               <span className="ml-1 text-amber-700">

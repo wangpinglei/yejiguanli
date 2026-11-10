@@ -498,6 +498,19 @@ function initSchema() {
       updated_at TEXT DEFAULT (datetime('now')),
       uploaded_at TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS commission_order_adj_scopes (
+      id TEXT PRIMARY KEY,
+      year_month TEXT NOT NULL,
+      personnel_id TEXT NOT NULL,
+      unit_id TEXT NOT NULL,
+      adj_json TEXT NOT NULL DEFAULT '{}',
+      updated_by TEXT DEFAULT '',
+      updated_by_id TEXT DEFAULT '',
+      updated_at TEXT DEFAULT (datetime('now')),
+      uploaded_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(year_month, personnel_id, unit_id)
+    );
   `);
 
   ensureColumns("sales_units", [
@@ -2687,6 +2700,20 @@ export function rowToPayrollMonthScope(row: any) {
   return {
     yearMonth: row.year_month,
     unitIds: parseJsonField(row.unit_ids_json, []),
+    updatedBy: row.updated_by || "",
+    updatedById: row.updated_by_id || "",
+    updatedAt: row.updated_at || "",
+    uploadedAt: row.uploaded_at || "",
+  };
+}
+
+export function rowToCommissionOrderAdjScope(row: any) {
+  return {
+    id: row.id,
+    yearMonth: row.year_month,
+    personnelId: row.personnel_id,
+    unitId: row.unit_id,
+    adjustments: parseJsonField(row.adj_json, {}),
     updatedBy: row.updated_by || "",
     updatedById: row.updated_by_id || "",
     updatedAt: row.updated_at || "",

@@ -102,6 +102,44 @@ export function saveCommissionOrderAdj(
   return loadCommissionOrderAdjMap(yearMonth, personnelId, unitId)
 }
 
+/** 整份覆盖写入本机（服务端拉取 / 保存后回写） */
+export function replaceCommissionOrderAdjMap(
+  yearMonth: string,
+  personnelId: string,
+  unitId: string,
+  map: CommissionOrderAdjMap | Record<string, Partial<CommissionOrderAdj>>,
+): CommissionOrderAdjMap {
+  const all = loadAll()
+  const key = scopeKey(yearMonth, personnelId, unitId)
+  const next: CommissionOrderAdjMap = {}
+  for (const [saleId, adj] of Object.entries(map || {})) {
+    const n = normalizeCommissionOrderAdj(adj)
+    if (hasCommissionOrderAdj(n)) next[saleId] = n
+  }
+  if (Object.keys(next).length === 0) delete all[key]
+  else all[key] = next
+  localStorage.setItem(COMMISSION_ORDER_ADJ_STORAGE_KEY, JSON.stringify(all))
+  return next
+}
+
+/** 批量把服务端 scopes 写入本机（工资表按月加载用） */
+export function hydrateCommissionOrderAdjScopes(
+  scopes: Array<{
+    yearMonth: string
+    personnelId: string
+    unitId: string
+    adjustments?: CommissionOrderAdjMap | Record<string, Partial<CommissionOrderAdj>>
+  }>,
+): void {
+  for (const scope of scopes) {
+    const ym = String(scope.yearMonth || '').trim()
+    const pid = String(scope.personnelId || '').trim()
+    const uid = String(scope.unitId || '').trim()
+    if (!ym || !pid || !uid) continue
+    replaceCommissionOrderAdjMap(ym, pid, uid, scope.adjustments || {})
+  }
+}
+
 /** 摘要文案，用于单元格展示 */
 export function formatCommissionOrderAdjSummary(adj?: CommissionOrderAdj | null): string {
   if (!hasCommissionOrderAdj(adj)) return ''

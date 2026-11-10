@@ -419,6 +419,58 @@ export const payrollEntriesApi = {
   }) => api.put<PayrollEntriesMonthPayload>('/payroll-entries', data),
 };
 
+export type CommissionOrderAdjAudit = {
+  updatedBy: string
+  updatedById: string
+  updatedAt: string
+  uploadedAt: string
+}
+
+export type CommissionOrderAdjScopePayload = {
+  yearMonth: string
+  personnelId: string
+  unitId: string
+  adjustments: Record<
+    string,
+    {
+      salesAmountAdj: number
+      rateAdjPct: number
+      commissionAmountAdj: number
+      note: string
+    }
+  >
+  audit: CommissionOrderAdjAudit | null
+}
+
+export type CommissionOrderAdjPayload = CommissionOrderAdjScopePayload & {
+  scopes: CommissionOrderAdjScopePayload[]
+  summary: {
+    scopeCount: number
+    updatedBy: string
+    updatedAt: string
+    uploadedAt: string
+  }
+}
+
+export const commissionOrderAdjApi = {
+  getScope: (yearMonth: string, personnelId: string, unitId: string) =>
+    api.get<CommissionOrderAdjPayload>(
+      `/commission-order-adj?yearMonth=${encodeURIComponent(yearMonth)}`
+        + `&personnelId=${encodeURIComponent(personnelId)}`
+        + `&unitId=${encodeURIComponent(unitId)}`,
+    ),
+  getMonth: (yearMonth: string) =>
+    api.get<CommissionOrderAdjPayload>(
+      `/commission-order-adj?yearMonth=${encodeURIComponent(yearMonth)}`,
+    ),
+  saveScope: (data: {
+    yearMonth: string
+    personnelId: string
+    unitId: string
+    adjustments: Record<string, unknown>
+  }) => api.put<CommissionOrderAdjPayload>('/commission-order-adj', data),
+};
+
 export const performanceTargetsApi = {
   list: () => api.get<any[]>("/performance-targets"),
   upsert: (data: any) => api.post<any>("/performance-targets/upsert", data),

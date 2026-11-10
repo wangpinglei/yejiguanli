@@ -30,9 +30,11 @@ import {
 import { useData } from '@/context/DataContext'
 import { usePermissions } from '@/hooks/usePermissions'
 import {
+  commissionOrderAdjApi,
   payrollEntriesApi,
   type PayrollEntriesMonthPayload,
 } from '@/lib/api'
+import { hydrateCommissionOrderAdjScopes } from '@/lib/commissionOrderAdj'
 import { formatCurrency, formatDateTime, formatDisplayPersonName } from '@/lib/format'
 import {
   calcPayrollRow,
@@ -295,8 +297,17 @@ export default function Payroll() {
       setSyncLoading(true)
       setCanMigrateLocal(false)
       try {
-        const payload = await payrollEntriesApi.getMonth(yearMonth)
+        const [payload, adjPayload] = await Promise.all([
+          payrollEntriesApi.getMonth(yearMonth),
+          commissionOrderAdjApi.getMonth(yearMonth).catch((err) => {
+            console.error(err)
+            return null
+          }),
+        ])
         if (cancelled) return
+        if (adjPayload?.scopes?.length) {
+          hydrateCommissionOrderAdjScopes(adjPayload.scopes)
+        }
         const serverCount = Object.keys(payload.entries || {}).length
         const local = loadPayrollEntries(yearMonth)
         if (serverCount === 0 && Object.keys(local).length > 0) {
