@@ -655,6 +655,17 @@ export default function SalesRecords() {
     return list;
   }, [products, salesRecords]);
 
+  /** 系统内已出现过的活动名，供表单下拉选择 */
+  const activityOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of salesRecords) {
+      const name = (s.activityName || "").trim();
+      if (!name || name === "无活动") continue;
+      set.add(name);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-CN"));
+  }, [salesRecords]);
+
   const baseFilteredRecords = useMemo(() => {
     return salesRecords
       .filter((s) => {
@@ -921,7 +932,7 @@ export default function SalesRecords() {
       orderAmount: 0,
       orderType: "",
       customerName: "",
-      activityName: "",
+      activityName: "无活动",
     });
     setDialogOpen(true);
   };
@@ -970,7 +981,7 @@ export default function SalesRecords() {
       orderAmount: record.orderAmount || 0,
       orderType: record.orderType || "",
       customerName: record.customerName || "",
-      activityName: record.activityName || "",
+      activityName: (record.activityName || "").trim() || "无活动",
     });
     setDialogOpen(true);
   };
@@ -2316,8 +2327,8 @@ export default function SalesRecords() {
           <div className="space-y-4 py-2">
             {isEditingSynced && (
               <p className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">
-                生态圈订单：金额/产品/日期等由同步维护；可改销售单位、主责人与订单分业绩。
-                手工改过的销售单位在刷新同步时不会被冲回。
+                生态圈订单：金额/产品/日期等由同步维护；可改销售单位、主责人、订单分业绩与参加活动。
+                手工改过的销售单位、参加活动在刷新同步时不会被冲回。
               </p>
             )}
             <div className="space-y-2">
@@ -2756,12 +2767,29 @@ export default function SalesRecords() {
               </div>
               <div className="space-y-2">
                 <Label>参加活动</Label>
-                <Input
-                  value={form.activityName}
-                  onChange={(e) => setForm({ ...form, activityName: e.target.value })}
-                  placeholder="如：小游戏风月庆 / 无活动"
-                  disabled={isEditingSynced}
-                />
+                <Select
+                  value={(form.activityName || "").trim() || "无活动"}
+                  onValueChange={(v) => setForm({ ...form, activityName: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择活动" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="无活动">无活动</SelectItem>
+                    {activityOptions.map((name) => (
+                      <SelectItem key={name} value={name}>
+                        {name}
+                      </SelectItem>
+                    ))}
+                    {!!(form.activityName || "").trim()
+                      && form.activityName !== "无活动"
+                      && !activityOptions.includes(form.activityName.trim()) && (
+                      <SelectItem value={form.activityName.trim()}>
+                        {form.activityName.trim()}（当前）
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <div className="grid grid-cols-3 gap-4">

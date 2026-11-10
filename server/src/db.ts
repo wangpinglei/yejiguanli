@@ -615,6 +615,7 @@ function initSchema() {
     { name: "activity_name", ddl: "activity_name TEXT DEFAULT ''" },
     { name: "collaborators", ddl: "collaborators TEXT DEFAULT ''" },
     { name: "unit_override", ddl: "unit_override INTEGER DEFAULT 0" },
+    { name: "activity_override", ddl: "activity_override INTEGER DEFAULT 0" },
   ]);
 
   ensureColumns("cost_records", [
@@ -2466,6 +2467,7 @@ export function rowToSalesRecord(row: any) {
     orderType: row.order_type || undefined,
     activityName: row.activity_name || undefined,
     unitOverride: Boolean(row.unit_override),
+    activityOverride: Boolean(row.activity_override),
   };
 }
 

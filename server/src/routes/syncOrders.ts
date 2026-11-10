@@ -236,7 +236,8 @@ function upsertSyncedOrder(order: SyncOrderInput): {
 
   const existing = db
     .prepare(
-      `SELECT id, collaborators, sales_unit_id, unit_override
+      `SELECT id, collaborators, sales_unit_id, unit_override,
+              activity_name, activity_override
        FROM sales_records WHERE external_order_id = ? LIMIT 1`,
     )
     .get(externalOrderId) as {
@@ -244,6 +245,8 @@ function upsertSyncedOrder(order: SyncOrderInput): {
       collaborators?: string
       sales_unit_id?: string
       unit_override?: number
+      activity_name?: string
+      activity_override?: number
     } | undefined
 
   // 同步未带分业绩时，保留库里已有的手工分业绩，避免整单被算回主责单位
@@ -260,6 +263,12 @@ function upsertSyncedOrder(order: SyncOrderInput): {
       .prepare('SELECT name FROM sales_units WHERE id = ? LIMIT 1')
       .get(existing.sales_unit_id) as { name?: string } | undefined
     if (lockedUnit?.name) unitNameToSave = lockedUnit.name
+  }
+
+  // 手工改过参加活动时保留
+  let activityToSave = order.activityName || ''
+  if (existing?.activity_override) {
+    activityToSave = String(existing.activity_name || '')
   }
 
   if (existing?.id) {
@@ -287,7 +296,7 @@ function upsertSyncedOrder(order: SyncOrderInput): {
       externalOrderId,
       order.orderAmount,
       order.orderType,
-      order.activityName,
+      activityToSave,
       collaboratorsToSave,
       existing.id,
     )

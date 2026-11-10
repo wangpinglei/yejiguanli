@@ -390,6 +390,8 @@ export interface SalesRecord {
   activityName?: string; // 参加活动（如：小游戏风月庆）
   /** 同步单是否已手工改过销售单位（刷新同步时保留） */
   unitOverride?: boolean;
+  /** 同步单是否已手工改过参加活动（刷新同步时保留） */
+  activityOverride?: boolean;
 }
 
 // 生态圈同步的订单（后端存储格式 / GET synced-orders 返回）

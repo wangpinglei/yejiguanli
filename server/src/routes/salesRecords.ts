@@ -15,15 +15,17 @@ const INSERT_SQL = `
   INSERT INTO sales_records (
     id, sales_unit_id, personnel_id, product_id, quantity, unit_price, total_amount, sale_date, remark,
     synced, external_order_id, customer_name, sales_unit_name, sales_person_name, product_name, synced_at,
-    order_number, product_module, order_amount, order_type, activity_name, collaborators, unit_override
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    order_number, product_module, order_amount, order_type, activity_name, collaborators,
+    unit_override, activity_override
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `;
 
 const UPDATE_SQL = `
   UPDATE sales_records SET
     sales_unit_id=?, personnel_id=?, product_id=?, quantity=?, unit_price=?, total_amount=?, sale_date=?, remark=?,
     synced=?, external_order_id=?, customer_name=?, sales_unit_name=?, sales_person_name=?, product_name=?, synced_at=?,
-    order_number=?, product_module=?, order_amount=?, order_type=?, activity_name=?, collaborators=?, unit_override=?
+    order_number=?, product_module=?, order_amount=?, order_type=?, activity_name=?, collaborators=?,
+    unit_override=?, activity_override=?
   WHERE id=?
 `;
 
@@ -78,6 +80,18 @@ function pick(body: any, existing?: any) {
   ) {
     unitOverride = 1;
   }
+  const activityName = body.activityName ?? existing?.activity_name ?? "";
+  let activityOverride = existing?.activity_override ? 1 : 0;
+  if (body.activityOverride != null) {
+    activityOverride = body.activityOverride ? 1 : 0;
+  } else if (
+    synced
+    && existing
+    && body.activityName != null
+    && String(body.activityName) !== String(existing.activity_name || "")
+  ) {
+    activityOverride = 1;
+  }
   return {
     salesUnitId,
     personnelId: body.personnelId ?? existing?.personnel_id ?? "",
@@ -98,9 +112,10 @@ function pick(body: any, existing?: any) {
     productModule: body.productModule ?? existing?.product_module ?? "",
     orderAmount: body.orderAmount ?? existing?.order_amount ?? 0,
     orderType: body.orderType ?? existing?.order_type ?? "",
-    activityName: body.activityName ?? existing?.activity_name ?? "",
+    activityName,
     collaborators,
     unitOverride,
+    activityOverride,
   };
 }
 
@@ -108,7 +123,8 @@ function bind(f: ReturnType<typeof pick>) {
   return [
     f.salesUnitId, f.personnelId, f.productId, f.quantity, f.unitPrice, f.totalAmount, f.saleDate, f.remark,
     f.synced, f.externalOrderId, f.customerName, f.salesUnitName, f.salesPersonName, f.productName, f.syncedAt,
-    f.orderNumber, f.productModule, f.orderAmount, f.orderType, f.activityName, f.collaborators, f.unitOverride,
+    f.orderNumber, f.productModule, f.orderAmount, f.orderType, f.activityName, f.collaborators,
+    f.unitOverride, f.activityOverride,
   ];
 }
 
