@@ -68,7 +68,7 @@ router.get("/payroll-unit-score-rules", (req, res) => {
   const rows = db
     .prepare("SELECT * FROM payroll_unit_score_rules ORDER BY unit_id")
     .all()
-    .map((raw) => toPayload(rowToPayrollUnitScoreRule(raw)));
+    .map((raw: unknown) => toPayload(rowToPayrollUnitScoreRule(raw)));
 
   res.json({
     unitId: "",
