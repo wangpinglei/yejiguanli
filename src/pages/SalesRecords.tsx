@@ -541,6 +541,8 @@ export default function SalesRecords() {
   const [filterDuplicate, setFilterDuplicate] = useState<
     "all" | "duplicate" | "similar" | "unique"
   >("all");
+  /** 是否参加活动：all | with | without */
+  const [filterActivity, setFilterActivity] = useState<"all" | "with" | "without">("all");
   const [importDupFilter, setImportDupFilter] = useState<"all" | "duplicate" | "unique">("all");
   const [dateFrom, setDateFrom] = useState(initialQuery.from);
   const [dateTo, setDateTo] = useState(initialQuery.to);
@@ -697,12 +699,18 @@ export default function SalesRecords() {
         const saleDate = normalizeSaleDate(s.saleDate);
         const matchFrom = !dateFrom || saleDate >= dateFrom;
         const matchTo = !dateTo || saleDate <= dateTo;
-        return matchSearch && matchUnit && matchPerson && matchSync && matchDomain && matchFrom && matchTo;
+        const actName = (s.activityName || "").trim();
+        const hasActivity = !!actName && actName !== "无活动";
+        const matchActivity =
+          filterActivity === "all"
+          || (filterActivity === "with" ? hasActivity : !hasActivity);
+        return matchSearch && matchUnit && matchPerson && matchSync
+          && matchDomain && matchFrom && matchTo && matchActivity;
       })
       .sort(compareSaleDateDesc);
   }, [
     salesRecords, personnel, products, search, filterUnit, filterPerson, filterSync,
-    filterDomain, dateFrom, dateTo,
+    filterDomain, filterActivity, dateFrom, dateTo,
   ]);
 
   const duplicateCountInFilters = useMemo(
@@ -738,7 +746,10 @@ export default function SalesRecords() {
   // 筛选条件变化时回到第 1 页
   useEffect(() => {
     setPage(1);
-  }, [search, filterUnit, filterPerson, filterSync, filterDomain, filterDuplicate, dateFrom, dateTo, pageSize]);
+  }, [
+    search, filterUnit, filterPerson, filterSync, filterDomain, filterDuplicate,
+    filterActivity, dateFrom, dateTo, pageSize,
+  ]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRecords.length / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -1956,6 +1967,19 @@ export default function SalesRecords() {
               </Button>
             )}
           </div>
+          <Select
+            value={filterActivity}
+            onValueChange={(v: "all" | "with" | "without") => setFilterActivity(v)}
+          >
+            <SelectTrigger className="h-10 w-44 border-sky-200 bg-white text-base">
+              <SelectValue placeholder="是否参加活动" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部活动状态</SelectItem>
+              <SelectItem value="with">已参加活动</SelectItem>
+              <SelectItem value="without">未参加活动</SelectItem>
+            </SelectContent>
+          </Select>
           {duplicateCountInFilters > 0 && (
             <Button
               type="button"
