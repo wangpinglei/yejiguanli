@@ -19,6 +19,7 @@ import financeNoticeRoutes from "./routes/financeNotice";
 import payrollEntriesRoutes from "./routes/payrollEntries";
 import payrollUnitScoreRulesRoutes from "./routes/payrollUnitScoreRules";
 import commissionOrderAdjRoutes from "./routes/commissionOrderAdj";
+import activityCostRulesRoutes from "./routes/activityCostRules";
 import { startFinanceNoticeScheduler, migrateFinanceNoticeTextColumn } from "./services/financeNotice";
 
 const app = express();
@@ -91,6 +92,8 @@ app.use("/api", payrollEntriesRoutes);
 app.use("/api", payrollUnitScoreRulesRoutes);
 
 app.use("/api", commissionOrderAdjRoutes);
+
+app.use("/api", activityCostRulesRoutes);
 
 app.use("/api", extraRoutes);
 

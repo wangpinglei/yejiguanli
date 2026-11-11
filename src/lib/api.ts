@@ -300,6 +300,30 @@ export const productsApi = {
     }>("/products/merge", data),
 };
 
+export type ActivityCostRulePayload = {
+  activityName: string
+  costType: 'fixed' | 'percentage'
+  costValue: number
+  audit?: {
+    updatedBy: string
+    updatedById: string
+    updatedAt: string
+  } | null
+}
+
+export const activityCostRulesApi = {
+  list: () => api.get<{ rules: ActivityCostRulePayload[] }>('/activity-cost-rules'),
+  save: (data: {
+    activityName: string
+    costType: 'fixed' | 'percentage'
+    costValue: number
+  }) => api.put<ActivityCostRulePayload>('/activity-cost-rules', data),
+  remove: (activityName: string) =>
+    api.delete<{ ok: boolean; activityName: string }>(
+      `/activity-cost-rules/${encodeURIComponent(activityName)}`,
+    ),
+};
+
 export const salesRecordsApi = {
   list: (params?: { salesUnitId?: string; personnelId?: string }) => {
     const query = new URLSearchParams();

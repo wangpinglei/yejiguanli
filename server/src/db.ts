@@ -520,6 +520,15 @@ function initSchema() {
       updated_at TEXT DEFAULT (datetime('now')),
       uploaded_at TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS activity_cost_rules (
+      activity_name TEXT PRIMARY KEY,
+      cost_type TEXT NOT NULL DEFAULT 'fixed',
+      cost_value REAL NOT NULL DEFAULT 0,
+      updated_by TEXT DEFAULT '',
+      updated_by_id TEXT DEFAULT '',
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   ensureColumns("sales_units", [
@@ -2746,6 +2755,17 @@ export function rowToPayrollUnitScoreRule(row: any) {
     updatedById: row.updated_by_id || "",
     updatedAt: row.updated_at || "",
     uploadedAt: row.uploaded_at || "",
+  };
+}
+
+export function rowToActivityCostRule(row: any) {
+  return {
+    activityName: row.activity_name || "",
+    costType: row.cost_type === "percentage" ? "percentage" : "fixed",
+    costValue: Number(row.cost_value) || 0,
+    updatedBy: row.updated_by || "",
+    updatedById: row.updated_by_id || "",
+    updatedAt: row.updated_at || "",
   };
 }
 

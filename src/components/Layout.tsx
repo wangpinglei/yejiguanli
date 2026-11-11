@@ -20,6 +20,7 @@ import {
   IdCard,
   Megaphone,
   Calculator,
+  Tags,
 } from "lucide-react";
 import { useAuth, ROLE_LABELS } from "@/context/AuthContext";
 import { useData } from "@/context/DataContext";
@@ -67,6 +68,7 @@ const hrNavChildren: NavItem[] = [
 const warehouseNavChildren: NavItem[] = [
   { path: "/sales-units", label: "销售单位", icon: Building2, moduleKey: "sales_units" },
   { path: "/sales-records", label: "销售记录", icon: ShoppingCart, moduleKey: "sales_records" },
+  { path: "/activity-cost", label: "活动成本", icon: Tags, moduleKey: "activity_cost" },
   { path: "/sales-battle-report", label: "单位战报", icon: Swords, moduleKey: "sales_battle_report" },
 ];
 

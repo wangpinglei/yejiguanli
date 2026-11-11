@@ -9,6 +9,7 @@ import SalesUnits from "@/pages/SalesUnits";
 import Personnel from "@/pages/Personnel";
 import Products from "@/pages/Products";
 import SalesRecords from "@/pages/SalesRecords";
+import ActivityCost from "@/pages/ActivityCost";
 import CostManagement from "@/pages/CostManagement";
 import ProfitAnalysis from "@/pages/ProfitAnalysis";
 import BusinessAnalysis from "@/pages/BusinessAnalysis";
@@ -69,6 +70,7 @@ export default function App() {
               />
               <Route path="products" element={<Products />} />
               <Route path="sales-records" element={<SalesRecords />} />
+              <Route path="activity-cost" element={<ActivityCost />} />
               <Route path="cost-management" element={<CostManagement />} />
               <Route path="finance-notice" element={<FinanceNotice />} />
               <Route path="payroll" element={<Payroll />} />

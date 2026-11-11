@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { getDb, rowToSalesRecord, generateId } from "../db";
 import { authMiddleware } from "../auth";
+import { resolveCostOverrideForNewSale } from "../lib/activityCost";
 import { normalizeSaleDate } from "../lib/saleDate";
 import {
   getVisibleUnitIds,
@@ -187,6 +188,17 @@ router.post("/", requireModuleEdit("sales_records"), (req, res) => {
   }
   const id = generateId("sr");
   const db = getDb();
+  // 新建：未本单手工时按活动规则固化扣除（只影响新单）
+  const bodyHasManual =
+    Object.prototype.hasOwnProperty.call(req.body || {}, "costDeductionOverride")
+    && req.body.costDeductionOverride !== null
+    && req.body.costDeductionOverride !== "";
+  f.costDeductionOverride = resolveCostOverrideForNewSale({
+    db,
+    activityName: f.activityName,
+    orderAmount: Number(f.totalAmount) || 0,
+    explicitOverride: bodyHasManual ? f.costDeductionOverride : null,
+  });
   db.prepare(INSERT_SQL).run(id, ...bind(f));
   res.json(rowToSalesRecord(db.prepare("SELECT * FROM sales_records WHERE id = ?").get(id)));
 });

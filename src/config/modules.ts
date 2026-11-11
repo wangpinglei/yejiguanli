@@ -6,6 +6,7 @@ export type ModuleKey =
   | "personnel"
   | "hr_management"
   | "sales_records"
+  | "activity_cost"
   | "cost_management"
   | "finance_notice"
   | "payroll"
@@ -36,6 +37,7 @@ export const MODULE_DEFS: ModuleDef[] = [
   { key: "dashboard", label: "数据看板", path: "/", canEdit: false },
   { key: "sales_units", label: "销售单位", path: "/sales-units", canEdit: true },
   { key: "sales_records", label: "销售记录", path: "/sales-records", canEdit: true },
+  { key: "activity_cost", label: "活动成本", path: "/activity-cost", canEdit: true },
   { key: "sales_battle_report", label: "单位战报", path: "/sales-battle-report", canEdit: true },
   { key: "personnel", label: "人员管理", path: "/personnel", canEdit: true },
   { key: "hr_management", label: "人事档案", path: "/hr-management", canEdit: true },
@@ -68,8 +70,8 @@ export const MODULE_PERMISSION_GROUPS: ModulePermissionGroup[] = [
   {
     id: "warehouse",
     label: "分仓管理",
-    hint: "销售单位 · 销售记录 · 单位战报",
-    moduleKeys: ["sales_units", "sales_records", "sales_battle_report"],
+    hint: "销售单位 · 销售记录 · 活动成本 · 单位战报",
+    moduleKeys: ["sales_units", "sales_records", "activity_cost", "sales_battle_report"],
   },
   {
     id: "hr",

@@ -7,6 +7,7 @@ export type ModuleKey =
   | "personnel"
   | "hr_management"
   | "sales_records"
+  | "activity_cost"
   | "cost_management"
   | "finance_notice"
   | "payroll"
@@ -27,6 +28,7 @@ const MODULE_KEYS: ModuleKey[] = [
   "dashboard",
   "sales_units",
   "sales_records",
+  "activity_cost",
   "sales_battle_report",
   "personnel",
   "hr_management",
@@ -47,6 +49,7 @@ const EDITABLE = new Set<ModuleKey>([
   "personnel",
   "hr_management",
   "sales_records",
+  "activity_cost",
   "cost_management",
   "finance_notice",
   "payroll",

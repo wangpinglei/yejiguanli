@@ -1,6 +1,7 @@
 import { createHash } from 'crypto'
 import { Router, Request, Response } from 'express'
 import { getDb, generateId, rowToSalesRecord, findProductRowByNameOrAlias } from '../db'
+import { resolveCostOverrideForNewSale } from '../lib/activityCost'
 import { parsePerformanceSplitText } from '../lib/parsePerformanceSplit'
 import { normalizeSaleDate } from '../lib/saleDate'
 import { authMiddleware } from '../auth'
@@ -304,12 +305,19 @@ function upsertSyncedOrder(order: SyncOrderInput): {
   }
 
   const id = generateId('sr')
+  const costDeductionOverride = resolveCostOverrideForNewSale({
+    db,
+    activityName: order.activityName,
+    orderAmount: Number(order.totalAmount) || 0,
+    explicitOverride: null,
+  })
   db.prepare(`
     INSERT INTO sales_records (
       id, sales_unit_id, personnel_id, product_id, quantity, unit_price, total_amount, sale_date, remark,
       synced, external_order_id, customer_name, sales_unit_name, sales_person_name, product_name, synced_at,
-      order_number, product_module, order_amount, order_type, activity_name, collaborators
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)
+      order_number, product_module, order_amount, order_type, activity_name, collaborators,
+      cost_deduction_override
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?)
   `).run(
     id,
     recordUnitId || unitId,
@@ -331,6 +339,7 @@ function upsertSyncedOrder(order: SyncOrderInput): {
     order.orderType,
     order.activityName,
     collaboratorsToSave,
+    costDeductionOverride,
   )
   return { action: 'added', id }
 }
