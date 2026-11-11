@@ -179,7 +179,7 @@ export default function ProfitAnalysis() {
     return filterByMonth(salesRecords, yearMonth)
       .filter((s) => s.salesUnitId === unitId)
       .reduce(
-        (sum, s) => sum + calcSaleSettlementIncome(s, visibleUnitProductSettlements),
+        (sum, s) => sum + calcSaleSettlementIncome(s, visibleUnitProductSettlements, products),
         0,
       );
   }
@@ -301,7 +301,7 @@ unitIds,
       const ym = getYearMonth(s.saleDate);
       const existing = monthMap.get(ym) || { salesAmount: 0, settlementIncome: 0, otherIncome: 0, cost: 0 };
       existing.salesAmount += s.totalAmount;
-      existing.settlementIncome += calcSaleSettlementIncome(s, visibleUnitProductSettlements);
+      existing.settlementIncome += calcSaleSettlementIncome(s, visibleUnitProductSettlements, products);
       monthMap.set(ym, existing);
     });
     costRecords.forEach((c) => {
@@ -488,7 +488,7 @@ unitIds,
   const personnelRanking = useMemo(() => {
     return personnel
       .map((p) => {
-        const totalRevenue = getPersonalSales(p.id, filteredSales, p.name);
+        const totalRevenue = getPersonalSales(p.id, filteredSales, p.name, products);
         const count = filteredSales.filter(
           (s) => getPersonShareAmount(s, p.id) > 0,
         ).length;
@@ -527,7 +527,7 @@ unitIds,
     return unitsToShow.map((unit) => {
       const unitSales = monthlySales.filter((s) => s.salesUnitId === unit.id);
       const estimatedAmount = unitSales.reduce(
-        (sum, s) => sum + calcSaleSettlementIncome(s, visibleUnitProductSettlements),
+        (sum, s) => sum + calcSaleSettlementIncome(s, visibleUnitProductSettlements, products),
         0,
       );
       const settlement = revenueSettlements.find(
@@ -670,7 +670,7 @@ unitIds,
           product?.name || s.productName || "",
           s.totalAmount,
           formatSaleSettlementRatioForSale(s, visibleUnitProductSettlements),
-          calcSaleSettlementIncome(s, visibleUnitProductSettlements),
+          calcSaleSettlementIncome(s, visibleUnitProductSettlements, products),
           s.synced ? "生态圈" : "手动",
         ]);
       }
@@ -1617,6 +1617,7 @@ unitIds,
                                           const settlementAmt = calcSaleSettlementIncome(
                                             s,
                                             visibleUnitProductSettlements,
+                                            products,
                                           );
                                           const settlementRatio = formatSaleSettlementRatioForSale(
                                             s,

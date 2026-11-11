@@ -402,7 +402,7 @@ export default function CostManagement() {
         const estimated = filterByMonth(salesRecords, selectedMonth)
           .filter((s) => s.salesUnitId === uid)
           .reduce(
-            (s, sale) => s + calcSaleSettlementIncome(sale, unitProductSettlements),
+            (s, sale) => s + calcSaleSettlementIncome(sale, unitProductSettlements, products),
             0,
           );
         return sum + getEffectiveConfirmAmount(

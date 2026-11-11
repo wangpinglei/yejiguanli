@@ -216,7 +216,7 @@ export default function SalesUnits() {
       const estimatedSettlement = filterByMonth(salesRecords, selectedMonth)
         .filter((s) => s.salesUnitId === u.id)
         .reduce(
-          (sum, s) => sum + calcSaleSettlementIncome(s, visibleUnitProductSettlements),
+          (sum, s) => sum + calcSaleSettlementIncome(s, visibleUnitProductSettlements, products),
           0,
         )
       const settlementIncome = getEffectiveConfirmAmount(

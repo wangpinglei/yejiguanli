@@ -103,7 +103,7 @@ export default function MUnitSettlementList({
   function calcUnitIncome(productId: string, unitId: string): number {
     return monthlySales
       .filter((s) => s.productId === productId && s.salesUnitId === unitId)
-      .reduce((sum, s) => sum + calcSaleSettlementIncome(s, upsList), 0)
+      .reduce((sum, s) => sum + calcSaleSettlementIncome(s, upsList, products), 0)
   }
 
   function buildDomainGroups(unitId: string): DomainGroup[] {

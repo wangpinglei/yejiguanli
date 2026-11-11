@@ -16,8 +16,8 @@ const INSERT_SQL = `
     id, sales_unit_id, personnel_id, product_id, quantity, unit_price, total_amount, sale_date, remark,
     synced, external_order_id, customer_name, sales_unit_name, sales_person_name, product_name, synced_at,
     order_number, product_module, order_amount, order_type, activity_name, collaborators,
-    unit_override, activity_override
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    unit_override, activity_override, cost_deduction_override
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `;
 
 const UPDATE_SQL = `
@@ -25,7 +25,7 @@ const UPDATE_SQL = `
     sales_unit_id=?, personnel_id=?, product_id=?, quantity=?, unit_price=?, total_amount=?, sale_date=?, remark=?,
     synced=?, external_order_id=?, customer_name=?, sales_unit_name=?, sales_person_name=?, product_name=?, synced_at=?,
     order_number=?, product_module=?, order_amount=?, order_type=?, activity_name=?, collaborators=?,
-    unit_override=?, activity_override=?
+    unit_override=?, activity_override=?, cost_deduction_override=?
   WHERE id=?
 `;
 
@@ -92,6 +92,18 @@ function pick(body: any, existing?: any) {
   ) {
     activityOverride = 1;
   }
+  let costDeductionOverride: number | null =
+    existing && existing.cost_deduction_override != null
+      ? Number(existing.cost_deduction_override)
+      : null;
+  if (Object.prototype.hasOwnProperty.call(body, "costDeductionOverride")) {
+    if (body.costDeductionOverride === null || body.costDeductionOverride === "") {
+      costDeductionOverride = null;
+    } else {
+      const n = Number(body.costDeductionOverride);
+      costDeductionOverride = Number.isFinite(n) ? Math.max(0, n) : null;
+    }
+  }
   return {
     salesUnitId,
     personnelId: body.personnelId ?? existing?.personnel_id ?? "",
@@ -116,6 +128,7 @@ function pick(body: any, existing?: any) {
     collaborators,
     unitOverride,
     activityOverride,
+    costDeductionOverride,
   };
 }
 
@@ -124,7 +137,7 @@ function bind(f: ReturnType<typeof pick>) {
     f.salesUnitId, f.personnelId, f.productId, f.quantity, f.unitPrice, f.totalAmount, f.saleDate, f.remark,
     f.synced, f.externalOrderId, f.customerName, f.salesUnitName, f.salesPersonName, f.productName, f.syncedAt,
     f.orderNumber, f.productModule, f.orderAmount, f.orderType, f.activityName, f.collaborators,
-    f.unitOverride, f.activityOverride,
+    f.unitOverride, f.activityOverride, f.costDeductionOverride,
   ];
 }
 

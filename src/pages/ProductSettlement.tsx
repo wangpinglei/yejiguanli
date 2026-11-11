@@ -206,7 +206,7 @@ export default function ProductSettlement() {
   const calcUnitIncome = (productId: string, unitId: string): number => {
     return monthlySales
       .filter((s) => s.productId === productId && s.salesUnitId === unitId)
-      .reduce((sum, s) => sum + calcSaleSettlementIncome(s, upsList), 0);
+      .reduce((sum, s) => sum + calcSaleSettlementIncome(s, upsList, products), 0);
   };
 
   // 全产品本月结算收入合计

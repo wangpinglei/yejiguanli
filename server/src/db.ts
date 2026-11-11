@@ -625,6 +625,8 @@ function initSchema() {
     { name: "collaborators", ddl: "collaborators TEXT DEFAULT ''" },
     { name: "unit_override", ddl: "unit_override INTEGER DEFAULT 0" },
     { name: "activity_override", ddl: "activity_override INTEGER DEFAULT 0" },
+    // NULL = 按产品自动扣成本；有值（含 0）= 手工覆盖本单成本扣除
+    { name: "cost_deduction_override", ddl: "cost_deduction_override REAL" },
   ]);
 
   ensureColumns("cost_records", [
@@ -2477,6 +2479,10 @@ export function rowToSalesRecord(row: any) {
     activityName: row.activity_name || undefined,
     unitOverride: Boolean(row.unit_override),
     activityOverride: Boolean(row.activity_override),
+    costDeductionOverride:
+      row.cost_deduction_override === null || row.cost_deduction_override === undefined
+        ? null
+        : Number(row.cost_deduction_override),
   };
 }
 

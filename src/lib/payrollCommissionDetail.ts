@@ -17,6 +17,11 @@ import {
   canApplyPersonalCommissionTiers,
   formatPersonalCommissionTiersLabel,
 } from '@/lib/personalCommissionTiers'
+import {
+  findProductById,
+  getPersonCommissionBaseAmount,
+  resolveOrderCostDeduction,
+} from '@/lib/orderCostBase'
 import { findUnitProductSettlement } from '@/lib/settlement'
 import {
   calculateMonthlySalary,
@@ -46,8 +51,16 @@ export interface CommissionDetailLine {
   productId: string
   /** 参加活动（对齐销售记录 activityName；无活动则空） */
   activityName: string
-  /** 订单金额 / 本人业绩份额 */
+  /** 订单金额 / 本人业绩份额（扣成本前） */
   orderAmount: number
+  /** 本人分摊的成本扣除 */
+  costDeduction: number
+  /** 系统成本（产品配置） */
+  systemCost: number
+  /** 是否手工改过成本扣除 */
+  costIsManual: boolean
+  /** 扣成本后计佣业绩（尚未加人工业绩调整） */
+  billableBase: number
   /** 提成规则文案 */
   rateLabel: string
   /** 原比例 %（fixed 为 0） */
@@ -140,9 +153,19 @@ function buildSaleRecordLines(options: {
   related.sort((a, b) => (b.saleDate || '').localeCompare(a.saleDate || ''))
 
   return related.map((sale) => {
+    const product = findProductById(products, sale.productId)
     let orderAmount = getPersonShareAmount(sale, person.id)
     if (orderAmount <= 0 && saleInvolvesPerson(sale, person.id, person.name)) {
       orderAmount = sale.totalAmount || 0
+    }
+    const costResolved = resolveOrderCostDeduction(sale, product)
+    const fullTotal = Number(sale.totalAmount) || 0
+    const shareRatio = fullTotal > 0 ? orderAmount / fullTotal : 0
+    const costDeduction = roundMoney(costResolved.cost * shareRatio)
+    const systemCostShare = roundMoney(costResolved.systemCost * shareRatio)
+    let billableBase = getPersonCommissionBaseAmount(sale, person.id, product)
+    if (billableBase <= 0 && orderAmount > 0) {
+      billableBase = roundMoney(Math.max(0, orderAmount - costDeduction))
     }
 
     const ppc =
@@ -198,7 +221,7 @@ function buildSaleRecordLines(options: {
         salesUnitId: sale.salesUnitId,
         personnelId: person.id,
         quantity: sale.quantity,
-        totalAmount: orderAmount,
+        totalAmount: billableBase,
         saleDate: sale.saleDate,
       },
       ppcList,
@@ -209,25 +232,31 @@ function buildSaleRecordLines(options: {
     if (systemAmount <= 0 && !ppc) {
       const rate = person.salary?.personalCommissionRate || 0
       const th = person.salary?.personalCommissionThreshold || 0
-      if (rate > 0 && orderAmount > th) {
-        systemAmount = orderAmount * (rate / 100)
+      if (rate > 0 && billableBase > th) {
+        systemAmount = billableBase * (rate / 100)
       }
     }
     if (ppc) {
       systemAmount = preview
-      if ((sale.collaborators || []).length > 0 && orderAmount > 0 && (sale.totalAmount || 0) > 0) {
-        const fullPreview = calcSalePersonCommissionPreview(sale, ppcList, upsList)
+      if ((sale.collaborators || []).length > 0 && billableBase > 0 && fullTotal > 0) {
+        const netSale = {
+          ...sale,
+          totalAmount: costResolved.netAmount,
+        }
+        const fullPreview = calcSalePersonCommissionPreview(netSale, ppcList, upsList)
         const reward = calcSaleCommissionReward(sale, ppc)
         const baseFull = Math.max(0, fullPreview - reward)
-        const shareRatio = orderAmount / (sale.totalAmount || 1)
-        systemAmount = baseFull * shareRatio + reward * shareRatio
+        const netShareRatio = costResolved.netAmount > 0
+          ? billableBase / costResolved.netAmount
+          : shareRatio
+        systemAmount = baseFull * netShareRatio + reward * shareRatio
       }
     }
 
     systemAmount = roundMoney(systemAmount)
     const adj = adjMap[sale.id] || null
     const applied = applyCommissionOrderAdj({
-      orderAmount,
+      orderAmount: billableBase,
       baseRatePct,
       systemAmount,
       commissionType,
@@ -246,6 +275,10 @@ function buildSaleRecordLines(options: {
         return !act || act === '无活动' ? '' : act
       })(),
       orderAmount: roundMoney(orderAmount),
+      costDeduction,
+      systemCost: systemCostShare,
+      costIsManual: costResolved.isManual,
+      billableBase: roundMoney(billableBase),
       rateLabel,
       baseRatePct,
       commissionType,
@@ -338,7 +371,9 @@ export function buildPayrollCommissionDetail(options: {
     internalTotal,
     teamMgmtTotal,
     commissionTotal: roundMoney(personalTotal + internalTotal + teamMgmtTotal),
-    personalSales: roundMoney(getPersonalSales(personnelId, unitScopedSales, person.name)),
+    personalSales: roundMoney(
+      getPersonalSales(personnelId, unitScopedSales, person.name, products),
+    ),
     hasOrderAdj,
     lines,
   }

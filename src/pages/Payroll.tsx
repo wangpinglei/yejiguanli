@@ -705,7 +705,7 @@ export default function Payroll() {
         const taxed = enrichPayrollRowWithTax(baseRow, person, yearMonth, entry)
         list.push({
           ...taxed,
-          personalSales: getPersonalSales(person.id, monthSales, person.name),
+          personalSales: getPersonalSales(person.id, monthSales, person.name, products),
           hasCommissionOrderAdj: Boolean(commissionResolved.hasOrderAdj),
           commissionPersonal: commissionResolved.personal || 0,
           commissionInternal: commissionResolved.internal || 0,

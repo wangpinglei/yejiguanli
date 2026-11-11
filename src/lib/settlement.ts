@@ -1,4 +1,19 @@
-import type { UnitProductSettlement } from '@/types'
+import {
+  findProductById,
+  getSaleNetAmount,
+} from '@/lib/orderCostBase'
+import type { Product, UnitProductSettlement } from '@/types'
+
+type ProductLookup = Product | Product[] | null | undefined
+
+function resolveProductForSale(
+  sale: { productId: string },
+  productOrList?: ProductLookup,
+): Product | undefined {
+  if (!productOrList) return undefined
+  if (Array.isArray(productOrList)) return findProductById(productOrList, sale.productId)
+  return productOrList
+}
 
 /** 取日期 YYYY-MM-DD 部分 */
 export function toDateOnly(value?: string): string {
@@ -40,16 +55,25 @@ export function findUnitProductSettlement(
   return ups
 }
 
-/** 单笔销售的基础结算金额（不含奖励） */
+/** 单笔销售的基础结算金额（不含奖励；金额口径为扣成本后净额） */
 export function calcSaleSettlementBase(
-  sale: { totalAmount: number; quantity: number },
+  sale: {
+    totalAmount: number
+    quantity: number
+    unitPrice?: number
+    costDeductionOverride?: number | null
+    productId?: string
+  },
   ups?: UnitProductSettlement,
+  product?: Product | null,
 ): number {
-  if (!ups) return sale.totalAmount
-  if (ups.settlementType === 'fixed') {
+  // 按件固定结算仍按数量×单价，不与金额成本混扣
+  if (ups?.settlementType === 'fixed') {
     return (ups.settlementAmount || 0) * sale.quantity
   }
-  return sale.totalAmount * ((ups.settlementRate || 0) / 100)
+  const net = getSaleNetAmount(sale, product)
+  if (!ups) return net
+  return net * ((ups.settlementRate || 0) / 100)
 }
 
 /** 特殊结算奖励（按件） */
@@ -66,16 +90,19 @@ export function calcSaleSettlementReward(
   return rewardAmount * (sale.quantity || 0)
 }
 
-/** 单笔销售结算收入 = 基础结算 + 特殊奖励 */
+/** 单笔销售结算收入 = 基础结算 + 特殊奖励（金额结算按扣成本后净额） */
 export function calcSaleSettlementIncome(
   sale: {
     totalAmount: number
     quantity: number
+    unitPrice?: number
     saleDate?: string
     productId: string
     salesUnitId: string
+    costDeductionOverride?: number | null
   },
   upsList: UnitProductSettlement[],
+  productOrList?: ProductLookup,
 ): number {
   const ups = findUnitProductSettlement(
     upsList,
@@ -83,7 +110,8 @@ export function calcSaleSettlementIncome(
     sale.salesUnitId,
     sale.saleDate,
   )
-  return calcSaleSettlementBase(sale, ups) + calcSaleSettlementReward(sale, ups)
+  const product = resolveProductForSale(sale, productOrList)
+  return calcSaleSettlementBase(sale, ups, product) + calcSaleSettlementReward(sale, ups)
 }
 
 /**

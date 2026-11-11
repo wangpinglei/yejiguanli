@@ -392,6 +392,12 @@ export interface SalesRecord {
   unitOverride?: boolean;
   /** 同步单是否已手工改过参加活动（刷新同步时保留） */
   activityOverride?: boolean;
+  /**
+   * 本单成本扣除手工覆盖（元）。
+   * undefined/null = 按产品成本配置自动算；number（含 0）= 手工指定。
+   * 扣后净额同时用于结算与工资计佣业绩。
+   */
+  costDeductionOverride?: number | null;
 }
 
 // 生态圈同步的订单（后端存储格式 / GET synced-orders 返回）

@@ -6,6 +6,12 @@ import {
   getFixedPayRatioInMonth,
   resolvePpcListForSaleDate,
 } from "@/lib/compensation";
+import {
+  applyCostNetToScaledSale,
+  findProductById,
+  getPersonCommissionBaseAmount,
+  getSaleNetAmount,
+} from "@/lib/orderCostBase";
 import { calcPersonalCommissionByTiers } from "@/lib/personalCommissionTiers";
 import { findUnitProductSettlement } from "@/lib/settlement";
 import {
@@ -165,9 +171,23 @@ export function isPersonnelOnDutyInMonth(
 export function getPersonalSales(
   personId: string,
   salesRecords: SalesRecord[],
-  personName?: string
+  personName?: string,
+  products?: Product[],
 ): number {
   return salesRecords.reduce((sum, s) => {
+    if (products) {
+      const product = findProductById(products, s.productId);
+      const base = getPersonCommissionBaseAmount(s, personId, product);
+      if (base > 0) return sum + base;
+      if (
+        !s.personnelId
+        && (!s.collaborators || s.collaborators.length === 0)
+        && saleInvolvesPerson(s, personId, personName)
+      ) {
+        return sum + getSaleNetAmount(s, product);
+      }
+      return sum;
+    }
     const share = getPersonShareAmount(s, personId);
     if (share > 0) return sum + share;
     if (
@@ -441,7 +461,7 @@ export function calcManagementCommissionByProduct(
 export function calcPersonalCommissionByProduct(
   person: Personnel,
   monthlyRecords: SalesRecord[],
-  _products: Product[],
+  products: Product[],
   ppcList: ProductPersonCommission[],
   upsList: UnitProductSettlement[] = [],
 ): number {
@@ -451,6 +471,7 @@ export function calcPersonalCommissionByProduct(
     ppcList,
     "personal",
     upsList,
+    products,
   );
 }
 
@@ -458,10 +479,17 @@ export function calcPersonalCommissionByProduct(
 export function calcInternalSalesCommissionByProduct(
   person: Personnel,
   monthlyRecords: SalesRecord[],
-  _products: Product[],
+  products: Product[],
   ppcList: ProductPersonCommission[],
 ): number {
-  return calcProductCommissionByKind(person, monthlyRecords, ppcList, "internalSales");
+  return calcProductCommissionByKind(
+    person,
+    monthlyRecords,
+    ppcList,
+    "internalSales",
+    [],
+    products,
+  );
 }
 
 /** 某薪酬段内部销售提成的受益人；空 = 成交人本人 */
@@ -657,9 +685,15 @@ function calcProductCommissionByKind(
   ppcList: ProductPersonCommission[],
   kind: ProductCommissionKind,
   upsList: UnitProductSettlement[] = [],
+  products: Product[] = [],
 ): number {
   const personRecords = monthlyRecords
-    .map((r) => scaleSaleForPerson(r, person.id))
+    .map((r) => {
+      const scaled = scaleSaleForPerson(r, person.id);
+      if (!scaled) return null;
+      const product = findProductById(products, r.productId);
+      return applyCostNetToScaledSale(r, scaled, product);
+    })
     .filter((r): r is SalesRecord => r != null);
   if (personRecords.length === 0) return 0;
 
@@ -888,7 +922,12 @@ export function calculateMonthlySalary(
   if (!acc && forUnitId && yearMonth) {
     fixedRatio = getUnitFixedPayRatioInMonth(person, forUnitId, yearMonth);
   }
-  const personalSales = getPersonalSales(person.id, monthlyRecords, person.name);
+  const personalSales = getPersonalSales(
+    person.id,
+    monthlyRecords,
+    person.name,
+    products,
+  );
 
   // 个人提成：优先产品×单位×人员配置（按成交日分段）
   const usePpc = productPersonCommissions !== undefined;

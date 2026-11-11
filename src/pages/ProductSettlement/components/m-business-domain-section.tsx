@@ -136,7 +136,7 @@ export default function MBusinessDomainSection({
         map.set(s.productId, row)
       }
       row.salesAmount += s.totalAmount || 0
-      row.settlementIncome += calcSaleSettlementIncome(s, upsList)
+      row.settlementIncome += calcSaleSettlementIncome(s, upsList, products)
     })
     return map
   }, [monthlySales, upsList])
@@ -167,7 +167,7 @@ export default function MBusinessDomainSection({
       if (!product) return
       const row = ensure(getProductDomainKey(product), getProductDomainName(product))
       row.salesAmount += s.totalAmount || 0
-      row.settlementIncome += calcSaleSettlementIncome(s, upsList)
+      row.settlementIncome += calcSaleSettlementIncome(s, upsList, products)
     })
 
     return Array.from(map.values()).sort((a, b) => {
