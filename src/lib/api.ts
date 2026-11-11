@@ -419,6 +419,37 @@ export const payrollEntriesApi = {
   }) => api.put<PayrollEntriesMonthPayload>('/payroll-entries', data),
 };
 
+export type PayrollUnitScoreRuleAudit = {
+  updatedBy: string
+  updatedById: string
+  updatedAt: string
+  uploadedAt: string
+}
+
+export type PayrollUnitScoreRulePayload = {
+  unitId: string
+  items: Array<{ id: string; name: string; maxScore: number }>
+  audit: PayrollUnitScoreRuleAudit | null
+  rules: Array<{
+    unitId: string
+    items: Array<{ id: string; name: string; maxScore: number }>
+    audit: PayrollUnitScoreRuleAudit | null
+  }>
+}
+
+export const payrollUnitScoreRulesApi = {
+  get: (unitId?: string) =>
+    api.get<PayrollUnitScoreRulePayload>(
+      unitId
+        ? `/payroll-unit-score-rules?unitId=${encodeURIComponent(unitId)}`
+        : '/payroll-unit-score-rules',
+    ),
+  save: (data: {
+    unitId: string
+    items: Array<{ id: string; name: string; maxScore: number }>
+  }) => api.put<PayrollUnitScoreRulePayload>('/payroll-unit-score-rules', data),
+};
+
 export type CommissionOrderAdjAudit = {
   updatedBy: string
   updatedById: string

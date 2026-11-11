@@ -511,6 +511,15 @@ function initSchema() {
       uploaded_at TEXT DEFAULT (datetime('now')),
       UNIQUE(year_month, personnel_id, unit_id)
     );
+
+    CREATE TABLE IF NOT EXISTS payroll_unit_score_rules (
+      unit_id TEXT PRIMARY KEY,
+      items_json TEXT NOT NULL DEFAULT '[]',
+      updated_by TEXT DEFAULT '',
+      updated_by_id TEXT DEFAULT '',
+      updated_at TEXT DEFAULT (datetime('now')),
+      uploaded_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   ensureColumns("sales_units", [
@@ -2716,6 +2725,17 @@ export function rowToCommissionOrderAdjScope(row: any) {
     personnelId: row.personnel_id,
     unitId: row.unit_id,
     adjustments: parseJsonField(row.adj_json, {}),
+    updatedBy: row.updated_by || "",
+    updatedById: row.updated_by_id || "",
+    updatedAt: row.updated_at || "",
+    uploadedAt: row.uploaded_at || "",
+  };
+}
+
+export function rowToPayrollUnitScoreRule(row: any) {
+  return {
+    unitId: row.unit_id,
+    items: parseJsonField(row.items_json, []),
     updatedBy: row.updated_by || "",
     updatedById: row.updated_by_id || "",
     updatedAt: row.updated_at || "",

@@ -17,6 +17,7 @@ import laborCompaniesRoutes from "./routes/laborCompanies";
 import extraRoutes from "./routes/extra";
 import financeNoticeRoutes from "./routes/financeNotice";
 import payrollEntriesRoutes from "./routes/payrollEntries";
+import payrollUnitScoreRulesRoutes from "./routes/payrollUnitScoreRules";
 import commissionOrderAdjRoutes from "./routes/commissionOrderAdj";
 import { startFinanceNoticeScheduler, migrateFinanceNoticeTextColumn } from "./services/financeNotice";
 
@@ -86,6 +87,8 @@ app.use("/api", battleReportRoutes);
 app.use("/api", financeNoticeRoutes);
 
 app.use("/api", payrollEntriesRoutes);
+
+app.use("/api", payrollUnitScoreRulesRoutes);
 
 app.use("/api", commissionOrderAdjRoutes);
 

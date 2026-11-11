@@ -32,6 +32,7 @@ import { usePermissions } from '@/hooks/usePermissions'
 import {
   commissionOrderAdjApi,
   payrollEntriesApi,
+  payrollUnitScoreRulesApi,
   type PayrollEntriesMonthPayload,
 } from '@/lib/api'
 import { hydrateCommissionOrderAdjScopes } from '@/lib/commissionOrderAdj'
@@ -51,12 +52,19 @@ import {
   type PayrollRowResult,
 } from '@/lib/payrollCalc'
 import { resolvePayForDate } from '@/lib/compensation'
+import {
+  formatScoreRuleSummary,
+  normalizeScoreRuleItems,
+  resolveScoreFromItems,
+  type PayrollScoreRuleItem,
+} from '@/lib/payrollScoreRules'
 import MPayrollAdjCell from '@/pages/Payroll/components/m-payroll-adj-cell'
 import MInsurancePersonalDialog from '@/pages/Payroll/components/m-insurance-personal-dialog'
 import MPayrollEntryLinks, {
   type PayrollCalcPhase,
   type PayrollEntryMode,
 } from '@/pages/Payroll/components/m-payroll-entry-links'
+import MPayrollScoreRuleDialog from '@/pages/Payroll/components/m-payroll-score-rule-dialog'
 import MSpecialAdditionalDialog from '@/pages/Payroll/components/m-special-additional-dialog'
 import MPayPlanDialog from '@/pages/Personnel/components/m-pay-plan-dialog'
 import { resolvePayrollCommissionTotal } from '@/lib/payrollCommissionDetail'
@@ -128,12 +136,13 @@ function showPayrollCol(
   return col === 'core' || col === 'special' || col === 'tax' || col === 'salary'
 }
 
-function payrollColSpan(mode: PayrollEntryMode): number {
+function payrollColSpan(mode: PayrollEntryMode, scoreItemCount = 0): number {
   // 与表头条件保持一致：单位+姓名=2
   if (mode === 'attendance') return 2 + 1 + 1 + 2 + 1 // 标准底薪 + 实际/缺勤/应出勤 + 实发底薪
   // 本月业绩 + 个人/内部/团队 + 提成合计 + 明细状态 + 操作
   if (mode === 'commission') return 2 + 1 + 3 + 1 + 1 + 1
-  if (mode === 'score') return 2 + 1 + 1 + 1 // 标准绩效 + 分数 + 实发绩效
+  // 标准绩效 + 评分项 + 考核分合计 + 实发绩效
+  if (mode === 'score') return 2 + 1 + Math.max(0, scoreItemCount) + 1 + 1
   if (mode === 'insurance') return 2 + 1 + 4 + 1 // 应发 + 企业/个人四列 + 操作
   // 提成 + 加项 + 减项 + 应发 + 专项附加 + 操作
   if (mode === 'otherDeduct') return 2 + 1 + 1 + 1 + 1 + 1 + 1
@@ -249,6 +258,12 @@ export default function Payroll() {
     mode: 'single' | 'batch' | 'history'
     person: Personnel | null
   } | null>(null)
+  /** unitId → 评分项；空数组表示该单位未配置规则 */
+  const [scoreRulesByUnit, setScoreRulesByUnit] = useState<
+    Record<string, PayrollScoreRuleItem[]>
+  >({})
+  const [scoreRuleDialogOpen, setScoreRuleDialogOpen] = useState(false)
+  const [scoreRuleSaving, setScoreRuleSaving] = useState(false)
 
   const teamMgmtContext = useMemo(
     () => ({
@@ -270,6 +285,16 @@ export default function Payroll() {
     [salesUnits, scopeUnitIds],
   )
 
+  const filterUnitName = useMemo(
+    () => scopedUnits.find((u) => u.id === filterUnitId)?.name || '',
+    [scopedUnits, filterUnitId],
+  )
+
+  const activeScoreRuleItems = useMemo(
+    () => (filterUnitId ? scoreRulesByUnit[filterUnitId] || [] : []),
+    [filterUnitId, scoreRulesByUnit],
+  )
+
   // 筛选下拉仅含上方已选单位；默认第一个，不提供「全部」
   useEffect(() => {
     if (scopedUnits.length === 0) {
@@ -281,6 +306,36 @@ export default function Payroll() {
       setFilterUnitId(scopedUnits[0].id)
     }
   }, [scopedUnits, filterUnitId])
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadScoreRules() {
+      if (scopedUnits.length === 0) {
+        setScoreRulesByUnit({})
+        return
+      }
+      try {
+        const payload = await payrollUnitScoreRulesApi.get()
+        if (cancelled) return
+        const next: Record<string, PayrollScoreRuleItem[]> = {}
+        for (const unit of scopedUnits) {
+          next[unit.id] = []
+        }
+        for (const rule of payload.rules || []) {
+          const uid = String(rule.unitId || '').trim()
+          if (!uid) continue
+          next[uid] = normalizeScoreRuleItems(rule.items)
+        }
+        setScoreRulesByUnit(next)
+      } catch (err) {
+        console.error(err)
+      }
+    }
+    void loadScoreRules()
+    return () => {
+      cancelled = true
+    }
+  }, [scopedUnits])
 
   function applyScopeFromPayload(payload: PayrollEntriesMonthPayload) {
     if (Array.isArray(payload.scopeUnitIds) && payload.scopeUnitIds.length > 0) {
@@ -402,6 +457,75 @@ export default function Payroll() {
         [personnelId]: { ...base, ...patch, personnelId },
       }
     })
+  }
+
+  function updateScoreItem(
+    personnelId: string,
+    unitId: string,
+    itemId: string,
+    value: number | null,
+  ) {
+    const items = scoreRulesByUnit[unitId] || []
+    setEntries((prev) => {
+      const base = prev[personnelId] || createEmptyPayrollEntry(personnelId)
+      const scoreItemScores = {
+        ...(base.scoreItemScores || {}),
+        [itemId]: value,
+      }
+      const score = resolveScoreFromItems(items, scoreItemScores)
+      return {
+        ...prev,
+        [personnelId]: {
+          ...base,
+          personnelId,
+          scoreItemScores,
+          score,
+        },
+      }
+    })
+  }
+
+  async function handleSaveScoreRule(items: PayrollScoreRuleItem[]) {
+    if (!filterUnitId) return
+    if (!canEdit('payroll')) {
+      alert('无工资核算编辑权限，无法保存评分规则')
+      return
+    }
+    setScoreRuleSaving(true)
+    try {
+      const payload = await payrollUnitScoreRulesApi.save({
+        unitId: filterUnitId,
+        items,
+      })
+      const nextItems = normalizeScoreRuleItems(payload.items)
+      setScoreRulesByUnit((prev) => ({
+        ...prev,
+        [filterUnitId]: nextItems,
+      }))
+      // 规则变更后，按新项重算本单位已录入分项对应的考核分
+      setEntries((prev) => {
+        const next = { ...prev }
+        for (const row of rows) {
+          if (row.unitId !== filterUnitId) continue
+          const base = next[row.personnelId] || createEmptyPayrollEntry(row.personnelId)
+          const score = resolveScoreFromItems(nextItems, base.scoreItemScores)
+          next[row.personnelId] = {
+            ...base,
+            personnelId: row.personnelId,
+            score: nextItems.length > 0 ? score : base.score,
+          }
+        }
+        return next
+      })
+      setScoreRuleDialogOpen(false)
+      setSavedTip(nextItems.length > 0 ? '评分规则已保存' : '评分规则已清除')
+      window.setTimeout(() => setSavedTip(''), 2000)
+    } catch (err) {
+      console.error(err)
+      alert('保存评分规则失败')
+    } finally {
+      setScoreRuleSaving(false)
+    }
   }
 
   async function handleSaveEntries() {
@@ -920,9 +1044,31 @@ export default function Payroll() {
             </p>
           )}
           {calcPhase === 'wizard' && entryMode === 'score' && (
-            <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-              步骤 3/6 绩效分数录入 — 请填写考核分（0–100）。
-            </p>
+            <div className="space-y-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+              <p>
+                步骤 3/6 绩效分数录入 —
+                {activeScoreRuleItems.length > 0
+                  ? ' 按本单位规则分项打分，合计为考核分（0–100）。'
+                  : ' 请填写考核分（0–100）；也可点「编辑评分规则」为本单位配置分项。'}
+              </p>
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-emerald-800/80">
+                  {filterUnitName || '当前单位'}：
+                  {formatScoreRuleSummary(activeScoreRuleItems)}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 border-emerald-300 bg-white px-2 text-xs text-emerald-900"
+                  disabled={!filterUnitId}
+                  onClick={() => setScoreRuleDialogOpen(true)}
+                >
+                  <Pencil className="mr-1 h-3.5 w-3.5" />
+                  编辑评分规则
+                </Button>
+              </div>
+            </div>
           )}
           {calcPhase === 'wizard' && entryMode === 'insurance' && (
             <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -1154,8 +1300,31 @@ export default function Payroll() {
                         应出勤时间
                       </TableHead>
                     )}
+                    {showPayrollCol(entryMode, 'score') &&
+                      entryMode === 'score' &&
+                      activeScoreRuleItems.map((item) => (
+                        <TableHead
+                          key={item.id}
+                          className="min-w-[92px] bg-emerald-50/80 text-center"
+                        >
+                          {item.name}
+                          <div className="text-[10px] font-normal text-muted-foreground">
+                            满分 {item.maxScore}
+                          </div>
+                        </TableHead>
+                      ))}
                     {showPayrollCol(entryMode, 'score') && (
-                      <TableHead className="min-w-[88px] bg-emerald-50/80">绩效分数</TableHead>
+                      <TableHead
+                        className={
+                          entryMode === 'score' && activeScoreRuleItems.length > 0
+                            ? 'min-w-[88px] bg-emerald-50/80 text-right'
+                            : 'min-w-[88px] bg-emerald-50/80'
+                        }
+                      >
+                        {entryMode === 'score' && activeScoreRuleItems.length > 0
+                          ? '考核分合计'
+                          : '绩效分数'}
+                      </TableHead>
                     )}
                     {showPayrollCol(entryMode, 'salary') &&
                       (entryMode === 'all' || entryMode === 'attendance') && (
@@ -1476,10 +1645,54 @@ export default function Payroll() {
                           {onlyCommission ? '—' : row.expectedAttendanceHours.toFixed(3)}
                         </TableCell>
                         )}
+                        {showPayrollCol(entryMode, 'score') &&
+                          entryMode === 'score' &&
+                          activeScoreRuleItems.map((item) => (
+                            <TableCell
+                              key={item.id}
+                              className="bg-emerald-50/40 text-center"
+                            >
+                              {onlyCommission ? (
+                                <span className="text-muted-foreground">—</span>
+                              ) : (
+                                <Input
+                                  type="number"
+                                  step="1"
+                                  min={0}
+                                  max={item.maxScore}
+                                  className="mx-auto h-8 w-[72px] text-right"
+                                  placeholder="—"
+                                  title={`${item.name}（0–${item.maxScore}）`}
+                                  value={entry.scoreItemScores?.[item.id] ?? ''}
+                                  onChange={(e) =>
+                                    updateScoreItem(
+                                      row.personnelId,
+                                      row.unitId,
+                                      item.id,
+                                      e.target.value === '' ? null : Number(e.target.value),
+                                    )
+                                  }
+                                />
+                              )}
+                            </TableCell>
+                          ))}
                         {showPayrollCol(entryMode, 'score') && (
-                        <TableCell className={entryMode === 'score' ? 'bg-emerald-50/40' : undefined}>
+                        <TableCell
+                          className={
+                            entryMode === 'score'
+                              ? 'bg-emerald-50/40 text-right tabular-nums'
+                              : undefined
+                          }
+                        >
                           {onlyCommission ? (
                             <span className="text-muted-foreground">—</span>
+                          ) : entryMode === 'score' && activeScoreRuleItems.length > 0 ? (
+                            <span
+                              className="font-medium text-emerald-900"
+                              title="由评分项自动合计；未填任何项时按 100 分核算"
+                            >
+                              {entry.score == null ? '—' : entry.score}
+                            </span>
                           ) : (
                             <Input
                               type="number"
@@ -1938,7 +2151,13 @@ export default function Payroll() {
                   })}
                   {rows.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={payrollColSpan(entryMode)} className="py-8 text-center text-muted-foreground">
+                      <TableCell
+                        colSpan={payrollColSpan(
+                          entryMode,
+                          entryMode === 'score' ? activeScoreRuleItems.length : 0,
+                        )}
+                        className="py-8 text-center text-muted-foreground"
+                      >
                         纳入单位下本月暂无在职归属人员
                       </TableCell>
                     </TableRow>
@@ -1980,6 +2199,16 @@ export default function Payroll() {
           )}
 </CardContent>
       </Card>
+
+      <MPayrollScoreRuleDialog
+        open={scoreRuleDialogOpen}
+        onOpenChange={setScoreRuleDialogOpen}
+        unitId={filterUnitId}
+        unitName={filterUnitName}
+        initialItems={activeScoreRuleItems}
+        saving={scoreRuleSaving}
+        onSave={handleSaveScoreRule}
+      />
 
       <MInsurancePersonalDialog
         open={Boolean(insuranceAdjust)}

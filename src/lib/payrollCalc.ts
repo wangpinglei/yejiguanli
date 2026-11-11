@@ -35,6 +35,11 @@ export interface PayrollMonthEntry {
   attendanceDays?: number | null
   /** 绩效考核分 0–100，空则按 100 分 */
   score: number | null
+  /**
+   * 按单位评分规则录入的分项分（itemId → 分数）。
+   * 有有效分项时 score 由分项合计回写。
+   */
+  scoreItemScores: Record<string, number | null>
   otherBonus: number
   otherDeduction: number
   /** 加项明细备注（可多行文字；有 lines 时由明细汇总生成） */
@@ -300,11 +305,14 @@ export function normalizePayrollEntry(
     }
   }
 
+  const scoreItemScores = normalizeScoreItemScoresField(raw.scoreItemScores)
+
   return {
     personnelId,
     attendanceHours: null, // 实际出勤改为按应出勤−缺勤核算，不再持久化直接出勤
     absenceHours,
     score: raw.score === undefined ? null : raw.score,
+    scoreItemScores,
     otherBonus,
     otherDeduction,
     otherBonusNote,
@@ -383,12 +391,31 @@ export function savePayrollEntries(
   localStorage.setItem(PAYROLL_ENTRY_STORAGE_KEY, JSON.stringify(all))
 }
 
+function normalizeScoreItemScoresField(
+  raw: unknown,
+): Record<string, number | null> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const out: Record<string, number | null> = {}
+  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+    const key = String(id || '').trim()
+    if (!key) continue
+    if (value === null || value === undefined || value === '') {
+      out[key] = null
+      continue
+    }
+    const num = Number(value)
+    out[key] = Number.isFinite(num) ? num : null
+  }
+  return out
+}
+
 export function createEmptyPayrollEntry(personnelId: string): PayrollMonthEntry {
   return {
     personnelId,
     attendanceHours: null,
     absenceHours: null,
     score: null,
+    scoreItemScores: {},
     otherBonus: 0,
     otherDeduction: 0,
     otherBonusNote: '',
