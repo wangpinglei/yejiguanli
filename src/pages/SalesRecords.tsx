@@ -7,6 +7,10 @@ import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { calcSalePersonCommissionPreview } from "@/lib/commissionReward";
 import {
+  findProductById,
+  resolveOrderCostDeduction,
+} from "@/lib/orderCostBase";
+import {
   buildDefaultShares,
   formatShareLabel,
   getCollaboratorsAmountSum,
@@ -583,6 +587,9 @@ export default function SalesRecords() {
     orderType: "",
     customerName: "",
     activityName: "",
+    /** auto=按产品成本；manual=本单手工扣成本 */
+    costDeductionMode: "auto" as "auto" | "manual",
+    costDeductionManual: 0,
   });
   /** 是否开启订单分业绩（编辑对应订单时配置） */
   const [isSplitPerformance, setIsSplitPerformance] = useState(false);
@@ -909,6 +916,17 @@ export default function SalesRecords() {
   }
 
   const totalAmount = form.quantity * form.unitPrice;
+  const formProduct = findProductById(products, form.productId);
+  const formCostResolved = resolveOrderCostDeduction(
+    {
+      totalAmount,
+      quantity: form.quantity,
+      unitPrice: form.unitPrice,
+      costDeductionOverride:
+        form.costDeductionMode === "manual" ? form.costDeductionManual : null,
+    },
+    formProduct,
+  );
 
   const openAdd = () => {
     setEditingRecord(null);
@@ -933,6 +951,8 @@ export default function SalesRecords() {
       orderType: "",
       customerName: "",
       activityName: "无活动",
+      costDeductionMode: "auto",
+      costDeductionManual: 0,
     });
     setDialogOpen(true);
   };
@@ -966,6 +986,9 @@ export default function SalesRecords() {
           record.salesUnitId || "",
         ),
     );
+    const isManualCost =
+      record.costDeductionOverride !== undefined
+      && record.costDeductionOverride !== null;
     setForm({
       salesUnitId: record.salesUnitId,
       salesUnitName:
@@ -982,6 +1005,13 @@ export default function SalesRecords() {
       orderType: record.orderType || "",
       customerName: record.customerName || "",
       activityName: (record.activityName || "").trim() || "无活动",
+      costDeductionMode: isManualCost ? "manual" : "auto",
+      costDeductionManual: isManualCost
+        ? Number(record.costDeductionOverride) || 0
+        : resolveOrderCostDeduction(
+          record,
+          findProductById(products, record.productId),
+        ).systemCost,
     });
     setDialogOpen(true);
   };
@@ -1060,6 +1090,21 @@ export default function SalesRecords() {
     return salesUnits.find((u) => u.id === unitId)?.name || fallback || "";
   }
 
+  function buildSalesRecordPayload(extra: Record<string, unknown> = {}) {
+    const {
+      costDeductionMode,
+      costDeductionManual,
+      ...rest
+    } = form;
+    return {
+      ...rest,
+      ...extra,
+      totalAmount: form.quantity * form.unitPrice,
+      costDeductionOverride:
+        costDeductionMode === "manual" ? Number(costDeductionManual) || 0 : null,
+    };
+  }
+
   const handleSubmit = async () => {
     if (!form.productId) return;
     if (!isSplitPerformance && (!form.salesUnitId || !form.personnelId)) return;
@@ -1100,14 +1145,13 @@ export default function SalesRecords() {
       const primary = list[0];
       const primaryUnitId = primary.salesUnitId || form.salesUnitId;
       try {
-        const payload = {
-          ...form,
+        const payload = buildSalesRecordPayload({
           salesUnitId: primaryUnitId,
           salesUnitName: resolveUnitNameForPayload(primaryUnitId, form.salesUnitName),
           personnelId: primary.personnelId,
           collaborators: payloadCollaborators,
           shareMode: payloadShareMode,
-        };
+        });
         if (editingRecord) {
           await updateSalesRecord(editingRecord.id, payload);
         } else {
@@ -1123,12 +1167,11 @@ export default function SalesRecords() {
       payloadShareMode = undefined;
     }
     try {
-      const payload = {
-        ...form,
+      const payload = buildSalesRecordPayload({
         salesUnitName: resolveUnitNameForPayload(form.salesUnitId, form.salesUnitName),
         collaborators: payloadCollaborators,
         shareMode: payloadShareMode,
-      };
+      });
       if (editingRecord) {
         await updateSalesRecord(editingRecord.id, payload);
       } else {
@@ -2040,6 +2083,8 @@ export default function SalesRecords() {
                   <TableHead className="h-14 min-w-[12rem] px-3 text-base">购买产品</TableHead>
                   <TableHead className="h-14 min-w-[7rem] px-3 text-right text-base">订单金额</TableHead>
                   <TableHead className="h-14 min-w-[7rem] px-3 text-right text-base">实收金额</TableHead>
+                  <TableHead className="h-14 min-w-[7rem] px-3 text-right text-base">成本扣除</TableHead>
+                  <TableHead className="h-14 min-w-[7rem] px-3 text-right text-base">计佣基数</TableHead>
                   <TableHead className="h-14 min-w-[7rem] px-3 text-base">订单类型</TableHead>
                   <TableHead className="h-14 min-w-[8rem] px-3 text-base">销售单位</TableHead>
                   <TableHead className="h-14 min-w-[10rem] px-3 text-base">销售人员</TableHead>
@@ -2121,6 +2166,25 @@ export default function SalesRecords() {
                           </div>
                         )}
                     </TableCell>
+                    {(() => {
+                      const costInfo = resolveOrderCostDeduction(
+                        record,
+                        findProductById(products, record.productId),
+                      );
+                      return (
+                        <>
+                          <TableCell className="px-3 py-3 text-right text-amber-800 whitespace-nowrap">
+                            {formatCurrency(costInfo.cost)}
+                            {costInfo.isManual && (
+                              <div className="text-[10px] font-normal text-amber-700">手改</div>
+                            )}
+                          </TableCell>
+                          <TableCell className="px-3 py-3 text-right font-medium text-sky-800 whitespace-nowrap">
+                            {formatCurrency(costInfo.netAmount)}
+                          </TableCell>
+                        </>
+                      );
+                    })()}
                     <TableCell className="px-3 py-3">
                       {record.orderType ? (
                         <Badge variant="outline" className="text-sm">{record.orderType}</Badge>
@@ -2814,7 +2878,7 @@ export default function SalesRecords() {
                     salesUnitId: form.salesUnitId,
                     personnelId: form.personnelId,
                     quantity: form.quantity,
-                    totalAmount,
+                    totalAmount: formCostResolved.netAmount,
                     saleDate: form.saleDate,
                   },
                   ppcList,
@@ -2835,13 +2899,83 @@ export default function SalesRecords() {
                 return (
                   <div className="rounded-lg bg-violet-50 p-3 flex flex-col justify-center">
                     <span className="text-sm text-violet-700">
-                      {isSplitPerformance ? "主责提成预估" : "提成预估"}
+                      {isSplitPerformance ? "主责提成预估(扣成本后)" : "提成预估(扣成本后)"}
                     </span>
                     <span className="text-lg font-bold text-violet-700">{formatCurrency(shown)}</span>
                     <span className="text-[10px] text-muted-foreground mt-0.5">按成本管理配置</span>
                   </div>
                 );
               })()}
+            </div>
+            <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <Label className="text-amber-950">成本扣除（结算 / 计佣共用）</Label>
+                  <p className="text-[11px] text-amber-900/80">
+                    默认按产品成本；可改本单扣除。扣后净额同时用于结算与工资业绩提成。
+                  </p>
+                </div>
+                <Select
+                  value={form.costDeductionMode}
+                  onValueChange={(v: "auto" | "manual") => {
+                    if (v === "manual") {
+                      setForm({
+                        ...form,
+                        costDeductionMode: "manual",
+                        costDeductionManual: formCostResolved.systemCost,
+                      });
+                    } else {
+                      setForm({ ...form, costDeductionMode: "auto" });
+                    }
+                  }}
+                >
+                  <SelectTrigger className="w-[140px] bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">按产品自动</SelectItem>
+                    <SelectItem value="manual">本单手工</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">成本扣除 (¥)</Label>
+                  {form.costDeductionMode === "manual" ? (
+                    <Input
+                      type="number"
+                      min={0}
+                      className="bg-white"
+                      value={form.costDeductionManual}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          costDeductionManual: Number(e.target.value) || 0,
+                        })
+                      }
+                    />
+                  ) : (
+                    <div className="flex h-9 items-center rounded-md border bg-white px-3 text-sm tabular-nums">
+                      {formatCurrency(formCostResolved.cost)}
+                    </div>
+                  )}
+                  <p className="text-[10px] text-muted-foreground">
+                    系统自动 {formatCurrency(formCostResolved.systemCost)}
+                  </p>
+                </div>
+                <div className="rounded-md border bg-white p-2">
+                  <div className="text-[11px] text-muted-foreground">计佣 / 结算基数</div>
+                  <div className="text-base font-semibold text-sky-800 tabular-nums">
+                    {formatCurrency(formCostResolved.netAmount)}
+                  </div>
+                </div>
+                <div className="rounded-md border bg-white p-2">
+                  <div className="text-[11px] text-muted-foreground">实收 − 成本</div>
+                  <div className="text-xs text-muted-foreground tabular-nums">
+                    {formatCurrency(totalAmount)} − {formatCurrency(formCostResolved.cost)}
+                  </div>
+                </div>
+              </div>
             </div>
             <div className="space-y-2">
               <Label>备注</Label>

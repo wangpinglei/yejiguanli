@@ -31,7 +31,6 @@ import {
   buildSalesRecordsCheckHref,
 } from '@/lib/payrollCommissionDetail'
 import MCommissionOrderAdjCell from '@/pages/Payroll/components/m-commission-order-adj-cell'
-import MOrderCostDeductCell from '@/pages/Payroll/components/m-order-cost-deduct-cell'
 
 /**
  * 工资核算 → 个人业绩提成明细（对齐销售记录逐单核对；可调单笔）
@@ -46,7 +45,6 @@ export default function PayrollCommissionDetail() {
     teamMgmtCommissionRules,
     performanceTargets,
     unitProductSettlements,
-    updateSalesRecord,
   } = useData()
   const {
     visibleSalesUnits: salesUnits,
@@ -55,7 +53,6 @@ export default function PayrollCommissionDetail() {
     canEdit,
   } = usePermissions()
   const canSaveOnline = canEdit('payroll')
-  const canEditCost = canEdit('payroll') || canEdit('sales_records')
 
   const personnelId = params.get('personnelId') || ''
   const unitId = params.get('unitId') || ''
@@ -153,47 +150,6 @@ export default function PayrollCommissionDetail() {
     saveCommissionOrderAdj(yearMonth, personnelId, unitId, saleId, next)
     setDirtyLocal(true)
     setAdjTick((n) => n + 1)
-  }
-
-  async function handleSaveCostDeduction(
-    saleId: string,
-    override: number | null,
-  ) {
-    if (!canEditCost) {
-      alert('无编辑权限，无法修改成本扣除')
-      return
-    }
-    try {
-      // 手工值按「整单成本」写入；明细行展示的是本人分摊份额
-      const sale = salesRecords.find((s) => s.id === saleId)
-      if (!sale) {
-        alert('未找到对应销售记录')
-        return
-      }
-      let wholeOverride: number | null = override
-      if (override != null) {
-        const full = Number(sale.totalAmount) || 0
-        const share = (() => {
-          const line = detail?.lines.find((l) => l.saleId === saleId)
-          return line?.orderAmount || 0
-        })()
-        if (full > 0 && share > 0 && Math.abs(share - full) > 0.05) {
-          // 分摊单：把本人看到的成本份额还原成整单成本
-          wholeOverride = Math.round((override * full) / share * 100) / 100
-        }
-      }
-      await updateSalesRecord(saleId, {
-        costDeductionOverride: wholeOverride,
-      })
-      setAdjTick((n) => n + 1)
-      setSavedTip(
-        wholeOverride == null ? '已恢复按产品自动扣成本' : '本单成本扣除已保存',
-      )
-      window.setTimeout(() => setSavedTip(''), 3000)
-    } catch (err) {
-      console.error(err)
-      alert(err instanceof Error ? err.message : '保存成本扣除失败')
-    }
   }
 
   async function handleSaveOnline() {
@@ -307,7 +263,7 @@ export default function PayrollCommissionDetail() {
     <div className="space-y-6">
       <PageHeader
         title={`业绩提成明细 · ${detail.personnelName}`}
-        description={`${detail.unitName} · ${detail.yearMonth} · 扣成本后计佣；逐单核对，可改成本扣除与提成调整`}
+        description={`${detail.unitName} · ${detail.yearMonth} · 成本扣除在销售记录改；此处按扣后计佣核对，可调提成`}
       />
 
       <div className="flex flex-wrap items-center gap-2">
@@ -458,14 +414,11 @@ export default function PayrollCommissionDetail() {
                     <TableCell className="text-right tabular-nums">
                       {formatCurrency(line.orderAmount)}
                     </TableCell>
-                    <TableCell className="text-right">
-                      <MOrderCostDeductCell
-                        costDeduction={line.costDeduction}
-                        systemCost={line.systemCost}
-                        isManual={line.costIsManual}
-                        disabled={!canEditCost}
-                        onSave={(next) => void handleSaveCostDeduction(line.saleId, next)}
-                      />
+                    <TableCell className="text-right tabular-nums text-amber-800">
+                      {formatCurrency(line.costDeduction)}
+                      {line.costIsManual && (
+                        <div className="text-[10px] text-amber-700">手改</div>
+                      )}
                     </TableCell>
                     <TableCell className="text-right tabular-nums font-medium text-sky-800">
                       {formatCurrency(line.billableBase)}
