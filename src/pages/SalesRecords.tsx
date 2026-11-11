@@ -2912,8 +2912,8 @@ export default function SalesRecords() {
                 <div>
                   <Label className="text-amber-950">成本扣除（结算 / 计佣共用）</Label>
                   <p className="text-[11px] text-amber-900/80">
-                    默认按产品成本；「活动成本」页可为活动配置默认扣除（新建/新同步时固化）。
-                    亦可改本单手工。扣后净额同时用于结算与工资业绩提成。
+                    默认按产品成本；「活动成本」页可为活动配置有效期内默认扣除（新建/新同步时固化）。
+                    过期或不适用时可改本单手工。扣后净额同时用于结算与工资业绩提成。
                   </p>
                 </div>
                 <Select

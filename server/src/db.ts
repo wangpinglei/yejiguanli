@@ -525,11 +525,18 @@ function initSchema() {
       activity_name TEXT PRIMARY KEY,
       cost_type TEXT NOT NULL DEFAULT 'fixed',
       cost_value REAL NOT NULL DEFAULT 0,
+      start_date TEXT DEFAULT '',
+      end_date TEXT DEFAULT '',
       updated_by TEXT DEFAULT '',
       updated_by_id TEXT DEFAULT '',
       updated_at TEXT DEFAULT (datetime('now'))
     );
   `);
+
+  ensureColumns("activity_cost_rules", [
+    { name: "start_date", ddl: "start_date TEXT DEFAULT ''" },
+    { name: "end_date", ddl: "end_date TEXT DEFAULT ''" },
+  ]);
 
   ensureColumns("sales_units", [
     { name: "group_admin_name", ddl: "group_admin_name TEXT DEFAULT ''" },
@@ -2763,6 +2770,8 @@ export function rowToActivityCostRule(row: any) {
     activityName: row.activity_name || "",
     costType: row.cost_type === "percentage" ? "percentage" : "fixed",
     costValue: Number(row.cost_value) || 0,
+    startDate: String(row.start_date || "").trim().slice(0, 10),
+    endDate: String(row.end_date || "").trim().slice(0, 10),
     updatedBy: row.updated_by || "",
     updatedById: row.updated_by_id || "",
     updatedAt: row.updated_at || "",

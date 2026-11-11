@@ -34,19 +34,36 @@ import {
   activityCostRulesApi,
   type ActivityCostRulePayload,
 } from '@/lib/api'
-import { formatCurrency, formatDateTime } from '@/lib/format'
-import { normalizeActivityName, isBlankActivity } from '@/lib/activityCost'
+import { formatCurrency, formatDate, formatDateTime } from '@/lib/format'
+import {
+  normalizeActivityName,
+  isBlankActivity,
+  normalizeRuleDate,
+} from '@/lib/activityCost'
 
 type FormState = {
   activityName: string
   costType: 'fixed' | 'percentage'
   costValue: string
+  startDate: string
+  endDate: string
 }
 
 const emptyForm: FormState = {
   activityName: '',
   costType: 'fixed',
   costValue: '',
+  startDate: '',
+  endDate: '',
+}
+
+function formatRulePeriod(startDate?: string, endDate?: string): string {
+  const start = normalizeRuleDate(startDate)
+  const end = normalizeRuleDate(endDate)
+  if (!start && !end) return '未设有效期'
+  if (start && end) return `${formatDate(start)} ~ ${formatDate(end)}`
+  if (start) return `${formatDate(start)} 起`
+  return `至 ${formatDate(end)}`
 }
 
 export default function ActivityCost() {
@@ -106,6 +123,8 @@ export default function ActivityCost() {
       activityName: rule.activityName,
       costType: rule.costType,
       costValue: String(rule.costValue ?? ''),
+      startDate: normalizeRuleDate(rule.startDate),
+      endDate: normalizeRuleDate(rule.endDate),
     })
     setError('')
     setDialogOpen(true)
@@ -126,6 +145,16 @@ export default function ActivityCost() {
       setError('比例不能超过 100%')
       return
     }
+    const startDate = normalizeRuleDate(form.startDate)
+    const endDate = normalizeRuleDate(form.endDate)
+    if (!startDate || !endDate) {
+      setError('请填写活动起止日期')
+      return
+    }
+    if (startDate > endDate) {
+      setError('开始日期不能晚于结束日期')
+      return
+    }
     setSaving(true)
     setError('')
     try {
@@ -133,6 +162,8 @@ export default function ActivityCost() {
         activityName,
         costType: form.costType,
         costValue,
+        startDate,
+        endDate,
       })
       setDialogOpen(false)
       await loadRules()
@@ -167,7 +198,7 @@ export default function ActivityCost() {
     <div className="space-y-6">
       <PageHeader
         title="活动成本"
-        description="按活动名配置默认成本扣除（固定金额或实收比例）。只影响之后新建/新同步的订单；老单保持原扣除，特殊单仍可在销售记录里手工改。"
+        description="按活动名配置默认成本扣除与有效期。成交日落在起止日内的新建/新同步订单自动套用；过期后不再自动扣，仍可在销售记录里本单手工扣除。老单不回刷。"
       />
 
       <Card>
@@ -189,6 +220,7 @@ export default function ActivityCost() {
               <TableHeader>
                 <TableRow>
                   <TableHead>活动名称</TableHead>
+                  <TableHead>活动时间</TableHead>
                   <TableHead>扣除方式</TableHead>
                   <TableHead className="text-right">扣除值</TableHead>
                   <TableHead>最近修改</TableHead>
@@ -199,16 +231,23 @@ export default function ActivityCost() {
                 {rules.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={canEditPage ? 5 : 4}
+                      colSpan={canEditPage ? 6 : 5}
                       className="h-24 text-center text-muted-foreground"
                     >
-                      暂无规则。生态圈带来的活动可在此配置一次，后续新单自动按此扣除。
+                      暂无规则。生态圈带来的活动可在此配置一次，有效期内新单自动按此扣除。
                     </TableCell>
                   </TableRow>
                 ) : (
                   rules.map((rule) => (
                     <TableRow key={rule.activityName}>
-                      <TableCell className="font-medium">{rule.activityName}</TableCell>
+                      <TableCell className="font-medium max-w-[220px]">
+                        <span className="line-clamp-2" title={rule.activityName}>
+                          {rule.activityName}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-sm tabular-nums whitespace-nowrap">
+                        {formatRulePeriod(rule.startDate, rule.endDate)}
+                      </TableCell>
                       <TableCell>
                         {rule.costType === 'percentage' ? '按实收比例' : '固定金额'}
                       </TableCell>
@@ -314,9 +353,27 @@ export default function ActivityCost() {
                 placeholder={form.costType === 'percentage' ? '如 10' : '如 500'}
               />
             </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>开始日期</Label>
+                <Input
+                  type="date"
+                  value={form.startDate}
+                  onChange={(e) => setForm({ ...form, startDate: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>结束日期</Label>
+                <Input
+                  type="date"
+                  value={form.endDate}
+                  onChange={(e) => setForm({ ...form, endDate: e.target.value })}
+                />
+              </div>
+            </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
             <p className="text-xs text-muted-foreground">
-              保存后仅对新单生效；已有订单不会自动重算。
+              仅成交日落在起止日内的新单自动套用；过期后可在销售记录本单手工扣除。已有订单不回刷。
             </p>
           </div>
           <DialogFooter>

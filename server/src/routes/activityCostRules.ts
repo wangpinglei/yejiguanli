@@ -2,7 +2,11 @@ import { Router } from "express";
 import { getDb, rowToActivityCostRule } from "../db";
 import { authMiddleware } from "../auth";
 import { requireModuleEdit } from "../middleware";
-import { normalizeActivityName, isBlankActivity } from "../lib/activityCost";
+import {
+  normalizeActivityName,
+  isBlankActivity,
+  normalizeRuleDate,
+} from "../lib/activityCost";
 
 const router = Router();
 router.use(authMiddleware);
@@ -12,6 +16,8 @@ function toPayload(row: ReturnType<typeof rowToActivityCostRule>) {
     activityName: row.activityName,
     costType: row.costType,
     costValue: row.costValue,
+    startDate: row.startDate || "",
+    endDate: row.endDate || "",
     audit: {
       updatedBy: row.updatedBy,
       updatedById: row.updatedById,
@@ -32,7 +38,7 @@ router.get("/activity-cost-rules", (_req, res) => {
 
 /**
  * PUT /activity-cost-rules
- * body: { activityName, costType: 'fixed'|'percentage', costValue }
+ * body: { activityName, costType, costValue, startDate, endDate }
  */
 router.put("/activity-cost-rules", requireModuleEdit("activity_cost"), (req, res) => {
   const activityName = normalizeActivityName(req.body?.activityName);
@@ -48,6 +54,15 @@ router.put("/activity-cost-rules", requireModuleEdit("activity_cost"), (req, res
     return res.status(400).json({ error: "比例不能超过 100%" });
   }
 
+  const startDate = normalizeRuleDate(req.body?.startDate);
+  const endDate = normalizeRuleDate(req.body?.endDate);
+  if (!startDate || !endDate) {
+    return res.status(400).json({ error: "请填写活动起止日期" });
+  }
+  if (startDate > endDate) {
+    return res.status(400).json({ error: "开始日期不能晚于结束日期" });
+  }
+
   const operator = req.user!.name || req.user!.username || "未知";
   const operatorId = req.user!.id || "";
   const now = new Date().toISOString();
@@ -60,15 +75,35 @@ router.put("/activity-cost-rules", requireModuleEdit("activity_cost"), (req, res
   if (existing?.activity_name) {
     db.prepare(`
       UPDATE activity_cost_rules
-      SET cost_type=?, cost_value=?, updated_by=?, updated_by_id=?, updated_at=?
+      SET cost_type=?, cost_value=?, start_date=?, end_date=?,
+          updated_by=?, updated_by_id=?, updated_at=?
       WHERE activity_name=?
-    `).run(costType, costValue, operator, operatorId, now, activityName);
+    `).run(
+      costType,
+      costValue,
+      startDate,
+      endDate,
+      operator,
+      operatorId,
+      now,
+      activityName,
+    );
   } else {
     db.prepare(`
       INSERT INTO activity_cost_rules (
-        activity_name, cost_type, cost_value, updated_by, updated_by_id, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?)
-    `).run(activityName, costType, costValue, operator, operatorId, now);
+        activity_name, cost_type, cost_value, start_date, end_date,
+        updated_by, updated_by_id, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      activityName,
+      costType,
+      costValue,
+      startDate,
+      endDate,
+      operator,
+      operatorId,
+      now,
+    );
   }
 
   const row = rowToActivityCostRule(

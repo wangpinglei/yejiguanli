@@ -309,6 +309,7 @@ function upsertSyncedOrder(order: SyncOrderInput): {
     db,
     activityName: order.activityName,
     orderAmount: Number(order.totalAmount) || 0,
+    saleDate: order.saleDate,
     explicitOverride: null,
   })
   db.prepare(`

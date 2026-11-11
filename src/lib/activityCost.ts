@@ -6,9 +6,30 @@ export type ActivityCostRule = {
   activityName: string
   costType: ActivityCostType
   costValue: number
+  startDate?: string
+  endDate?: string
   updatedBy?: string
   updatedById?: string
   updatedAt?: string
+}
+
+export function normalizeRuleDate(value: string | null | undefined): string {
+  const s = String(value || '').trim().slice(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : ''
+}
+
+/** 成交日是否在规则有效期内；起/止为空则该侧不限 */
+export function isSaleDateInActivityRule(
+  saleDate: string | null | undefined,
+  rule: Pick<ActivityCostRule, 'startDate' | 'endDate'>,
+): boolean {
+  const day = normalizeRuleDate(saleDate)
+  if (!day) return false
+  const start = normalizeRuleDate(rule.startDate)
+  const end = normalizeRuleDate(rule.endDate)
+  if (start && day < start) return false
+  if (end && day > end) return false
+  return true
 }
 
 export function normalizeActivityName(name: string | null | undefined): string {

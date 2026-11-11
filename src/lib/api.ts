@@ -304,6 +304,8 @@ export type ActivityCostRulePayload = {
   activityName: string
   costType: 'fixed' | 'percentage'
   costValue: number
+  startDate?: string
+  endDate?: string
   audit?: {
     updatedBy: string
     updatedById: string
@@ -317,6 +319,8 @@ export const activityCostRulesApi = {
     activityName: string
     costType: 'fixed' | 'percentage'
     costValue: number
+    startDate: string
+    endDate: string
   }) => api.put<ActivityCostRulePayload>('/activity-cost-rules', data),
   remove: (activityName: string) =>
     api.delete<{ ok: boolean; activityName: string }>(

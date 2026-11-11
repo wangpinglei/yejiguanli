@@ -6,6 +6,8 @@ export type ActivityCostRuleRow = {
   activityName: string;
   costType: ActivityCostType;
   costValue: number;
+  startDate: string;
+  endDate: string;
 };
 
 export function normalizeActivityName(name: string | null | undefined): string {
@@ -17,8 +19,31 @@ export function isBlankActivity(name: string | null | undefined): boolean {
   return !n || n === "无活动";
 }
 
+/** 取 YYYY-MM-DD，非法则空串 */
+export function normalizeRuleDate(value: string | null | undefined): string {
+  const s = String(value || "").trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : "";
+}
+
 function roundMoney(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+/**
+ * 成交日是否在规则有效期内。
+ * 起/止任一侧为空则该侧不限制（兼容旧数据）；两侧都空 = 始终有效。
+ */
+export function isSaleDateInActivityRule(
+  saleDate: string | null | undefined,
+  rule: Pick<ActivityCostRuleRow, "startDate" | "endDate">,
+): boolean {
+  const day = normalizeRuleDate(saleDate);
+  if (!day) return false;
+  const start = normalizeRuleDate(rule.startDate);
+  const end = normalizeRuleDate(rule.endDate);
+  if (start && day < start) return false;
+  if (end && day > end) return false;
+  return true;
 }
 
 export function calcActivityCostDeduction(
@@ -44,10 +69,17 @@ export function getActivityCostRuleFromDb(
   const name = normalizeActivityName(activityName);
   const row = db
     .prepare(
-      "SELECT activity_name, cost_type, cost_value FROM activity_cost_rules WHERE activity_name = ? LIMIT 1",
+      `SELECT activity_name, cost_type, cost_value, start_date, end_date
+       FROM activity_cost_rules WHERE activity_name = ? LIMIT 1`,
     )
     .get(name) as
-    | { activity_name?: string; cost_type?: string; cost_value?: number }
+    | {
+        activity_name?: string;
+        cost_type?: string;
+        cost_value?: number;
+        start_date?: string;
+        end_date?: string;
+      }
     | undefined;
   if (!row?.activity_name) return null;
   const costType = row.cost_type === "percentage" ? "percentage" : "fixed";
@@ -55,16 +87,20 @@ export function getActivityCostRuleFromDb(
     activityName: String(row.activity_name),
     costType,
     costValue: Number(row.cost_value) || 0,
+    startDate: normalizeRuleDate(row.start_date),
+    endDate: normalizeRuleDate(row.end_date),
   };
 }
 
 /**
- * 新建单时：已有数字覆盖（含 0）用覆盖；否则按活动规则固化；再否则 null（读时按产品）。
+ * 新建单时：已有数字覆盖（含 0）用覆盖；
+ * 否则活动规则且成交日落在有效期内 → 固化；再否则 null（读时按产品 / 可再手工）。
  */
 export function resolveCostOverrideForNewSale(options: {
   db: { prepare: (sql: string) => { get: (...args: unknown[]) => unknown } };
   activityName: string | null | undefined;
   orderAmount: number;
+  saleDate: string | null | undefined;
   explicitOverride: number | null | undefined;
 }): number | null {
   if (options.explicitOverride !== undefined && options.explicitOverride !== null) {
@@ -72,5 +108,7 @@ export function resolveCostOverrideForNewSale(options: {
     return Number.isFinite(n) ? Math.max(0, n) : null;
   }
   const rule = getActivityCostRuleFromDb(options.db, options.activityName);
+  if (!rule) return null;
+  if (!isSaleDateInActivityRule(options.saleDate, rule)) return null;
   return calcActivityCostDeduction(rule, options.orderAmount);
 }

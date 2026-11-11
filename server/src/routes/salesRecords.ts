@@ -197,6 +197,7 @@ router.post("/", requireModuleEdit("sales_records"), (req, res) => {
     db,
     activityName: f.activityName,
     orderAmount: Number(f.totalAmount) || 0,
+    saleDate: f.saleDate,
     explicitOverride: bodyHasManual ? f.costDeductionOverride : null,
   });
   db.prepare(INSERT_SQL).run(id, ...bind(f));
