@@ -81,6 +81,8 @@ import {
 import type { Personnel } from '@/types'
 import {
   calculateMonthlySalary,
+  filterByMonth,
+  getPersonalSales,
   isPayrollCommissionOnly,
   isPersonnelOnDutyInMonth,
 } from '@/lib/salary'
@@ -97,6 +99,7 @@ function showPayrollCol(
     | 'core'
     | 'salary'
     | 'attendance'
+    | 'commission'
     | 'score'
     | 'adjust'
     | 'insurance'
@@ -104,9 +107,12 @@ function showPayrollCol(
     | 'tax',
 ): boolean {
   // 最终工资表不展示出勤三列（仅在考勤录入步骤显示）
-  if (mode === 'all') return col !== 'attendance'
+  if (mode === 'all') return col !== 'attendance' && col !== 'commission'
   if (mode === 'attendance') {
     return col === 'core' || col === 'attendance' || col === 'salary'
+  }
+  if (mode === 'commission') {
+    return col === 'core' || col === 'commission'
   }
   if (mode === 'score') {
     return col === 'core' || col === 'score' || col === 'salary'
@@ -125,6 +131,8 @@ function showPayrollCol(
 function payrollColSpan(mode: PayrollEntryMode): number {
   // 与表头条件保持一致：单位+姓名=2
   if (mode === 'attendance') return 2 + 1 + 1 + 2 + 1 // 标准底薪 + 实际/缺勤/应出勤 + 实发底薪
+  // 本月业绩 + 个人/内部/团队 + 提成合计 + 明细状态 + 操作
+  if (mode === 'commission') return 2 + 1 + 3 + 1 + 1 + 1
   if (mode === 'score') return 2 + 1 + 1 + 1 // 标准绩效 + 分数 + 实发绩效
   if (mode === 'insurance') return 2 + 1 + 4 + 1 // 应发 + 企业/个人四列 + 操作
   // 提成 + 加项 + 减项 + 应发 + 专项附加 + 操作
@@ -132,6 +140,14 @@ function payrollColSpan(mode: PayrollEntryMode): number {
   // 应发 + 专项 + 期初三列 + 个税/实发（期初列仅 10 月起展示，colSpan 取上限）
   if (mode === 'tax') return 2 + 1 + 1 + 3 + 2
   return 18 // 最终表含企业/个人四列、专项、不含出勤三列
+}
+
+type PayrollRowView = PayrollRowResult & {
+  personalSales: number
+  hasCommissionOrderAdj: boolean
+  commissionPersonal: number
+  commissionInternal: number
+  commissionTeamMgmt: number
 }
 
 function getArchiveSpecialAdditional(person: Personnel): number {
@@ -494,11 +510,12 @@ export default function Payroll() {
     window.setTimeout(() => setSavedTip(''), 2000)
   }
 
-  const rows: PayrollRowResult[] = useMemo(() => {
+  const rows: PayrollRowView[] = useMemo(() => {
     if (scopedUnits.length === 0) return []
 
     const unitNameMap = new Map(salesUnits.map((u) => [u.id, u.name]))
-    const list: PayrollRowResult[] = []
+    const list: PayrollRowView[] = []
+    const monthSales = filterByMonth(salesRecords, yearMonth)
 
     for (const unit of scopedUnits) {
       if (filterUnitId !== 'all' && filterUnitId !== unit.id) continue
@@ -561,7 +578,15 @@ export default function Payroll() {
           commission,
           entry,
         })
-        list.push(enrichPayrollRowWithTax(baseRow, person, yearMonth, entry))
+        const taxed = enrichPayrollRowWithTax(baseRow, person, yearMonth, entry)
+        list.push({
+          ...taxed,
+          personalSales: getPersonalSales(person.id, monthSales, person.name),
+          hasCommissionOrderAdj: Boolean(commissionResolved.hasOrderAdj),
+          commissionPersonal: commissionResolved.personal || 0,
+          commissionInternal: commissionResolved.internal || 0,
+          commissionTeamMgmt: commissionResolved.teamMgmt || 0,
+        })
       }
     }
 
@@ -874,7 +899,7 @@ export default function Payroll() {
           </div>
           <CardDescription>
             {calcPhase === 'idle' && (
-              <>默认不展示录入项与工资明细。请先在上方「选择单位」后点「去核算工资」，依次完成考勤、绩效分数、社保公积金、其他预扣、个税录入，再生成工资表。</>
+              <>默认不展示录入项与工资明细。请先在上方「选择单位」后点「去核算工资」，依次完成考勤、提成核对、绩效分数、社保公积金、其他预扣、个税录入，再生成工资表。</>
             )}
             {calcPhase === 'wizard' && (
               <>请按步骤填写本月录入项；完成后点「生成工资表」。标准底薪/保密费/岗位补贴/绩效可点姓名跳转调整。</>
@@ -885,23 +910,28 @@ export default function Payroll() {
           </CardDescription>
           {calcPhase === 'wizard' && entryMode === 'attendance' && (
             <p className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
-              步骤 1/5 考勤录入 — 应出勤固定 {PAYROLL_STANDARD_HOURS} 小时；填写缺勤后，
+              步骤 1/6 考勤录入 — 应出勤固定 {PAYROLL_STANDARD_HOURS} 小时；填写缺勤后，
               实际出勤 = 应出勤 − 缺勤。
+            </p>
+          )}
+          {calcPhase === 'wizard' && entryMode === 'commission' && (
+            <p className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
+              步骤 2/6 提成核对 — 系统按销售记录汇总，不在此录入。核对每人业绩与提成；有疑问点「查看明细」逐单调整，回写后合计与页脚「提成合计」一致。
             </p>
           )}
           {calcPhase === 'wizard' && entryMode === 'score' && (
             <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-              步骤 2/5 绩效分数录入 — 请填写考核分（0–100）。
+              步骤 3/6 绩效分数录入 — 请填写考核分（0–100）。
             </p>
           )}
           {calcPhase === 'wizard' && entryMode === 'insurance' && (
             <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              步骤 3/5 社保公积金录入 — 企业/个人按人员档案固定展示；不对时点上方「批量调整社保公积金」或行内「去调整」写入薪酬方案/个税档案（有修改记录）。
+              步骤 4/6 社保公积金录入 — 企业/个人按人员档案固定展示；不对时点上方「批量调整社保公积金」或行内「去调整」写入薪酬方案/个税档案（有修改记录）。
             </p>
           )}
           {calcPhase === 'wizard' && entryMode === 'otherDeduct' && (
             <p className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-900">
-              步骤 4/5 其他预扣项目 — 先核对业绩提成（可点进明细修正），再录入加项/减项明细与金额；
+              步骤 5/6 其他预扣项目 — 录入加项/减项明细与金额；
               专项附加按个税档案展示，不对时点上方「批量调整专项附加」或右侧操作列「去调整」。
             </p>
           )}
@@ -910,7 +940,7 @@ export default function Payroll() {
             const useOpening = shouldUseIitCycleOpening(yearMonth)
             return (
               <p className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
-                步骤 5/5 个税扣除预报 — 累计周期{' '}
+                步骤 6/6 个税扣除预报 — 累计周期{' '}
                 <strong>
                   {cycle.startYm}～{cycle.endYm}
                 </strong>
@@ -935,7 +965,7 @@ export default function Payroll() {
         <CardContent className="space-y-4">
           {calcPhase === 'idle' ? (
             <div className="rounded-lg border border-dashed bg-muted/20 px-4 py-10 text-center text-sm text-muted-foreground">
-              尚未开始核算。请先在上方选择单位并点「去核算工资」，按考勤 → 绩效分数 → 社保公积金 → 其他预扣 → 个税依次录入后生成工资表。
+              尚未开始核算。请先在上方选择单位并点「去核算工资」，按考勤 → 提成核对 → 绩效分数 → 社保公积金 → 其他预扣 → 个税依次录入后生成工资表。
             </div>
           ) : (
           <>
@@ -1075,6 +1105,39 @@ export default function Payroll() {
                       <TableHead className="text-right min-w-[100px] bg-violet-50/80">
                         业绩提成
                       </TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'commission') && (
+                      <TableHead className="min-w-[100px] bg-violet-50/80 text-right">
+                        本月业绩
+                      </TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'commission') && (
+                      <TableHead className="min-w-[88px] bg-violet-50/80 text-right">
+                        个人提成
+                      </TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'commission') && (
+                      <TableHead className="min-w-[88px] bg-violet-50/80 text-right">
+                        内部销售
+                      </TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'commission') && (
+                      <TableHead className="min-w-[88px] bg-violet-50/80 text-right">
+                        团队管理
+                      </TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'commission') && (
+                      <TableHead className="min-w-[100px] bg-violet-50/80 text-right">
+                        提成合计
+                      </TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'commission') && (
+                      <TableHead className="min-w-[88px] bg-violet-50/80 text-center">
+                        明细调整
+                      </TableHead>
+                    )}
+                    {showPayrollCol(entryMode, 'commission') && (
+                      <TableHead className="min-w-[96px] bg-violet-50/80">操作</TableHead>
                     )}
                     {showPayrollCol(entryMode, 'attendance') && (
                       <TableHead className="w-[100px] min-w-[100px] bg-sky-50/80 text-right">
@@ -1307,6 +1370,57 @@ export default function Payroll() {
                             {money(row.commission)}
                           </Link>
                         </TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'commission') && (
+                          <TableCell className="bg-violet-50/40 text-right tabular-nums">
+                            {money(row.personalSales)}
+                          </TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'commission') && (
+                          <TableCell className="bg-violet-50/40 text-right tabular-nums">
+                            {money(row.commissionPersonal)}
+                          </TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'commission') && (
+                          <TableCell className="bg-violet-50/40 text-right tabular-nums">
+                            {money(row.commissionInternal)}
+                          </TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'commission') && (
+                          <TableCell className="bg-violet-50/40 text-right tabular-nums">
+                            {money(row.commissionTeamMgmt)}
+                          </TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'commission') && (
+                          <TableCell className="bg-violet-50/40 text-right tabular-nums font-medium text-violet-800">
+                            {money(row.commission)}
+                          </TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'commission') && (
+                          <TableCell className="bg-violet-50/40 text-center">
+                            {row.hasCommissionOrderAdj ? (
+                              <Badge
+                                variant="outline"
+                                className="border-violet-300 px-1.5 py-0 text-[11px] text-violet-700"
+                              >
+                                已调整
+                              </Badge>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                        )}
+                        {showPayrollCol(entryMode, 'commission') && (
+                          <TableCell className="bg-violet-50/40">
+                            <Button asChild variant="outline" size="sm" className="h-7 px-2 text-xs">
+                              <Link
+                                to={`/payroll/commission-detail?personnelId=${encodeURIComponent(row.personnelId)}&unitId=${encodeURIComponent(row.unitId)}&yearMonth=${encodeURIComponent(yearMonth)}`}
+                                title="按销售记录逐单核对与调整提成"
+                              >
+                                查看明细
+                              </Link>
+                            </Button>
+                          </TableCell>
                         )}
                         {showPayrollCol(entryMode, 'attendance') && (
                         <TableCell
