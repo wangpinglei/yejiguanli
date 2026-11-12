@@ -137,7 +137,7 @@ export function shouldUseIitCycleOpening(yearMonth: string): boolean {
   return startYm === IIT_SEED_CYCLE_START && yearMonth > IIT_SEED_THROUGH_YM
 }
 
-/** 期初手工录入月（2026-10）：仅此月改期初 B/税基；其后月份只读结转上月 */
+/** 期初手工录入月（2026-10）：默认此月改期初 B/税基；有工资/人员编辑权时可在后续月份补录 */
 export function isIitOpeningEditMonth(yearMonth: string): boolean {
   if (!shouldUseIitCycleOpening(yearMonth)) return false
   const priorsAfterSeed = listPriorMonthsInIitCycle(yearMonth).filter(

@@ -1100,7 +1100,7 @@ export default function Payroll() {
                 {useOpening && (
                   <>
                     {' '}
-                    请填写截至 {IIT_SEED_THROUGH_YM} 的已预扣个税、累计扣税基数；应纳税所得额可改。
+                    请填写截至 {IIT_SEED_THROUGH_YM} 的已预扣个税、累计扣税基数（有工资/人员编辑权时可在后续月份补录）；应纳税所得额可改。
                   </>
                 )}
                 {' '}完成后点「生成工资表」。
@@ -1920,7 +1920,7 @@ export default function Payroll() {
                                 </>
                               )
                             }
-                            const canEditOpening = isIitOpeningEditMonth(yearMonth)
+                            const canEditOpening = isIitOpeningEditMonth(yearMonth) || canAdjustPayrollArchive
                             return (
                               <>
                                 <TableCell className="bg-violet-50/40">
