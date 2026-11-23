@@ -325,11 +325,35 @@ export function isSalesBattlePosition(position?: string): boolean {
  * 是否出现在单位战报：销售相关岗位，或当月本单位有个人业绩（如服务中心等）
  */
 export function shouldShowOnBattleReport(
-  person: { id: string; name: string; position?: string },
+  person: Pick<Personnel, 'id' | 'name' | 'position' | 'isInternalEmployee'>,
   monthUnitSales: SalesRecord[],
 ): boolean {
+  if (!isInternalEmployeePerson(person)) {
+    return getPersonalSales(person.id, monthUnitSales, person.name) > 0;
+  }
   if (isSalesBattlePosition(person.position)) return true;
   return getPersonalSales(person.id, monthUnitSales, person.name) > 0;
+}
+
+/** 已明确标记为对外合作方（内部员工开关关闭） */
+export function isExplicitNonInternalEmployee(
+  person: Pick<Personnel, "isInternalEmployee">,
+): boolean {
+  return person.isInternalEmployee === false;
+}
+
+/**
+ * 战报零业绩占位：已勾选「内部员工」的销售岗无成交仍展示以便录目标；
+ * 明确合作方或未勾选内部分销岗无成交不占位（有成交仍由销售记录归集）。
+ */
+export function shouldPadZeroSalesBattleRow(
+  person: Pick<Personnel, "isInternalEmployee" | "position">,
+): boolean {
+  if (!isSalesBattlePosition(person.position)) return false;
+  if (person.isInternalEmployee === false) return false;
+  if (person.isInternalEmployee === true) return true;
+  if (isDistributionPosition(person.position)) return false;
+  return true;
 }
 
 /**

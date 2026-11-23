@@ -13,6 +13,16 @@ const SALES_POSITION_KEYWORDS = [
   '销售', '顾问', '业务员', '业务经理', '客户经理', '外援',
 ] as const
 
+function isDistributionPosition(position?: string): boolean {
+  return (position || '').trim().replace(/\s+/g, '').includes('分销')
+}
+
+function isInternalEmployeePerson(person: BattlePerson): boolean {
+  if (person.isInternalEmployee === false) return false
+  if (person.isInternalEmployee === true) return true
+  return !isDistributionPosition(person.position)
+}
+
 const UNATTRIBUTED_ID = 'unattributed'
 const UNATTRIBUTED_NAME = '未归集（无销售员）'
 
@@ -30,6 +40,7 @@ export type BattlePerson = {
   hireDate?: string
   resignDate?: string
   status?: string
+  isInternalEmployee?: boolean
   unitAssignments?: BattleUnitAssignment[]
 }
 
@@ -177,9 +188,18 @@ function wasEmployedInMonth(
 function isSalesBattlePosition(position?: string): boolean {
   const pos = (position || '').trim().toLowerCase().replace(/\s+/g, '')
   if (!pos) return false
+  if (pos.includes('分销')) return true
   if (pos.includes('销售')) return true
   if (NON_SALES_POSITION_KEYWORDS.some((k) => pos.includes(k.toLowerCase()))) return false
   return SALES_POSITION_KEYWORDS.some((k) => pos.includes(k.toLowerCase()))
+}
+
+function shouldPadZeroSalesBattleRow(person: BattlePerson): boolean {
+  if (!isSalesBattlePosition(person.position)) return false
+  if (person.isInternalEmployee === false) return false
+  if (person.isInternalEmployee === true) return true
+  if (isDistributionPosition(person.position)) return false
+  return true
 }
 
 function matchPositionLabel(
@@ -430,7 +450,7 @@ export function buildUnitBattleReport(options: {
     if (salesAgg.has(p.id)) continue
     if (!personBelongsToUnitInMonth(p, salesUnitId, yearMonth)) continue
     if (!wasEmployedInMonth(p, yearMonth)) continue
-    if (!isSalesBattlePosition(p.position)) continue
+    if (!shouldPadZeroSalesBattleRow(p)) continue
     salesAgg.set(p.id, {
       personId: p.id,
       name: p.name,

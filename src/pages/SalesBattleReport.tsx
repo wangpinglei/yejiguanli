@@ -454,7 +454,7 @@ export default function SalesBattleReport() {
       <Card className="overflow-hidden">
         <div className="border-b bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
           业绩按成交日人事归属计入本单位：团队总业绩 = 表内个人业绩之和（订单上的销售单位仅作开单/同步来源，不单独决定战报归属）。
-          按人员ID归集；ID无效时按销售员姓名；仍无法匹配则记为外援/未归集。销售岗无成交也会展示以便录入目标。
+          按人员ID归集；ID无效时按销售员姓名；仍无法匹配则记为外援/未归集。已勾选「内部员工」的销售岗无成交也会展示以便录入目标；对外合作方或未勾选内的分销岗仅在有业绩时展示。
         </div>
         <div className="overflow-x-auto">
           <Table>

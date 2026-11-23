@@ -13,6 +13,7 @@ import {
   getInternalSalesRecipientId,
   getPersonalSales,
   isDistributionPosition,
+  isExplicitNonInternalEmployee,
   isInternalEmployeePerson,
   isSalesBattlePosition,
   MONTHLY_STANDARD_HOURS,
@@ -1622,12 +1623,23 @@ export default function PersonnelPage() {
                                 || !isInternal,
                             })}
                           </span>
-                          {!isInternal && (
+                          {isExplicitNonInternalEmployee(person) && (
                             <Badge
                               variant="outline"
                               className="shrink-0 border-violet-300 bg-violet-100/80 text-violet-800"
                             >
                               非内部
+                            </Badge>
+                          )}
+                          {!isInternal
+                            && !isExplicitNonInternalEmployee(person)
+                            && isDistributionPosition(person.position) && (
+                            <Badge
+                              variant="outline"
+                              className="shrink-0 border-sky-300 bg-sky-50 text-sky-800"
+                              title="未勾选「内部员工」，工资按仅提成；在编请编辑并开启内部员工"
+                            >
+                              分销岗
                             </Badge>
                           )}
                           {allocLabel && (
@@ -1966,18 +1978,7 @@ export default function PersonnelPage() {
                       value={form.position}
                       onChange={(e) => {
                         const position = e.target.value
-                        setForm((prev) => {
-                          const next = { ...prev, position }
-                          // 首次改成含「分销」时默认关掉内部员工；用户可再手动打开
-                          if (
-                            position.includes('分销')
-                            && !(prev.position || '').includes('分销')
-                            && prev.isInternalEmployee
-                          ) {
-                            next.isInternalEmployee = false
-                          }
-                          return next
-                        })
+                        setForm((prev) => ({ ...prev, position }))
                       }}
                       placeholder="如：销售经理 / 分销"
                     />
@@ -1997,8 +1998,8 @@ export default function PersonnelPage() {
                   <div className="space-y-0.5">
                     <Label htmlFor="is-internal-employee">内部员工</Label>
                     <p className="text-[11px] text-muted-foreground leading-snug">
-                      开启：核算底薪、保密费、补贴、绩效、社保公积金与出勤。
-                      关闭：工资核算只计提成（适合分销/非入职合作）。
+                      开启：核算底薪、保密费、补贴、绩效、社保公积金与出勤；本单位在编分销也应开启。
+                      关闭：工资核算只计提成（仅对外合作方）。
                     </p>
                   </div>
                   <Switch

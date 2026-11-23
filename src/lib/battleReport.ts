@@ -6,7 +6,7 @@
 import {
   filterByMonth,
   wasEmployedInMonth,
-  isSalesBattlePosition,
+  shouldPadZeroSalesBattleRow,
   EMPTY_SALARY,
 } from '@/lib/salary'
 import {
@@ -290,11 +290,11 @@ export function buildUnitBattleReport(options: {
     upsList,
   )
 
-  // 本单位在职销售岗：无成交也保留行，便于录目标
+  // 本单位在职内部销售岗：无成交也保留行，便于录目标（分销/外部无成交不占位）
   const roster = getUnitRosterPersonnel(personnel, salesUnitId, yearMonth)
   for (const p of roster) {
     if (salesAgg.has(p.id)) continue
-    if (!isSalesBattlePosition(p.position)) continue
+    if (!shouldPadZeroSalesBattleRow(p)) continue
     salesAgg.set(p.id, {
       personId: p.id,
       name: p.name,
