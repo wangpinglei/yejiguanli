@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { FileUp, Loader2 } from 'lucide-react'
+import { useMemo, useRef, useState } from 'react'
+import { Download, FileUp, Loader2, Upload } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -23,6 +23,9 @@ import {
 import { useData } from '@/context/DataContext'
 import { EMPTY_SALARY } from '@/lib/salary'
 import {
+  downloadPersonnelImportTemplateXlsx,
+  parsePersonnelBatchImportFile,
+  parsePersonnelBatchImportMatrix,
   parsePersonnelBatchImportText,
   personnelBatchImportTemplateTsv,
   type PersonnelBatchImportRow,
@@ -43,10 +46,13 @@ export default function MPersonnelBatchImportDialog({
   personnel,
 }: Props) {
   const { addPersonnel } = useData()
-  const [text, setText] = useState(() => personnelBatchImportTemplateTsv())
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [text, setText] = useState('')
+  const [fileLabel, setFileLabel] = useState('')
   const [rows, setRows] = useState<PersonnelBatchImportRow[]>([])
   const [step, setStep] = useState<'paste' | 'preview'>('paste')
   const [importing, setImporting] = useState(false)
+  const [parsing, setParsing] = useState(false)
 
   const stats = useMemo(() => {
     const selected = rows.filter((r) => r.selected)
@@ -58,14 +64,38 @@ export default function MPersonnelBatchImportDialog({
     }
   }, [rows])
 
-  function handleParse() {
-    const parsed = parsePersonnelBatchImportText(text, units, personnel)
+  function applyParsed(parsed: PersonnelBatchImportRow[]) {
     if (parsed.length === 0) {
-      alert('未解析到有效行。请包含表头：销售单位、姓名、岗位（或仅三列：单位、姓名、岗位）')
+      alert(
+        '未识别到有效人员行。\n'
+        + '请使用表头：销售单位、姓名、岗位；\n'
+        + '或四列：单位、负责人、岗位、姓名（合并单元格的单位会自动向下填充）。',
+      )
       return
     }
     setRows(parsed)
     setStep('preview')
+  }
+
+  function handleParseText() {
+    const parsed = parsePersonnelBatchImportText(text, units, personnel)
+    applyParsed(parsed)
+  }
+
+  async function handlePickFile(file: File | null) {
+    if (!file) return
+    setParsing(true)
+    setFileLabel(file.name)
+    try {
+      const matrix = await parsePersonnelBatchImportFile(file)
+      const parsed = parsePersonnelBatchImportMatrix(matrix, units, personnel)
+      setText('')
+      applyParsed(parsed)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '读取表格失败')
+    } finally {
+      setParsing(false)
+    }
   }
 
   function toggleRow(index: number) {
@@ -83,6 +113,9 @@ export default function MPersonnelBatchImportDialog({
     )
   }
 
+  const selectable = rows.filter((r) => r.unitMatched && !r.alreadyExists)
+  const allSelected = selectable.length > 0 && selectable.every((r) => r.selected)
+
   async function handleImport() {
     const targets = rows.filter((r) => r.selected && r.unitMatched && !r.alreadyExists)
     if (targets.length === 0) {
@@ -92,7 +125,7 @@ export default function MPersonnelBatchImportDialog({
     setImporting(true)
     let ok = 0
     let fail = 0
-  const errors: string[] = []
+    const errors: string[] = []
     for (const row of targets) {
       try {
         await addPersonnel({
@@ -122,6 +155,8 @@ export default function MPersonnelBatchImportDialog({
     if (ok > 0) {
       onOpenChange(false)
       setStep('paste')
+      setText('')
+      setFileLabel('')
     }
   }
 
@@ -136,24 +171,53 @@ export default function MPersonnelBatchImportDialog({
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>批量导入人员</DialogTitle>
+          <DialogTitle>表格导入人员</DialogTitle>
           <DialogDescription>
-            从 Excel 复制三列粘贴：<strong>销售单位、姓名、岗位</strong>。单位名称须与系统中一致；
-            合并单元格粘贴时可只填首行单位，下面行留空会自动沿用。已存在同单位同名会标记为跳过。
+            上传 <strong>.xlsx / .xls</strong> 或粘贴 Excel 区域。自动识别列：
+            <strong>销售单位、姓名、岗位</strong>。
+            若表格为「单位｜负责人｜岗位｜姓名」四列，或单位列有合并单元格，也会按行解析。
+            单位名须与系统中销售单位完全一致。
           </DialogDescription>
         </DialogHeader>
 
         {step === 'paste' ? (
           <div className="space-y-3">
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={parsing}
+                onClick={() => fileRef.current?.click()}
+              >
+                <Upload className="mr-2 h-4 w-4" />
+                {parsing ? '读取中…' : '选择 Excel 表格'}
+              </Button>
+              <Button type="button" variant="ghost" onClick={() => downloadPersonnelImportTemplateXlsx()}>
+                <Download className="mr-2 h-4 w-4" />
+                下载模板
+              </Button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  void handlePickFile(f || null)
+                  e.target.value = ''
+                }}
+              />
+            </div>
+            {fileLabel && (
+              <p className="text-sm text-muted-foreground">已选文件：{fileLabel}</p>
+            )}
+            <p className="text-xs text-muted-foreground">或在下方粘贴（含表头，制表符分隔）：</p>
             <Textarea
-              className="min-h-[220px] font-mono text-sm"
+              className="min-h-[180px] font-mono text-sm"
               value={text}
               onChange={(e) => setText(e.target.value)}
               placeholder={personnelBatchImportTemplateTsv()}
             />
-            <p className="text-xs text-muted-foreground">
-              下图西安分仓名单已预填在文本框，确认单位名为「西安分仓」后可点「解析预览」。
-            </p>
           </div>
         ) : (
           <div className="space-y-2">
@@ -172,7 +236,7 @@ export default function MPersonnelBatchImportDialog({
                 <TableRow>
                   <TableHead className="w-10">
                     <Checkbox
-                      checked={rows.every((r) => !r.selected ? false : true) && rows.some((r) => r.selected)}
+                      checked={allSelected}
                       onCheckedChange={(v) => toggleAll(v === true)}
                     />
                   </TableHead>
@@ -218,8 +282,8 @@ export default function MPersonnelBatchImportDialog({
             </Button>
           )}
           {step === 'paste' ? (
-            <Button type="button" onClick={handleParse}>
-              解析预览
+            <Button type="button" disabled={!text.trim() || parsing} onClick={handleParseText}>
+              解析粘贴内容
             </Button>
           ) : (
             <Button type="button" disabled={importing || stats.selected === 0} onClick={() => void handleImport()}>

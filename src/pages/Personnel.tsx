@@ -1192,7 +1192,7 @@ export default function PersonnelPage() {
               {canEditPersonnel && !isReadOnly && (
                 <Button variant="outline" onClick={() => setBatchImportOpen(true)}>
                   <FileUp className="mr-2 h-4 w-4" />
-                  批量导入
+                  表格导入
                 </Button>
               )}
               <Button onClick={openAdd}>
