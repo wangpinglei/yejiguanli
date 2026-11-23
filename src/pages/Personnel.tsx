@@ -95,6 +95,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import MPersonProductCommission from "./Personnel/components/m-person-product-commission";
 import MPersonnelBatchImportDialog from "./Personnel/components/m-personnel-batch-import-dialog";
+import MPersonnelBatchHireDialog from "./Personnel/components/m-personnel-batch-hire-dialog";
 import MPayPlanDialog, {
   type PayPlanFocusField,
 } from "./Personnel/components/m-pay-plan-dialog";
@@ -267,6 +268,7 @@ export default function PersonnelPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [batchImportOpen, setBatchImportOpen] = useState(false);
+  const [batchHireOpen, setBatchHireOpen] = useState(false);
   const [mergeKeepId, setMergeKeepId] = useState("");
   const [mergeRemoveId, setMergeRemoveId] = useState("");
   const [merging, setMerging] = useState(false);
@@ -1190,10 +1192,20 @@ export default function PersonnelPage() {
                 合并人员
               </Button>
               {canEditPersonnel && !isReadOnly && (
-                <Button variant="outline" onClick={() => setBatchImportOpen(true)}>
-                  <FileUp className="mr-2 h-4 w-4" />
-                  表格导入
-                </Button>
+                <>
+                  <Button variant="outline" onClick={() => setBatchImportOpen(true)}>
+                    <FileUp className="mr-2 h-4 w-4" />
+                    表格导入
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={filteredPersonnel.length === 0}
+                    onClick={() => setBatchHireOpen(true)}
+                  >
+                    <CalendarRange className="mr-2 h-4 w-4" />
+                    批量改入职
+                  </Button>
+                </>
               )}
               <Button onClick={openAdd}>
                 <Plus className="mr-2 h-4 w-4" />
@@ -3325,6 +3337,17 @@ export default function PersonnelPage() {
         onOpenChange={setBatchImportOpen}
         units={salesUnits}
         personnel={personnel}
+      />
+
+      <MPersonnelBatchHireDialog
+        open={batchHireOpen}
+        onOpenChange={setBatchHireOpen}
+        people={filteredPersonnel}
+        scopeLabel={
+          filterUnit === "all"
+            ? `全部单位（当前筛选 ${filteredPersonnel.length} 人）`
+            : (salesUnits.find((u) => u.id === filterUnit)?.name || "本单位")
+        }
       />
 
       <AlertDialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}>

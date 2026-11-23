@@ -28,8 +28,11 @@ import {
   parsePersonnelBatchImportMatrix,
   parsePersonnelBatchImportText,
   personnelBatchImportTemplateTsv,
+  resolvePersonnelImportHireDate,
   type PersonnelBatchImportRow,
 } from '@/lib/personnelBatchImport'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import type { Personnel, SalesUnit } from '@/types'
 
 type Props = {
@@ -53,6 +56,8 @@ export default function MPersonnelBatchImportDialog({
   const [step, setStep] = useState<'paste' | 'preview'>('paste')
   const [importing, setImporting] = useState(false)
   const [parsing, setParsing] = useState(false)
+  const [batchHireDate, setBatchHireDate] = useState('')
+  const [forceBatchHireDate, setForceBatchHireDate] = useState(true)
 
   const stats = useMemo(() => {
     const selected = rows.filter((r) => r.selected)
@@ -122,6 +127,13 @@ export default function MPersonnelBatchImportDialog({
       alert('没有可导入的行（请勾选、且单位须已存在、且非重复）')
       return
     }
+    const missingDate = targets.some(
+      (r) => !resolvePersonnelImportHireDate(r, { batchHireDate, forceBatchHireDate }),
+    )
+    if (missingDate) {
+      alert('请设置「统一入职日期」，或在表格中提供「入职日期」列')
+      return
+    }
     setImporting(true)
     let ok = 0
     let fail = 0
@@ -137,7 +149,10 @@ export default function MPersonnelBatchImportDialog({
           salary: { ...EMPTY_SALARY },
           socialInsurance: 0,
           housingFund: 0,
-          hireDate: new Date().toISOString().slice(0, 10),
+          hireDate: resolvePersonnelImportHireDate(row, {
+            batchHireDate,
+            forceBatchHireDate,
+          }),
           status: 'active',
           isInternalEmployee: !String(row.position).includes('分销'),
         })
@@ -220,7 +235,31 @@ export default function MPersonnelBatchImportDialog({
             />
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-3">
+            <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                <div className="space-y-1">
+                  <Label htmlFor="import-batch-hire">统一入职日期</Label>
+                  <Input
+                    id="import-batch-hire"
+                    type="date"
+                    className="w-44"
+                    value={batchHireDate}
+                    onChange={(e) => setBatchHireDate(e.target.value)}
+                  />
+                </div>
+                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={forceBatchHireDate}
+                    onCheckedChange={(v) => setForceBatchHireDate(v === true)}
+                  />
+                  全部使用此日期（不读表格中的入职列）
+                </label>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                未勾选时：行内已有「入职日期」用行内值，否则用上方统一日期。
+              </p>
+            </div>
             <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
               <span>共 {stats.total} 行</span>
               <span>待导入 {stats.selected}</span>
@@ -243,6 +282,7 @@ export default function MPersonnelBatchImportDialog({
                   <TableHead>销售单位</TableHead>
                   <TableHead>姓名</TableHead>
                   <TableHead>岗位</TableHead>
+                  <TableHead>入职日期</TableHead>
                   <TableHead>状态</TableHead>
                 </TableRow>
               </TableHeader>
@@ -259,6 +299,12 @@ export default function MPersonnelBatchImportDialog({
                     <TableCell>{row.unitName || '—'}</TableCell>
                     <TableCell className="font-medium">{row.name}</TableCell>
                     <TableCell>{row.position}</TableCell>
+                    <TableCell className="text-sm tabular-nums">
+                      {resolvePersonnelImportHireDate(row, {
+                        batchHireDate,
+                        forceBatchHireDate,
+                      }) || '—'}
+                    </TableCell>
                     <TableCell className="text-xs">
                       {!row.unitMatched && <span className="text-amber-700">单位未建</span>}
                       {row.unitMatched && row.alreadyExists && (

@@ -2,22 +2,28 @@
  * 人员批量导入：Excel / 粘贴表格，识别销售单位、姓名、岗位
  */
 import * as XLSX from 'xlsx'
+import { normalizeSaleDate } from '@/lib/salesDuplicate'
 import type { Personnel, SalesUnit } from '@/types'
 
 export type PersonnelBatchImportRow = {
   unitName: string
   name: string
   position: string
+  /** 表格中的入职日期（yyyy-MM-dd），可空 */
+  hireDate: string
   matchedUnitId: string
   unitMatched: boolean
   alreadyExists: boolean
   selected: boolean
 }
 
-const FIELD_ALIASES: Record<'unitName' | 'name' | 'position', string[]> = {
+type ImportField = 'unitName' | 'name' | 'position' | 'hireDate'
+
+const FIELD_ALIASES: Record<ImportField, string[]> = {
   unitName: ['销售单位', '单位', '分仓', '所属单位', 'unit', 'salesunit', 'sales_unit'],
   name: ['姓名', '员工姓名', '销售人员', '员工', 'name', 'person'],
   position: ['岗位', '职位', '职务', '角色', 'position', 'title'],
+  hireDate: ['入职日期', '入职时间', '入司日期', 'hiredate', 'hire_date', 'onboard'],
 }
 
 const POSITION_RE =
@@ -27,12 +33,12 @@ function normalizeHeaderCell(raw: string): string {
   return (raw || '').replace(/\s/g, '').toLowerCase()
 }
 
-function mapHeaders(headerRow: string[]): Partial<Record<'unitName' | 'name' | 'position', number>> {
-  const map: Partial<Record<'unitName' | 'name' | 'position', number>> = {}
+function mapHeaders(headerRow: string[]): Partial<Record<ImportField, number>> {
+  const map: Partial<Record<ImportField, number>> = {}
   headerRow.forEach((cell, index) => {
     const key = normalizeHeaderCell(cell)
     if (!key) return
-    for (const field of Object.keys(FIELD_ALIASES) as Array<keyof typeof FIELD_ALIASES>) {
+    for (const field of Object.keys(FIELD_ALIASES) as ImportField[]) {
       const hit = FIELD_ALIASES[field].some(
         (a) => key === normalizeHeaderCell(a) || key.includes(normalizeHeaderCell(a)),
       )
@@ -161,10 +167,17 @@ function inferNameAndPosition(cells: string[]): { name: string; position: string
   return null
 }
 
+export function parseHireDateCell(raw: string): string {
+  const s = String(raw ?? '').trim()
+  if (!s) return ''
+  return normalizeSaleDate(s)
+}
+
 function toImportRow(
   unitName: string,
   name: string,
   position: string,
+  hireDate: string,
   units: SalesUnit[],
   personnel: Personnel[],
 ): PersonnelBatchImportRow {
@@ -175,11 +188,26 @@ function toImportRow(
     unitName,
     name,
     position: (position || '销售').trim() || '销售',
+    hireDate: parseHireDateCell(hireDate),
     matchedUnitId,
     unitMatched: Boolean(unit),
     alreadyExists,
     selected: Boolean(unit) && !alreadyExists,
   }
+}
+
+/** 导入时生效的入职日期：表格列 + 批量日期 */
+export function resolvePersonnelImportHireDate(
+  row: PersonnelBatchImportRow,
+  options: {
+    batchHireDate: string
+    /** true = 所有人用 batch；false = 行上有日期用行，否则用 batch */
+    forceBatchHireDate: boolean
+  },
+): string {
+  const batch = parseHireDateCell(options.batchHireDate)
+  if (options.forceBatchHireDate) return batch
+  return row.hireDate || batch
 }
 
 export function parsePersonnelBatchImportMatrix(
@@ -197,6 +225,7 @@ export function parsePersonnelBatchImportMatrix(
   const unitCol = headerMap.unitName ?? 0
   const nameCol = headerMap.name
   const posCol = headerMap.position
+  const hireCol = headerMap.hireDate
 
   const result: PersonnelBatchImportRow[] = []
   const seen = new Set<string>()
@@ -230,12 +259,14 @@ export function parsePersonnelBatchImportMatrix(
 
     if (!name || !looksLikePersonName(name)) continue
     if (!position) position = '销售'
+    const hireDate =
+      hireCol != null ? parseHireDateCell(row[hireCol] || '') : ''
 
     const key = `${unitName.toLowerCase()}|${name}`
     if (seen.has(key)) continue
     seen.add(key)
 
-    result.push(toImportRow(unitName, name, position, units, personnel))
+    result.push(toImportRow(unitName, name, position, hireDate, units, personnel))
   }
   return result
 }
@@ -273,15 +304,15 @@ export async function parsePersonnelBatchImportFile(
 }
 
 export function downloadPersonnelImportTemplateXlsx(): void {
-  const headers = ['销售单位', '姓名', '岗位']
+  const headers = ['销售单位', '姓名', '岗位', '入职日期']
   const rows = [
-    ['西安分仓', '李春莲', '分仓负责人'],
-    ['西安分仓', '陈鑫', '销售顾问'],
-    ['西安分仓', '杨德', '销售顾问'],
-    ['西安分仓', '王浩栋', '销售顾问'],
-    ['西安分仓', '雷河玲', '销售顾问'],
-    ['西安分仓', '卢大洋', '分仓负责人'],
-    ['西安分仓', '卢梅', '售前售后工程师'],
+    ['西安分仓', '李春莲', '分仓负责人', '2024-01-01'],
+    ['西安分仓', '陈鑫', '销售顾问', '2024-01-01'],
+    ['西安分仓', '杨德', '销售顾问', '2024-01-01'],
+    ['西安分仓', '王浩栋', '销售顾问', '2024-01-01'],
+    ['西安分仓', '雷河玲', '销售顾问', '2024-01-01'],
+    ['西安分仓', '卢大洋', '分仓负责人', '2024-01-01'],
+    ['西安分仓', '卢梅', '售前售后工程师', '2024-01-01'],
   ]
   const ws = XLSX.utils.aoa_to_sheet([headers, ...rows])
   const wb = XLSX.utils.book_new()
@@ -291,13 +322,13 @@ export function downloadPersonnelImportTemplateXlsx(): void {
 
 export function personnelBatchImportTemplateTsv(): string {
   return [
-    '销售单位\t姓名\t岗位',
-    '西安分仓\t李春莲\t分仓负责人',
-    '西安分仓\t陈鑫\t销售顾问',
-    '西安分仓\t杨德\t销售顾问',
-    '西安分仓\t王浩栋\t销售顾问',
-    '西安分仓\t雷河玲\t销售顾问',
-    '西安分仓\t卢大洋\t分仓负责人',
-    '西安分仓\t卢梅\t售前售后工程师',
+    '销售单位\t姓名\t岗位\t入职日期',
+    '西安分仓\t李春莲\t分仓负责人\t2024-01-01',
+    '西安分仓\t陈鑫\t销售顾问\t2024-01-01',
+    '西安分仓\t杨德\t销售顾问\t2024-01-01',
+    '西安分仓\t王浩栋\t销售顾问\t2024-01-01',
+    '西安分仓\t雷河玲\t销售顾问\t2024-01-01',
+    '西安分仓\t卢大洋\t分仓负责人\t2024-01-01',
+    '西安分仓\t卢梅\t售前售后工程师\t2024-01-01',
   ].join('\n')
 }
