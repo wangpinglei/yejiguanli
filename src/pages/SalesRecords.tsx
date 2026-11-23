@@ -510,9 +510,25 @@ function textToMatrix(text: string): string[][] {
   return lines.map((line) => line.split(delimiter).map((c) => c.trim()));
 }
 
+/** 销售记录「产品类型」筛选键：有 productId 用 id，否则用同步未匹配的产品名 */
+function saleProductFilterKey(s: Pick<SalesRecord, "productId" | "productName">): string {
+  if (s.productId) return s.productId;
+  const name = (s.productName || "").trim();
+  return name ? `name:${name}` : "__unknown__";
+}
+
+function saleProductFilterLabel(
+  key: string,
+  products: { id: string; name: string }[],
+): string {
+  if (key === "__unknown__") return "（未匹配产品）";
+  if (key.startsWith("name:")) return key.slice(5);
+  return products.find((p) => p.id === key)?.name || key;
+}
+
 function readSalesRecordsQuery() {
   if (typeof window === "undefined") {
-    return { unit: "all", person: "all", from: "", to: "" };
+    return { unit: "all", person: "all", from: "", to: "", product: "all" };
   }
   const q = new URLSearchParams(window.location.search);
   return {
@@ -520,6 +536,7 @@ function readSalesRecordsQuery() {
     person: q.get("person") || "all",
     from: q.get("from") || "",
     to: q.get("to") || "",
+    product: q.get("product") || "all",
   };
 }
 
@@ -538,6 +555,8 @@ export default function SalesRecords() {
   const [showResignedPersonnel, setShowResignedPersonnel] = useState(false);
   const [filterSync, setFilterSync] = useState("all"); // all | manual | synced
   const [filterDomain, setFilterDomain] = useState("all");
+  /** 购买产品（产品类型） */
+  const [filterProduct, setFilterProduct] = useState(initialQuery.product);
   const [filterDuplicate, setFilterDuplicate] = useState<
     "all" | "duplicate" | "similar" | "unique"
   >("all");
@@ -664,6 +683,18 @@ export default function SalesRecords() {
     return list;
   }, [products, salesRecords]);
 
+  const productTypeOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of salesRecords) {
+      const key = saleProductFilterKey(s);
+      if (map.has(key)) continue;
+      map.set(key, saleProductFilterLabel(key, products));
+    }
+    return Array.from(map.entries())
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label, "zh-CN"));
+  }, [salesRecords, products]);
+
   /** 系统内已出现过的活动名，供表单下拉选择 */
   const activityOptions = useMemo(() => {
     const set = new Set<string>();
@@ -696,6 +727,9 @@ export default function SalesRecords() {
         const matchSync = filterSync === "all" || (filterSync === "synced" ? s.synced : !s.synced);
         const domainKey = product ? getProductDomainKey(product) : UNCATEGORIZED;
         const matchDomain = filterDomain === "all" || domainKey === filterDomain;
+        const matchProduct =
+          filterProduct === "all"
+          || saleProductFilterKey(s) === filterProduct;
         const saleDate = normalizeSaleDate(s.saleDate);
         const matchFrom = !dateFrom || saleDate >= dateFrom;
         const matchTo = !dateTo || saleDate <= dateTo;
@@ -705,12 +739,12 @@ export default function SalesRecords() {
           filterActivity === "all"
           || (filterActivity === "with" ? hasActivity : !hasActivity);
         return matchSearch && matchUnit && matchPerson && matchSync
-          && matchDomain && matchFrom && matchTo && matchActivity;
+          && matchDomain && matchProduct && matchFrom && matchTo && matchActivity;
       })
       .sort(compareSaleDateDesc);
   }, [
     salesRecords, personnel, products, search, filterUnit, filterPerson, filterSync,
-    filterDomain, filterActivity, dateFrom, dateTo,
+    filterDomain, filterProduct, filterActivity, dateFrom, dateTo,
   ]);
 
   const duplicateCountInFilters = useMemo(
@@ -747,8 +781,8 @@ export default function SalesRecords() {
   useEffect(() => {
     setPage(1);
   }, [
-    search, filterUnit, filterPerson, filterSync, filterDomain, filterDuplicate,
-    filterActivity, dateFrom, dateTo, pageSize,
+    search, filterUnit, filterPerson, filterSync, filterDomain, filterProduct,
+    filterDuplicate, filterActivity, dateFrom, dateTo, pageSize,
   ]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRecords.length / pageSize));
@@ -1918,6 +1952,19 @@ export default function SalesRecords() {
               {domainOptions.map((d) => (
                 <SelectItem key={d} value={d}>
                   {d === UNCATEGORIZED ? UNCATEGORIZED_LABEL : d}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={filterProduct} onValueChange={setFilterProduct}>
+            <SelectTrigger className="h-10 min-w-[11rem] max-w-[14rem] border-sky-200 bg-white text-base">
+              <SelectValue placeholder="产品类型" />
+            </SelectTrigger>
+            <SelectContent className="max-h-[min(24rem,70vh)]">
+              <SelectItem value="all">全部产品类型</SelectItem>
+              {productTypeOptions.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
                 </SelectItem>
               ))}
             </SelectContent>

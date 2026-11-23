@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import ExcelJS from 'exceljs'
 
 import { Calculator, CheckSquare, FileSpreadsheet, Pencil, Save } from 'lucide-react'
 
@@ -37,11 +36,10 @@ import {
 } from '@/lib/api'
 import { hydrateCommissionOrderAdjScopes } from '@/lib/commissionOrderAdj'
 import { formatCurrency, formatDateTime, formatDisplayPersonName } from '@/lib/format'
+import { downloadPayrollWorkbook } from '@/lib/payrollExport'
 import {
   calcPayrollRow,
   createEmptyPayrollEntry,
-  formatAdjLinesComment,
-  formatAdjLinesNote,
   loadPayrollEntries,
   loadPayrollScopeUnitIds,
   normalizePayrollEntry,
@@ -99,6 +97,12 @@ import { personBelongsToUnitInMonth } from '@/lib/unitAssignment'
 /** 工资表金额统一展示两位小数 */
 function money(amount: number): string {
   return formatCurrency(amount, 2)
+}
+
+function monthLabelForYm(yearMonth: string): string {
+  return /^\d{4}-\d{2}$/.test(yearMonth)
+    ? `${yearMonth.slice(0, 4)}年${Number(yearMonth.slice(5, 7))}月`
+    : yearMonth
 }
 
 function showPayrollCol(
@@ -634,7 +638,8 @@ export default function Payroll() {
     window.setTimeout(() => setSavedTip(''), 2000)
   }
 
-  const rows: PayrollRowView[] = useMemo(() => {
+  /** 纳入工资核算范围内的全部行（导出与范围一致） */
+  const scopedPayrollRows: PayrollRowView[] = useMemo(() => {
     if (scopedUnits.length === 0) return []
 
     const unitNameMap = new Map(salesUnits.map((u) => [u.id, u.name]))
@@ -642,8 +647,6 @@ export default function Payroll() {
     const monthSales = filterByMonth(salesRecords, yearMonth)
 
     for (const unit of scopedUnits) {
-      if (filterUnitId !== 'all' && filterUnitId !== unit.id) continue
-
       const people = personnel.filter(
         (p) =>
           isPersonnelOnDutyInMonth(p, yearMonth) &&
@@ -726,16 +729,23 @@ export default function Payroll() {
     })
   }, [
     scopedUnits,
-    filterUnitId,
     personnel,
     yearMonth,
     salesRecords,
     products,
     productPersonCommissions,
     teamMgmtContext,
+    teamMgmtCommissionRules,
+    performanceTargets,
+    unitProductSettlements,
     entries,
     salesUnits,
   ])
+
+  const rows: PayrollRowView[] = useMemo(() => {
+    if (!filterUnitId || filterUnitId === 'all') return scopedPayrollRows
+    return scopedPayrollRows.filter((r) => r.unitId === filterUnitId)
+  }, [scopedPayrollRows, filterUnitId])
 
   const totals = useMemo(() => {
     return rows.reduce(
@@ -768,164 +778,35 @@ export default function Payroll() {
   }, [rows])
 
   async function handleExportExcel() {
-    if (rows.length === 0) {
-      alert('当前没有可导出的工资行，请先选择单位并确认月份')
+    if (scopedPayrollRows.length === 0) {
+      alert('请先在「纳入工资核算单位」中选择单位并确认月份')
       return
     }
-    const header = [
-      '月份',
-      '单位',
-      '姓名',
-      '标准底薪',
-      '保密费',
-      '岗位补贴',
-      '标准绩效',
-      '业绩提成',
-      '实际出勤',
-      '缺勤时间',
-      '应出勤时间',
-      '考核分',
-      '实发底薪',
-      '实发绩效',
-      '其他加项',
-      '加项明细',
-      '其他减项',
-      '减项明细',
-      '应发合计',
-      '社保企业',
-      '社保个人',
-      '公积金企业',
-      '公积金个人',
-      '专项附加',
-      '本期个税',
-      '实发',
-    ]
-    const bonusCol = header.indexOf('其他加项') + 1
-    const deductCol = header.indexOf('其他减项') + 1
-    // Excel 会把 "2026-10" 自动当成日期显示成 Oct-26，导出用中文月份文本避免误识别
-    const monthLabel = /^\d{4}-\d{2}$/.test(yearMonth)
-      ? `${yearMonth.slice(0, 4)}年${Number(yearMonth.slice(5, 7))}月`
-      : yearMonth
-
-    const workbook = new ExcelJS.Workbook()
-    workbook.creator = 'yejiguanli'
-    const sheet = workbook.addWorksheet('工资表', {
-      views: [{ state: 'frozen', ySplit: 1 }],
-    })
-    sheet.addRow(header)
-    sheet.getRow(1).font = { bold: true }
-
-    rows.forEach((r) => {
-      const entry = entries[r.personnelId] || createEmptyPayrollEntry(r.personnelId)
-      const person = personnel.find((p) => p.id === r.personnelId)
-      const archive = person
-        ? getArchiveInsurance(person, yearMonth)
-        : {
-          socialEmployer: 0,
-          housingEmployer: 0,
-          socialPersonal: r.socialInsurancePersonal || 0,
-          housingPersonal: r.housingFundPersonal || 0,
-        }
-      const bonusNote =
-        entry.otherBonusNote
-        || (entry.otherBonusLines?.length
-          ? formatAdjLinesNote(entry.otherBonusLines)
-          : '')
-      const deductNote =
-        entry.otherDeductionNote
-        || (entry.otherDeductionLines?.length
-          ? formatAdjLinesNote(entry.otherDeductionLines)
-          : '')
-      const bonusComment = formatAdjLinesComment(
-        entry.otherBonusLines || [],
-        entry.otherBonusNote || '',
-      )
-      const deductComment = formatAdjLinesComment(
-        entry.otherDeductionLines || [],
-        entry.otherDeductionNote || '',
-      )
-
-      const row = sheet.addRow([
-        monthLabel,
-        r.unitName,
-        r.name,
-        Number(r.standardBaseSalary.toFixed(2)),
-        Number(r.paidConfidentialityFee.toFixed(2)),
-        Number(r.paidPositionAllowance.toFixed(2)),
-        Number(r.standardPerformance.toFixed(2)),
-        Number(r.commission.toFixed(2)),
-        Number(r.attendanceHours.toFixed(2)),
-        Number(r.absenceHours.toFixed(2)),
-        Number(r.expectedAttendanceHours.toFixed(2)),
-        Number(r.score.toFixed(1)),
-        Number(r.paidBaseSalary.toFixed(2)),
-        Number(r.paidPerformance.toFixed(2)),
-        Number((entry.otherBonus || 0).toFixed(2)),
-        bonusNote,
-        Number((entry.otherDeduction || 0).toFixed(2)),
-        deductNote,
-        Number(r.payable.toFixed(2)),
-        Number(archive.socialEmployer.toFixed(2)),
-        Number(archive.socialPersonal.toFixed(2)),
-        Number(archive.housingEmployer.toFixed(2)),
-        Number(archive.housingPersonal.toFixed(2)),
-        Number((r.specialAdditional || 0).toFixed(2)),
-        Number((r.incomeTax || 0).toFixed(2)),
-        Number((r.netPay || 0).toFixed(2)),
-      ])
-
-      if (bonusComment) {
-        row.getCell(bonusCol).note = bonusComment
-        // 有批注时浅底色，便于发现
-        row.getCell(bonusCol).fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: 'FFFFF7ED' },
-        }
-      }
-      if (deductComment) {
-        row.getCell(deductCol).note = deductComment
-        row.getCell(deductCol).fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: 'FFFEF2F2' },
-        }
-      }
-    })
-
-    sheet.columns.forEach((col) => {
-      let max = 10
-      col.eachCell?.({ includeEmpty: true }, (cell) => {
-        const len = String(cell.value ?? '').length
-        if (len > max) max = len
+    const exportOk = window.confirm(
+      `将导出 ${monthLabelForYm(yearMonth)}、纳入核算的 ${scopedUnits.length} 个单位、共 ${scopedPayrollRows.length} 人的工资表及核算明细（多 Sheet）。\n页面当前仅显示「${filterUnitName || '未选单位'}」，导出包含范围内全部单位。是否继续？`,
+    )
+    if (!exportOk) return
+    try {
+      await downloadPayrollWorkbook({
+        yearMonth,
+        scopeUnitNames: scopedUnits.map((u) => u.name),
+        rows: scopedPayrollRows,
+        entries,
+        personnel,
+        salesUnits,
+        salesRecords,
+        products,
+        productPersonCommissions,
+        teamMgmtCommissionRules,
+        performanceTargets,
+        unitProductSettlements,
+        teamMgmtContext,
+        getArchiveInsurance,
       })
-      col.width = Math.min(Math.max(max + 2, 10), 28)
-    })
-
-    // 文件名：单位名称 + 月份（与筛选/导出内容一致）
-    const unitNames = Array.from(new Set(rows.map((r) => r.unitName).filter(Boolean)))
-    const hit = scopedUnits.find((u) => u.id === filterUnitId)
-    let unitLabel = hit?.name || unitNames[0] || '工资表'
-    if (!hit && unitNames.length > 1) {
-      unitLabel = unitNames.length <= 3
-        ? unitNames.join('、')
-        : `${unitNames.slice(0, 2).join('、')}等${unitNames.length}家`
+    } catch (err) {
+      console.error(err)
+      alert(err instanceof Error ? err.message : '导出失败')
     }
-    const safeUnit = unitLabel
-      .replace(/[\\/:*?"<>|]/g, '_')
-      .replace(/\s+/g, '')
-      .slice(0, 60) || '工资表'
-
-    const buffer = await workbook.xlsx.writeBuffer()
-    const blob = new Blob([buffer], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${safeUnit}_${monthLabel}.xlsx`
-    a.click()
-    URL.revokeObjectURL(url)
   }
 
   return (
@@ -942,7 +823,7 @@ export default function Payroll() {
           <CardDescription>
             应发 = 提成 + 实发底薪 + 保密费 + 岗位补贴 + 实发绩效 + 其他加项 − 其他减项；月出勤系数{' '}
             21.75 × 7.5 = {PAYROLL_STANDARD_HOURS} 小时；未填缺勤按满勤（缺勤=0），未填考核分按 100 分。
-            加项/减项悬停金额可开「明细」录入多行；导出 Excel 时明细写入加项/减项单元格批注。
+            加项/减项悬停金额可开「明细」录入多行；导出 Excel 含工资表及核算明细多 Sheet（按「纳入工资核算单位」全部导出，非仅当前切换单位）。
             实发=应发−社保个人−公积金个人−本期个税。
             社保/公积金企业与个人固定取薪酬方案（可「去调整」/批量写入档案并记修改记录）；本期个税可改。人员关闭「内部员工」后只核算提成。
           </CardDescription>
@@ -1167,9 +1048,13 @@ export default function Payroll() {
                 上传本机数据
               </Button>
             )}
-            <Button type="button" onClick={() => void handleExportExcel()}>
+            <Button
+              type="button"
+              disabled={scopedPayrollRows.length === 0}
+              onClick={() => void handleExportExcel()}
+            >
               <FileSpreadsheet className="mr-1.5 h-3.5 w-3.5" />
-              导出 Excel
+              导出 Excel（含核算明细）
             </Button>
             {entryMode === 'insurance' && (
               <Button
