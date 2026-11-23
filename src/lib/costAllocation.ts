@@ -8,6 +8,14 @@ import type {
 } from '@/types'
 
 const RATIO_SUM_TOLERANCE = 0.05
+const FIXED_AMOUNT_SUM_TOLERANCE = 1
+
+export function fixedAmountRemainderToPrimary(
+  alloc?: Pick<PersonnelCostAllocation, 'mode' | 'remainderToPrimary'>,
+): boolean {
+  if (normalizeCostAllocationMode(alloc?.mode) !== 'fixedAmount') return false
+  return alloc?.remainderToPrimary !== false
+}
 
 /** 与 salary.isInternalEmployeePerson 同口径，避免循环依赖 */
 function isInternalEmployeeForAllocation(
@@ -132,8 +140,10 @@ export function parsePersonnelCostAllocation(
     : []
   const effectiveFrom = String(data.effectiveFrom || '').slice(0, 7)
   if (shares.length === 0 && monthOverrides.length === 0) return undefined
+  const remainderToPrimary = data.remainderToPrimary !== false
   return {
     mode,
+    remainderToPrimary: mode === 'fixedAmount' ? remainderToPrimary : undefined,
     effectiveFrom: /^\d{4}-\d{2}$/.test(effectiveFrom) ? effectiveFrom : undefined,
     shares: shares.length > 0 ? shares : undefined,
     monthOverrides: monthOverrides.length > 0 ? monthOverrides : undefined,
@@ -144,6 +154,7 @@ export type ResolvedCostAllocation = {
   mode: CostAllocationMode
   shares: CostAllocationShare[]
   primaryUnitId: string
+  remainderToPrimary: boolean
 }
 
 /**
@@ -168,10 +179,15 @@ export function resolveCostAllocation(
       const mode = normalizeCostAllocationMode(hit.mode ?? defaultMode)
       const shares = normalizeCostAllocationShares(hit.shares, mode)
       if (!isValidCostAllocationShares(shares, mode)) return null
+      const remainderToPrimary = fixedAmountRemainderToPrimary({
+        mode,
+        remainderToPrimary: cfg.remainderToPrimary,
+      })
       return {
         mode,
         shares,
         primaryUnitId: person.salesUnitId || '',
+        remainderToPrimary: mode === 'fixedAmount' && remainderToPrimary,
       }
     }
   }
@@ -186,10 +202,12 @@ export function resolveCostAllocation(
   ) {
     return null
   }
+  const remainderToPrimary = fixedAmountRemainderToPrimary(cfg)
   return {
     mode: defaultMode,
     shares,
     primaryUnitId: person.salesUnitId || '',
+    remainderToPrimary: defaultMode === 'fixedAmount' && remainderToPrimary,
   }
 }
 
@@ -216,33 +234,58 @@ export function hasCostAllocation(
 
 /**
  * 把固定金额配置换成各单位权重（合计 1）。
- * 只在已配置单位之间分配，保证摊完：
- * - 配置合计 ≠ 总成本：按配置额等比缩放（放大或缩小）到总成本
- * - 不再把差额静默塞给主单位
- * @param _primaryUnitId 保留参数兼容旧调用，不再用于剩余归属
+ * remainderToPrimary=true：各行按配置额，差额归归属单位。
+ * remainderToPrimary=false：配置合计 ≠ 总成本时按配置额等比缩放。
  */
 export function buildFixedAmountWeights(
   shares: CostAllocationShare[],
-  _primaryUnitId: string,
+  primaryUnitId: string,
   totalFixed: number,
+  remainderToPrimary = false,
 ): Map<string, number> {
   const weights = new Map<string, number>()
   const t = Math.max(0, Number(totalFixed) || 0)
   if (t <= 0 || shares.length === 0) return weights
 
+  const amounts = new Map<string, number>()
   let sumConfigured = 0
   for (const row of shares) {
-    sumConfigured += Number(row.amount) || 0
+    const amt = Number(row.amount) || 0
+    if (amt <= 0) continue
+    amounts.set(row.salesUnitId, (amounts.get(row.salesUnitId) || 0) + amt)
+    sumConfigured += amt
   }
   if (sumConfigured <= 0) return weights
 
-  const scale = t / sumConfigured
-  for (const row of shares) {
-    const amt = (Number(row.amount) || 0) * scale
-    weights.set(
-      row.salesUnitId,
-      (weights.get(row.salesUnitId) || 0) + amt / t,
-    )
+  const absByUnit = new Map<string, number>()
+
+  if (remainderToPrimary && primaryUnitId) {
+    if (sumConfigured > t + FIXED_AMOUNT_SUM_TOLERANCE) {
+      const scale = t / sumConfigured
+      for (const [unitId, amt] of amounts) {
+        absByUnit.set(unitId, amt * scale)
+      }
+    } else {
+      for (const [unitId, amt] of amounts) {
+        absByUnit.set(unitId, amt)
+      }
+      const remainder = Math.max(0, t - sumConfigured)
+      if (remainder > 0) {
+        absByUnit.set(
+          primaryUnitId,
+          (absByUnit.get(primaryUnitId) || 0) + remainder,
+        )
+      }
+    }
+  } else {
+    const scale = t / sumConfigured
+    for (const [unitId, amt] of amounts) {
+      absByUnit.set(unitId, amt * scale)
+    }
+  }
+
+  for (const [unitId, amt] of absByUnit) {
+    if (amt > 0) weights.set(unitId, amt / t)
   }
   return weights
 }
@@ -270,15 +313,20 @@ export function getCostAllocationRatioForUnit(
   }
   const t = Number(totalFixed)
   if (!Number.isFinite(t) || t < 0) {
-    // 尚不知总成本时：仅已配置单位占位，不把主单位算进来
     const row = resolved.shares.find((s) => s.salesUnitId === unitId)
     if (row && (Number(row.amount) || 0) > 0) return 0.000001
+    if (
+      resolved.remainderToPrimary
+      && unitId === resolved.primaryUnitId
+      && resolved.shares.some((s) => (Number(s.amount) || 0) > 0)
+    ) return 0.000001
     return 0
   }
   const weights = buildFixedAmountWeights(
     resolved.shares,
     resolved.primaryUnitId,
     t,
+    resolved.remainderToPrimary,
   )
   return weights.get(unitId) ?? 0
 }
@@ -292,7 +340,41 @@ export function getCostAllocationUnitIds(
 ): string[] {
   const resolved = resolveCostAllocation(person, yearMonth)
   if (!resolved) return []
-  return Array.from(new Set(resolved.shares.map((s) => s.salesUnitId)))
+  const ids = new Set(resolved.shares.map((s) => s.salesUnitId))
+  if (
+    resolved.mode === 'fixedAmount'
+    && resolved.remainderToPrimary
+    && resolved.primaryUnitId
+  ) {
+    ids.add(resolved.primaryUnitId)
+  }
+  return Array.from(ids)
+}
+
+/** 固定金额 + 余额归主单位时，配置行金额合计（元） */
+export function sumFixedAmountShares(shares: CostAllocationShare[]): number {
+  return shares.reduce((s, r) => s + (Number(r.amount) || 0), 0)
+}
+
+export function validateFixedAmountSharesAgainstTotal(
+  shares: CostAllocationShare[],
+  totalFixed: number,
+  remainderToPrimary: boolean,
+): string {
+  const estimate = Number(totalFixed) || 0
+  if (estimate <= 0.5) return ''
+  const amountSum = sumFixedAmountShares(shares)
+  if (remainderToPrimary) {
+    if (amountSum > estimate + FIXED_AMOUNT_SUM_TOLERANCE) {
+      return `固定金额已配置 ¥${amountSum.toFixed(0)} 超过人员固定成本 ¥${estimate.toFixed(0)}`
+    }
+    return ''
+  }
+  if (Math.abs(amountSum - estimate) > FIXED_AMOUNT_SUM_TOLERANCE) {
+    return `固定金额合计 ¥${amountSum.toFixed(0)} 须等于人员固定成本 ¥${estimate.toFixed(0)}`
+      + '（或开启「剩余由归属单位承担」只填分摊单位金额）'
+  }
+  return ''
 }
 
 /** 固定成本合计（用于固定金额权重） */

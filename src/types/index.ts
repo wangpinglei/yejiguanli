@@ -137,6 +137,11 @@ export interface PersonnelCostAllocation {
   /** 默认模式，缺省 ratio */
   mode?: CostAllocationMode;
   /**
+   * 固定金额：未配置满额的差额由归属单位（salesUnitId）承担。
+   * 缺省 true；false 时按已配置额等比缩放到总成本（旧行为）。
+   */
+  remainderToPrimary?: boolean;
+  /**
    * 默认分摊生效起始月（YYYY-MM，含当月）。
    * 该月之前仍按调岗天数；空=不限（兼容旧数据）。
    */
