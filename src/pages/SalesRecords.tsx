@@ -2310,6 +2310,9 @@ export default function SalesRecords() {
                             {costInfo.isManual && (
                               <div className="text-[10px] font-normal text-amber-700">手改</div>
                             )}
+                            {!costInfo.isManual && costInfo.fromActivityRule && (
+                              <div className="text-[10px] font-normal text-violet-700">活动规则</div>
+                            )}
                           </TableCell>
                           <TableCell className="px-3 py-3 text-right font-medium text-sky-800 whitespace-nowrap">
                             {formatCurrency(costInfo.netAmount)}

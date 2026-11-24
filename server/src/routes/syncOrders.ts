@@ -238,7 +238,7 @@ function upsertSyncedOrder(order: SyncOrderInput): {
   const existing = db
     .prepare(
       `SELECT id, collaborators, sales_unit_id, unit_override,
-              activity_name, activity_override
+              activity_name, activity_override, cost_deduction_override
        FROM sales_records WHERE external_order_id = ? LIMIT 1`,
     )
     .get(externalOrderId) as {
@@ -248,6 +248,7 @@ function upsertSyncedOrder(order: SyncOrderInput): {
       unit_override?: number
       activity_name?: string
       activity_override?: number
+      cost_deduction_override?: number | null
     } | undefined
 
   // 同步未带分业绩时，保留库里已有的手工分业绩，避免整单被算回主责单位
@@ -273,13 +274,23 @@ function upsertSyncedOrder(order: SyncOrderInput): {
   }
 
   if (existing?.id) {
+    const costDeductionOverride =
+      existing.cost_deduction_override != null
+        ? Number(existing.cost_deduction_override)
+        : resolveCostOverrideForNewSale({
+          db,
+          activityName: activityToSave,
+          orderAmount: Number(order.totalAmount) || 0,
+          saleDate: order.saleDate,
+          explicitOverride: null,
+        })
     db.prepare(`
       UPDATE sales_records SET
         sales_unit_id=?, personnel_id=?, product_id=?, quantity=?, unit_price=?,
         total_amount=?, sale_date=?, remark=?,
         synced=1, customer_name=?, sales_unit_name=?, sales_person_name=?,
         product_name=?, order_number=?, order_amount=?, order_type=?, activity_name=?,
-        collaborators=?
+        collaborators=?, cost_deduction_override=?
       WHERE id=?
     `).run(
       unitIdToSave,
@@ -299,6 +310,7 @@ function upsertSyncedOrder(order: SyncOrderInput): {
       order.orderType,
       activityToSave,
       collaboratorsToSave,
+      costDeductionOverride,
       existing.id,
     )
     return { action: 'updated', id: existing.id }

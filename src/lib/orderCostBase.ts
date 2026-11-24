@@ -1,5 +1,11 @@
 /** 销售订单成本扣除 → 结算/计佣共用基数 */
 
+import {
+  calcActivityCostDeduction,
+  findActivityCostRule,
+  isSaleDateInActivityRule,
+  type ActivityCostRule,
+} from '@/lib/activityCost'
 import { roundMoney } from '@/lib/format'
 import { getPersonShareAmount } from '@/lib/saleCollaborators'
 import type { Product, SalesRecord } from '@/types'
@@ -7,14 +13,58 @@ import type { Product, SalesRecord } from '@/types'
 export type OrderCostResolveResult = {
   /** 实际采用的成本扣除 */
   cost: number
-  /** 产品配置算出的系统成本 */
+  /** 自动口径算出的系统成本（产品或活动规则） */
   systemCost: number
   /** 是否手工覆盖 */
   isManual: boolean
+  /** 自动成本是否来自活动规则（非产品） */
+  fromActivityRule?: boolean
   /** 订单全额 */
   orderAmount: number
   /** 扣成本后基数（全单） */
   netAmount: number
+}
+
+export type OrderCostResolveOptions = {
+  activityRules?: ActivityCostRule[]
+}
+
+/** 全局活动规则（DataContext 刷新时注入，供工资/结算等统一读口径） */
+let sharedActivityCostRules: ActivityCostRule[] | undefined
+
+export function setSharedActivityCostRules(
+  rules: ActivityCostRule[] | undefined,
+): void {
+  sharedActivityCostRules = rules
+}
+
+function resolveActivityRules(
+  options?: OrderCostResolveOptions,
+): ActivityCostRule[] | undefined {
+  if (options?.activityRules?.length) return options.activityRules
+  return sharedActivityCostRules
+}
+
+/** 无手工覆盖时：活动规则（成交日在有效期内）优先，否则产品成本 */
+export function calcAutoOrderCost(
+  sale: Pick<SalesRecord, 'totalAmount' | 'quantity'> & {
+    unitPrice?: number
+    activityName?: string
+    saleDate?: string
+  },
+  product?: Product | null,
+  options?: OrderCostResolveOptions,
+): { cost: number; fromActivityRule: boolean } {
+  const rules = resolveActivityRules(options)
+  const productCost = calcSystemOrderCost(sale, product)
+  const rule = findActivityCostRule(rules, sale.activityName)
+  if (rule && isSaleDateInActivityRule(sale.saleDate, rule)) {
+    const act = calcActivityCostDeduction(rule, Number(sale.totalAmount) || 0)
+    if (act != null) {
+      return { cost: act, fromActivityRule: true }
+    }
+  }
+  return { cost: productCost, fromActivityRule: false }
 }
 
 /** 按产品配置估算本单系统成本 */
@@ -39,18 +89,22 @@ export function calcSystemOrderCost(
 /**
  * 解析本单成本扣除。
  * - costDeductionOverride 为 number（含 0）→ 手工覆盖
- * - 否则 → 产品系统成本
+ * - 否则 → 活动规则（有效期内）或产品系统成本
  */
 export function resolveOrderCostDeduction(
   sale: Pick<SalesRecord, 'totalAmount' | 'quantity' | 'costDeductionOverride'> & {
     unitPrice?: number
+    activityName?: string
+    saleDate?: string
   },
   product?: Product | null,
+  options?: OrderCostResolveOptions,
 ): OrderCostResolveResult {
   const orderAmount = Number(sale.totalAmount) || 0
-  const systemCost = calcSystemOrderCost(sale, product)
   const hasOverride =
     sale.costDeductionOverride !== undefined && sale.costDeductionOverride !== null
+  const auto = calcAutoOrderCost(sale, product, options)
+  const systemCost = auto.cost
   const cost = hasOverride
     ? Math.max(0, Number(sale.costDeductionOverride) || 0)
     : systemCost
@@ -59,6 +113,7 @@ export function resolveOrderCostDeduction(
     cost: roundMoney(capped),
     systemCost: roundMoney(systemCost),
     isManual: hasOverride,
+    fromActivityRule: !hasOverride && auto.fromActivityRule,
     orderAmount: roundMoney(orderAmount),
     netAmount: roundMoney(Math.max(0, orderAmount - capped)),
   }
@@ -67,10 +122,13 @@ export function resolveOrderCostDeduction(
 export function getSaleNetAmount(
   sale: Pick<SalesRecord, 'totalAmount' | 'quantity' | 'costDeductionOverride'> & {
     unitPrice?: number
+    activityName?: string
+    saleDate?: string
   },
   product?: Product | null,
+  options?: OrderCostResolveOptions,
 ): number {
-  return resolveOrderCostDeduction(sale, product).netAmount
+  return resolveOrderCostDeduction(sale, product, options).netAmount
 }
 
 /** 某人在该单上的计佣/业绩份额（扣成本后按占比分摊） */

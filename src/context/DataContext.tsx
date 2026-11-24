@@ -46,6 +46,9 @@ import {
   teamMgmtCommissionRulesApi,
 } from "@/lib/api";
 import { EMPTY_SALARY } from "@/lib/salary";
+import { setSharedActivityCostRules } from "@/lib/orderCostBase";
+import type { ActivityCostRule } from "@/lib/activityCost";
+import { activityCostRulesApi } from "@/lib/api";
 import {
   buildCostCreateDetail,
   buildCostDeleteDetail,
@@ -99,6 +102,7 @@ interface DataContextType {
   unitProductSettlements: UnitProductSettlement[];
   productPersonCommissions: ProductPersonCommission[];
   teamMgmtCommissionRules: TeamMgmtCommissionRule[];
+  activityCostRules: ActivityCostRule[];
   costChangeLogs: CostChangeLog[];
   notifications: AppNotification[];
   monthlyAdjustments: MonthlyAdjustment[];
@@ -255,6 +259,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [unitProductSettlements, setUnitProductSettlements] = useState<UnitProductSettlement[]>([]);
   const [productPersonCommissions, setProductPersonCommissions] = useState<ProductPersonCommission[]>([]);
   const [teamMgmtCommissionRules, setTeamMgmtCommissionRules] = useState<TeamMgmtCommissionRule[]>([]);
+  const [activityCostRules, setActivityCostRules] = useState<ActivityCostRule[]>([]);
   const [costChangeLogs, setCostChangeLogs] = useState<CostChangeLog[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [monthlyAdjustments, setMonthlyAdjustments] = useState<MonthlyAdjustment[]>([]);
@@ -295,6 +300,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         positionGroupLabelsApi.list(),
         teamMgmtCommissionRulesApi.list(),
         costSettlementsApi.list(),
+        activityCostRulesApi.list(),
       ]);
 
       function value<T>(i: number, fallback: T): T {
@@ -321,6 +327,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setPositionGroupLabels(labels.length ? labels : []);
       setTeamMgmtCommissionRules(value(14, []));
       setCostSettlements(value(15, []));
+      const activityRes = value(16, { rules: [] as ActivityCostRule[] });
+      const rules = Array.isArray(activityRes?.rules) ? activityRes.rules : [];
+      setActivityCostRules(rules);
+      setSharedActivityCostRules(rules);
     } catch (e) {
       console.error("[DataContext] refreshAll failed", e);
     } finally {
@@ -351,6 +361,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setPerformanceTargets([]);
       setPositionGroupLabels([]);
       setTeamMgmtCommissionRules([]);
+      setActivityCostRules([]);
+      setSharedActivityCostRules(undefined);
       setLoading(false);
       return;
     }
@@ -894,6 +906,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     salesUnits, personnel, products, salesRecords, allSalesRecords, syncedOrders, syncedLoading,
     costRecords, incomeRecords, revenueSettlements, costSettlements, unitProductSettlements, productPersonCommissions,
     teamMgmtCommissionRules,
+    activityCostRules,
     costChangeLogs, notifications, monthlyAdjustments, loading,
     addSalesUnit, updateSalesUnit, deleteSalesUnit,
     addPersonnel, updatePersonnel, deletePersonnel, mergePersonnel, enablePersonnelDistribution, transferPersonnel, adjustPersonnelPay, ensurePersonnelByName,
