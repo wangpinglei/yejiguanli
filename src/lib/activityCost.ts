@@ -1,5 +1,7 @@
 /** 活动默认成本扣除：配置规则 → 新建单时固化金额 */
 
+import { normalizeSaleDate } from '@/lib/salesDuplicate'
+
 export type ActivityCostType = 'fixed' | 'percentage'
 
 export type ActivityCostRule = {
@@ -23,8 +25,9 @@ export function isSaleDateInActivityRule(
   saleDate: string | null | undefined,
   rule: Pick<ActivityCostRule, 'startDate' | 'endDate'>,
 ): boolean {
-  const day = normalizeRuleDate(saleDate)
-  if (!day) return false
+  const day =
+    normalizeSaleDate(saleDate ?? undefined) || normalizeRuleDate(saleDate)
+  if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return false
   const start = normalizeRuleDate(rule.startDate)
   const end = normalizeRuleDate(rule.endDate)
   if (start && day < start) return false
@@ -34,6 +37,16 @@ export function isSaleDateInActivityRule(
 
 export function normalizeActivityName(name: string | null | undefined): string {
   return String(name || '').trim()
+}
+
+/** 活动名比对：去首尾空白、忽略大小写与中间空格、统一括号 */
+export function activityNameMatchKey(name: string | null | undefined): string {
+  return String(name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s\u3000]+/g, '')
+    .replace(/（/g, '(')
+    .replace(/）/g, ')')
 }
 
 export function isBlankActivity(name: string | null | undefined): boolean {
@@ -74,6 +87,24 @@ export function findActivityCostRule(
   activityName: string | null | undefined,
 ): ActivityCostRule | undefined {
   if (isBlankActivity(activityName) || !rules?.length) return undefined
-  const key = normalizeActivityName(activityName)
-  return rules.find((r) => normalizeActivityName(r.activityName) === key)
+  const key = activityNameMatchKey(activityName)
+  if (!key) return undefined
+  return rules.find((r) => activityNameMatchKey(r.activityName) === key)
+}
+
+/**
+ * 为单笔销售匹配活动成本规则：活动名（宽松）+ 成交日；
+ * 名称未命中但该成交日仅有一条有效规则时兜底（同期唯一补贴）。
+ */
+export function findActivityCostRuleForSale(
+  rules: ActivityCostRule[] | undefined,
+  activityName: string | null | undefined,
+  saleDate: string | null | undefined,
+): ActivityCostRule | undefined {
+  if (isBlankActivity(activityName) || !rules?.length) return undefined
+  const exact = findActivityCostRule(rules, activityName)
+  if (exact && isSaleDateInActivityRule(saleDate, exact)) return exact
+  const dated = rules.filter((r) => isSaleDateInActivityRule(saleDate, r))
+  if (dated.length === 1) return dated[0]
+  return undefined
 }

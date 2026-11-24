@@ -2,8 +2,7 @@
 
 import {
   calcActivityCostDeduction,
-  findActivityCostRule,
-  isSaleDateInActivityRule,
+  findActivityCostRuleForSale,
   type ActivityCostRule,
 } from '@/lib/activityCost'
 import { roundMoney } from '@/lib/format'
@@ -57,8 +56,8 @@ export function calcAutoOrderCost(
 ): { cost: number; fromActivityRule: boolean } {
   const rules = resolveActivityRules(options)
   const productCost = calcSystemOrderCost(sale, product)
-  const rule = findActivityCostRule(rules, sale.activityName)
-  if (rule && isSaleDateInActivityRule(sale.saleDate, rule)) {
+  const rule = findActivityCostRuleForSale(rules, sale.activityName, sale.saleDate)
+  if (rule) {
     const act = calcActivityCostDeduction(rule, Number(sale.totalAmount) || 0)
     if (act != null) {
       return { cost: act, fromActivityRule: true }

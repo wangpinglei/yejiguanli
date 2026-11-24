@@ -1,5 +1,7 @@
 /** 活动默认成本扣除（服务端：新建/新同步时固化） */
 
+import { normalizeSaleDate } from "./saleDate";
+
 export type ActivityCostType = "fixed" | "percentage";
 
 export type ActivityCostRuleRow = {
@@ -12,6 +14,15 @@ export type ActivityCostRuleRow = {
 
 export function normalizeActivityName(name: string | null | undefined): string {
   return String(name || "").trim();
+}
+
+export function activityNameMatchKey(name: string | null | undefined): string {
+  return String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s\u3000]+/g, "")
+    .replace(/（/g, "(")
+    .replace(/）/g, ")");
 }
 
 export function isBlankActivity(name: string | null | undefined): boolean {
@@ -37,8 +48,9 @@ export function isSaleDateInActivityRule(
   saleDate: string | null | undefined,
   rule: Pick<ActivityCostRuleRow, "startDate" | "endDate">,
 ): boolean {
-  const day = normalizeRuleDate(saleDate);
-  if (!day) return false;
+  const day =
+    normalizeSaleDate(saleDate ?? undefined) || normalizeRuleDate(saleDate);
+  if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
   const start = normalizeRuleDate(rule.startDate);
   const end = normalizeRuleDate(rule.endDate);
   if (start && day < start) return false;
@@ -65,6 +77,37 @@ export function calcActivityCostDeduction(
   return roundMoney(Math.min(amount, value));
 }
 
+type ActivityCostRuleDbRow = {
+  activity_name?: string;
+  cost_type?: string;
+  cost_value?: number;
+  start_date?: string;
+  end_date?: string;
+};
+
+function rowToActivityCostRuleRow(row: ActivityCostRuleDbRow): ActivityCostRuleRow {
+  const costType = row.cost_type === "percentage" ? "percentage" : "fixed";
+  return {
+    activityName: String(row.activity_name || ""),
+    costType,
+    costValue: Number(row.cost_value) || 0,
+    startDate: normalizeRuleDate(row.start_date),
+    endDate: normalizeRuleDate(row.end_date),
+  };
+}
+
+function listActivityCostRulesFromDb(db: {
+  prepare: (sql: string) => { all?: () => unknown[] };
+}): ActivityCostRuleRow[] {
+  const stmt = db.prepare(
+    `SELECT activity_name, cost_type, cost_value, start_date, end_date
+       FROM activity_cost_rules`,
+  );
+  if (!stmt.all) return [];
+  const rows = stmt.all() as ActivityCostRuleDbRow[];
+  return rows.filter((r) => r.activity_name).map(rowToActivityCostRuleRow);
+}
+
 /** 从 DB 取活动规则；无则 null */
 export function getActivityCostRuleFromDb(
   db: { prepare: (sql: string) => { get: (...args: unknown[]) => unknown } },
@@ -77,24 +120,30 @@ export function getActivityCostRuleFromDb(
       `SELECT activity_name, cost_type, cost_value, start_date, end_date
        FROM activity_cost_rules WHERE activity_name = ? LIMIT 1`,
     )
-    .get(name) as
-    | {
-        activity_name?: string;
-        cost_type?: string;
-        cost_value?: number;
-        start_date?: string;
-        end_date?: string;
-      }
-    | undefined;
+    .get(name) as ActivityCostRuleDbRow | undefined;
   if (!row?.activity_name) return null;
-  const costType = row.cost_type === "percentage" ? "percentage" : "fixed";
-  return {
-    activityName: String(row.activity_name),
-    costType,
-    costValue: Number(row.cost_value) || 0,
-    startDate: normalizeRuleDate(row.start_date),
-    endDate: normalizeRuleDate(row.end_date),
-  };
+  return rowToActivityCostRuleRow(row);
+}
+
+/** 同步/新建：活动名 + 成交日匹配（含宽松比对与同期唯一规则兜底） */
+export function getActivityCostRuleForSale(
+  db: {
+    prepare: (
+      sql: string,
+    ) => { get: (...args: unknown[]) => unknown; all?: () => unknown[] };
+  },
+  activityName: string | null | undefined,
+  saleDate: string | null | undefined,
+): ActivityCostRuleRow | null {
+  if (isBlankActivity(activityName)) return null;
+  const rules = listActivityCostRulesFromDb(db);
+  if (!rules.length) return null;
+  const key = activityNameMatchKey(activityName);
+  const exact = rules.find((r) => activityNameMatchKey(r.activityName) === key);
+  if (exact && isSaleDateInActivityRule(saleDate, exact)) return exact;
+  const dated = rules.filter((r) => isSaleDateInActivityRule(saleDate, r));
+  if (dated.length === 1) return dated[0];
+  return null;
 }
 
 /**
@@ -112,8 +161,11 @@ export function resolveCostOverrideForNewSale(options: {
     const n = Number(options.explicitOverride);
     return Number.isFinite(n) ? Math.max(0, n) : null;
   }
-  const rule = getActivityCostRuleFromDb(options.db, options.activityName);
+  const rule = getActivityCostRuleForSale(
+    options.db,
+    options.activityName,
+    options.saleDate,
+  );
   if (!rule) return null;
-  if (!isSaleDateInActivityRule(options.saleDate, rule)) return null;
   return calcActivityCostDeduction(rule, options.orderAmount);
 }
