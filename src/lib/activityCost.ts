@@ -48,6 +48,8 @@ function roundMoney(n: number): number {
 /**
  * 按活动规则计算本单应扣成本（元）。
  * 无规则 / 无活动 → null（调用方继续走产品自动）。
+ *
+ * 实收不足以承担固定扣除额，或按比例会扣光实收时 → null（本单不直接扣，常见于定金）。
  */
 export function calcActivityCostDeduction(
   rule: Pick<ActivityCostRule, 'costType' | 'costValue'> | null | undefined,
@@ -55,11 +57,15 @@ export function calcActivityCostDeduction(
 ): number | null {
   if (!rule) return null
   const amount = Math.max(0, Number(orderAmount) || 0)
+  if (amount <= 0) return null
   const value = Number(rule.costValue)
   if (!Number.isFinite(value) || value < 0) return null
   if (rule.costType === 'percentage') {
-    return roundMoney(Math.min(amount, amount * (value / 100)))
+    const deducted = roundMoney(Math.min(amount, amount * (value / 100)))
+    if (deducted >= amount) return null
+    return deducted
   }
+  if (amount <= value) return null
   return roundMoney(Math.min(amount, value))
 }
 

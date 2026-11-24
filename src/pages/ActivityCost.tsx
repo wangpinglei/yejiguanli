@@ -373,7 +373,7 @@ export default function ActivityCost() {
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
             <p className="text-xs text-muted-foreground">
-              仅成交日落在起止日内的新单自动套用；过期后可在销售记录本单手工扣除。已有订单不回刷。
+              仅成交日落在起止日内自动套用。实收 ≤ 固定扣除额、或比例会扣光实收时本单不扣（如定金）。过期或特殊单可在销售记录手工扣。
             </p>
           </div>
           <DialogFooter>

@@ -46,17 +46,22 @@ export function isSaleDateInActivityRule(
   return true;
 }
 
+/** 实收不足固定额或按比例扣光时返回 null（定金等小单本单不扣）。 */
 export function calcActivityCostDeduction(
   rule: Pick<ActivityCostRuleRow, "costType" | "costValue"> | null | undefined,
   orderAmount: number,
 ): number | null {
   if (!rule) return null;
   const amount = Math.max(0, Number(orderAmount) || 0);
+  if (amount <= 0) return null;
   const value = Number(rule.costValue);
   if (!Number.isFinite(value) || value < 0) return null;
   if (rule.costType === "percentage") {
-    return roundMoney(Math.min(amount, amount * (value / 100)));
+    const deducted = roundMoney(Math.min(amount, amount * (value / 100)));
+    if (deducted >= amount) return null;
+    return deducted;
   }
+  if (amount <= value) return null;
   return roundMoney(Math.min(amount, value));
 }
 
