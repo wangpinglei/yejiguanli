@@ -2058,7 +2058,7 @@ export default function SalesRecords() {
               title={
                 filterDuplicate === "similar"
                   ? "点击取消疑似相似筛选"
-                  : "客户/产品/实收/销售/成交日相同，单位或订单类型可能不同"
+                  : "一年内同客户、同产品、同实收（成交日可不同），请人工确认是否重复"
               }
             >
               疑似相似 {similarCountInFilters} 笔
@@ -2072,7 +2072,7 @@ export default function SalesRecords() {
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/60 px-4 py-2.5">
           <Badge className="bg-amber-100 text-amber-800">疑似相似筛选中</Badge>
           <span className="text-sm text-amber-900">
-            当前 {filteredRecords.length} 笔：客户/产品/实收/销售/成交日相同，单位或订单类型可能不同。
+            当前 {filteredRecords.length} 笔：一年内同客户、同产品、同实收，成交日或销售单位可能不同。
             若确为不同订单，可点行内「确认不重复」。
           </span>
         </div>

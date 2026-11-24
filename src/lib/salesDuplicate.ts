@@ -116,13 +116,14 @@ export function buildSalesDuplicateFingerprint(r: SaleDuplicateFields): string {
   ].join('|')
 }
 
-/** 疑似相似：客户+产品+实收+销售+成交日；单位/订单类型可不同 */
+/** 一年内同客同品同实收视为疑似重复（成交日可不同；与销售单位/销售员无关） */
+export const SALES_SIMILARITY_MAX_DAYS = 365
+
+/** 疑似相似指纹：客户 + 产品 + 实收金额 */
 export type SaleSimilarityFields = {
   customerName?: string
   productName?: string
   totalAmount?: number
-  personName?: string
-  saleDate?: string
 }
 
 export function buildSalesSimilarityFingerprint(r: SaleSimilarityFields): string {
@@ -130,9 +131,26 @@ export function buildSalesSimilarityFingerprint(r: SaleSimilarityFields): string
     normalizeSaleText(r.customerName),
     normalizeSaleText(r.productName),
     moneyKey(r.totalAmount),
-    normalizeSaleText(r.personName),
-    normalizeSaleDate(r.saleDate),
   ].join('|')
+}
+
+function saleDateToUtcMs(value?: string): number | null {
+  const ymd = normalizeSaleDate(value)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return null
+  const [y, m, d] = ymd.split('-').map(Number)
+  return Date.UTC(y, m - 1, d)
+}
+
+/** 成交日相距不超过 maxDays（缺日期时仍视为同组，便于人工确认） */
+export function saleDatesWithinSimilarityWindow(
+  a?: string,
+  b?: string,
+  maxDays: number = SALES_SIMILARITY_MAX_DAYS,
+): boolean {
+  const ma = saleDateToUtcMs(a)
+  const mb = saleDateToUtcMs(b)
+  if (ma == null || mb == null) return true
+  return Math.abs(ma - mb) / 86400000 <= maxDays
 }
 
 export function resolveSaleProductName(
@@ -190,13 +208,12 @@ export function getSalesRecordSimilarityKey(
     customerName: s.customerName,
     productName: resolveSaleProductName(s, maps.productNameById),
     totalAmount: s.totalAmount,
-    personName: resolveSalePersonName(s, maps.personNameById),
-    saleDate: s.saleDate,
   })
 }
 
 /**
- * 收集疑似相似记录 id：同 similarity key 出现 >1，且排除已是确定重复、已确认不重复的。
+ * 收集疑似相似记录 id：同客+同品+同实收，且成交日在一年内任意两笔配对；
+ * 排除确定重复、已「确认不重复」的指纹。
  */
 export function collectSimilarRecordIds(
   records: SalesRecord[],
@@ -204,22 +221,43 @@ export function collectSimilarRecordIds(
   options?: {
     duplicateIdSet?: Set<string>
     dismissedFingerprints?: Set<string>
+    maxDaysApart?: number
   },
 ): Set<string> {
   const duplicateIdSet = options?.duplicateIdSet || new Set<string>()
   const dismissed = options?.dismissedFingerprints || new Set<string>()
-  const keyCounts = new Map<string, number>()
-  const idToKey = new Map<string, string>()
+  const maxDays = options?.maxDaysApart ?? SALES_SIMILARITY_MAX_DAYS
+  const byKey = new Map<string, SalesRecord[]>()
   for (const s of records) {
     if (duplicateIdSet.has(s.id)) continue
+    const customer = normalizeSaleText(s.customerName)
+    const product = normalizeSaleText(
+      resolveSaleProductName(s, maps.productNameById),
+    )
+    if (!customer || !product) continue
     const key = getSalesRecordSimilarityKey(s, maps)
-    if (!key || key === '||||' || dismissed.has(key)) continue
-    idToKey.set(s.id, key)
-    keyCounts.set(key, (keyCounts.get(key) || 0) + 1)
+    if (!key || dismissed.has(key)) continue
+    const list = byKey.get(key) || []
+    list.push(s)
+    byKey.set(key, list)
   }
   const set = new Set<string>()
-  idToKey.forEach((key, id) => {
-    if ((keyCounts.get(key) || 0) > 1) set.add(id)
+  byKey.forEach((group) => {
+    if (group.length < 2) return
+    for (let i = 0; i < group.length; i++) {
+      for (let j = i + 1; j < group.length; j++) {
+        if (
+          saleDatesWithinSimilarityWindow(
+            group[i].saleDate,
+            group[j].saleDate,
+            maxDays,
+          )
+        ) {
+          set.add(group[i].id)
+          set.add(group[j].id)
+        }
+      }
+    }
   })
   return set
 }

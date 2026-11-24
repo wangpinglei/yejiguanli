@@ -7,6 +7,7 @@ import {
   getSalesRecordFingerprint,
   getSalesRecordSimilarityKey,
   normalizeSaleDate,
+  saleDatesWithinSimilarityWindow,
 } from './salesDuplicate'
 import type { SalesRecord } from './../types'
 
@@ -53,15 +54,11 @@ const maps = buildSaleNameMaps(
     customerName: '客户甲',
     productName: '产品A',
     totalAmount: 1000,
-    personName: '熊约燕',
-    saleDate: '2026-10-01',
   })
   const b = buildSalesSimilarityFingerprint({
     customerName: '客户甲',
     productName: '产品A',
     totalAmount: 1000,
-    personName: '熊约燕',
-    saleDate: '2026-10-01',
   })
   assertEqual(a, b)
 }
@@ -72,6 +69,7 @@ const maps = buildSaleNameMaps(
     id: '2',
     salesUnitId: 'u2',
     orderType: '续费',
+    saleDate: '2026-03-15',
     synced: true,
   })
   assertEqual(
@@ -85,6 +83,29 @@ const maps = buildSaleNameMaps(
   const similar = collectSimilarRecordIds([shenzhen, hainan], maps)
   assertEqual(similar.has('1'), true)
   assertEqual(similar.has('2'), true)
+}
+
+{
+  const a = baseRecord({ id: '1', saleDate: '2026-01-10' })
+  const b = baseRecord({
+    id: '2',
+    saleDate: '2026-08-20',
+    personnelId: 'p2',
+    synced: true,
+  })
+  const similar = collectSimilarRecordIds([a, b], maps)
+  assertEqual(similar.size, 2, '同客同品同额、成交日不同但在一年内应疑似')
+}
+
+{
+  const a = baseRecord({ id: '1', saleDate: '2024-01-01' })
+  const b = baseRecord({ id: '2', saleDate: '2026-06-01' })
+  assertEqual(
+    saleDatesWithinSimilarityWindow(a.saleDate, b.saleDate),
+    false,
+  )
+  const similar = collectSimilarRecordIds([a, b], maps)
+  assertEqual(similar.size, 0, '成交相隔超过一年不标疑似')
 }
 
 {
