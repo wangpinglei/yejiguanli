@@ -91,7 +91,7 @@ export function calcSystemOrderCost(
  * - 否则 → 活动规则（有效期内）或产品系统成本
  */
 export function resolveOrderCostDeduction(
-  sale: Pick<SalesRecord, 'totalAmount' | 'quantity' | 'costDeductionOverride'> & {
+  sale: Pick<SalesRecord, 'totalAmount' | 'quantity' | 'costDeductionOverride' | 'synced'> & {
     unitPrice?: number
     activityName?: string
     saleDate?: string
@@ -100,13 +100,22 @@ export function resolveOrderCostDeduction(
   options?: OrderCostResolveOptions,
 ): OrderCostResolveResult {
   const orderAmount = Number(sale.totalAmount) || 0
-  const hasOverride =
-    sale.costDeductionOverride !== undefined && sale.costDeductionOverride !== null
   const auto = calcAutoOrderCost(sale, product, options)
   const systemCost = auto.cost
-  const cost = hasOverride
-    ? Math.max(0, Number(sale.costDeductionOverride) || 0)
-    : systemCost
+  const rawOverride = sale.costDeductionOverride
+  const hasStoredOverride =
+    rawOverride !== undefined && rawOverride !== null
+  const overrideNum = hasStoredOverride ? Math.max(0, Number(rawOverride) || 0) : 0
+  let hasOverride = false
+  if (hasStoredOverride && overrideNum > 0) {
+    hasOverride = true
+  } else if (hasStoredOverride && overrideNum === 0) {
+    // 生态圈单常见：库里误存 0，会挡住活动规则；若本应命中规则则仍走自动
+    const legacySyncedZero =
+      sale.synced && auto.fromActivityRule && systemCost > 0
+    hasOverride = !legacySyncedZero
+  }
+  const cost = hasOverride ? overrideNum : systemCost
   const capped = Math.min(cost, Math.max(0, orderAmount))
   return {
     cost: roundMoney(capped),
