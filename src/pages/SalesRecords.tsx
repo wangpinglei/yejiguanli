@@ -38,7 +38,9 @@ import {
   getSalesRecordFingerprint,
   getSalesRecordSimilarityKey,
   normalizeSaleDate,
+  sortAndGroupSaleRecords,
   type SaleNameMaps,
+  type SaleRecordGroupMeta,
 } from "@/lib/salesDuplicate";
 import { salesRecordsApi } from "@/lib/api";
 import {
@@ -757,24 +759,33 @@ export default function SalesRecords() {
     [baseFilteredRecords, similarRecordIdSet],
   );
 
-  const filteredRecords = useMemo(() => {
+  const { filteredRecords, recordGroupMeta } = useMemo(() => {
+    const emptyMeta = null as Map<string, SaleRecordGroupMeta> | null
     if (filterDuplicate === "duplicate") {
-      return baseFilteredRecords.filter((s) => duplicateRecordIdSet.has(s.id));
+      const list = baseFilteredRecords.filter((s) => duplicateRecordIdSet.has(s.id));
+      const { sorted, meta } = sortAndGroupSaleRecords(list, saleNameMaps, "duplicate");
+      return { filteredRecords: sorted, recordGroupMeta: meta }
     }
     if (filterDuplicate === "similar") {
-      return baseFilteredRecords.filter((s) => similarRecordIdSet.has(s.id));
+      const list = baseFilteredRecords.filter((s) => similarRecordIdSet.has(s.id));
+      const { sorted, meta } = sortAndGroupSaleRecords(list, saleNameMaps, "similar");
+      return { filteredRecords: sorted, recordGroupMeta: meta }
     }
     if (filterDuplicate === "unique") {
-      return baseFilteredRecords.filter(
-        (s) => !duplicateRecordIdSet.has(s.id) && !similarRecordIdSet.has(s.id),
-      );
+      return {
+        filteredRecords: baseFilteredRecords.filter(
+          (s) => !duplicateRecordIdSet.has(s.id) && !similarRecordIdSet.has(s.id),
+        ),
+        recordGroupMeta: emptyMeta,
+      }
     }
-    return baseFilteredRecords;
+    return { filteredRecords: baseFilteredRecords, recordGroupMeta: emptyMeta }
   }, [
     baseFilteredRecords,
     filterDuplicate,
     duplicateRecordIdSet,
     similarRecordIdSet,
+    saleNameMaps,
   ]);
 
   // 筛选条件变化时回到第 1 页
@@ -2072,7 +2083,7 @@ export default function SalesRecords() {
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/60 px-4 py-2.5">
           <Badge className="bg-amber-100 text-amber-800">疑似相似筛选中</Badge>
           <span className="text-sm text-amber-900">
-            当前 {filteredRecords.length} 笔：一年内同客户、同产品、同实收，成交日或销售单位可能不同。
+            当前 {filteredRecords.length} 笔，已按组分在一起（同客户/产品/实收相邻）；组内按成交日新→旧。
             若确为不同订单，可点行内「确认不重复」。
           </span>
         </div>
@@ -2081,7 +2092,7 @@ export default function SalesRecords() {
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-orange-200 bg-orange-50/60 px-4 py-2.5">
           <Badge className="bg-orange-100 text-orange-800">重复记录筛选中</Badge>
           <span className="text-sm text-orange-900">
-            当前 {filteredRecords.length} 笔重复，每组自动保留 1 笔，其余可勾选删除
+            当前 {filteredRecords.length} 笔重复，已按组分在一起；每组自动保留 1 笔，其余可勾选删除
           </span>
           <div className="flex-1" />
           {canEditSales && !isReadOnly && (
@@ -2176,32 +2187,68 @@ export default function SalesRecords() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {pagedRecords.map((record) => {
+                {pagedRecords.map((record, rowIdx) => {
                   const isDup = duplicateRecordIdSet.has(record.id);
                   const isSimilar = similarRecordIdSet.has(record.id);
-                  const rowTone = isDup
-                    ? "bg-orange-50"
-                    : isSimilar
-                      ? "bg-amber-50"
-                      : record.synced
-                        ? (highlightSynced ? "bg-blue-100" : "bg-blue-50")
-                        : "bg-background";
-                  return (
-                  <TableRow
-                    key={record.id}
-                    className={
+                  const groupInfo = recordGroupMeta?.get(record.id);
+                  const prevGroupNo = rowIdx > 0
+                    ? recordGroupMeta?.get(pagedRecords[rowIdx - 1].id)?.groupNo
+                    : undefined;
+                  const groupSep = groupInfo
+                    && prevGroupNo !== undefined
+                    && prevGroupNo !== groupInfo.groupNo;
+                  const inGroupView = Boolean(recordGroupMeta && groupInfo);
+                  const groupStripe = inGroupView
+                    ? (
+                      filterDuplicate === "duplicate"
+                        ? (groupInfo!.groupNo % 2 === 0 ? "bg-orange-50" : "bg-orange-100/60")
+                        : (groupInfo!.groupNo % 2 === 0 ? "bg-amber-50" : "bg-amber-100/55")
+                    )
+                    : "";
+                  const rowTone = !inGroupView
+                    ? (
                       isDup
                         ? "bg-orange-50"
                         : isSimilar
                           ? "bg-amber-50"
                           : record.synced
-                            ? (highlightSynced
-                              ? "bg-blue-100 ring-1 ring-inset ring-blue-300"
-                              : "bg-blue-50")
-                            : ""
-                    }
+                            ? (highlightSynced ? "bg-blue-100" : "bg-blue-50")
+                            : "bg-background"
+                    )
+                    : groupStripe;
+                  const borderAccent = inGroupView
+                    ? (
+                      filterDuplicate === "duplicate"
+                        ? "border-l-4 border-l-orange-400"
+                        : "border-l-4 border-l-amber-400"
+                    )
+                    : "";
+                  return (
+                  <TableRow
+                    key={record.id}
+                    className={[
+                      inGroupView ? groupStripe : (
+                        isDup
+                          ? "bg-orange-50"
+                          : isSimilar
+                            ? "bg-amber-50"
+                            : record.synced
+                              ? (highlightSynced
+                                ? "bg-blue-100 ring-1 ring-inset ring-blue-300"
+                                : "bg-blue-50")
+                              : ""
+                      ),
+                      borderAccent,
+                      groupSep
+                        ? (
+                          filterDuplicate === "duplicate"
+                            ? "border-t-2 border-t-orange-200"
+                            : "border-t-2 border-t-amber-200"
+                        )
+                        : "",
+                    ].filter(Boolean).join(" ")}
                   >
-                    <TableCell className="px-3 py-3 text-center">
+                    <TableCell className={`px-3 py-3 text-center ${borderAccent ? rowTone : ""}`}>
                       <input
                         type="checkbox"
                         checked={selectedIds.has(record.id)}
@@ -2210,11 +2257,25 @@ export default function SalesRecords() {
                         aria-label="选择该行"
                       />
                     </TableCell>
-                    <TableCell className="max-w-[11rem] px-3 py-3">
-                      <ExpandableCellText
-                        text={record.customerName}
-                        label="客户姓名"
-                      />
+                    <TableCell className={`max-w-[11rem] px-3 py-3 ${borderAccent ? rowTone : ""}`}>
+                      <div className="flex flex-col gap-1">
+                        {groupInfo && groupInfo.size > 1 && (
+                          <Badge
+                            variant="outline"
+                            className={
+                              filterDuplicate === "duplicate"
+                                ? "w-fit border-orange-300 bg-orange-50 px-1.5 py-0 text-[10px] font-medium text-orange-800"
+                                : "w-fit border-amber-300 bg-amber-50 px-1.5 py-0 text-[10px] font-medium text-amber-900"
+                            }
+                          >
+                            组 {groupInfo.groupNo} · {groupInfo.size} 笔
+                          </Badge>
+                        )}
+                        <ExpandableCellText
+                          text={record.customerName}
+                          label="客户姓名"
+                        />
+                      </div>
                     </TableCell>
                     <TableCell className="whitespace-nowrap px-3 py-3">
                       {getProductName(record)}

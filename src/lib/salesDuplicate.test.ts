@@ -8,6 +8,7 @@ import {
   getSalesRecordSimilarityKey,
   normalizeSaleDate,
   saleDatesWithinSimilarityWindow,
+  sortAndGroupSaleRecords,
 } from './salesDuplicate'
 import type { SalesRecord } from './../types'
 
@@ -149,6 +150,17 @@ const maps = buildSaleNameMaps(
   ].sort(compareSaleDateDesc)
   assertEqual(rows[0].id, 'oct', '未补零的9月不应排在10月前面')
   assertEqual(rows[1].id, 'sept')
+}
+
+{
+  const noise = baseRecord({ id: 'x', customerName: '其他人', saleDate: '2026-05-01' })
+  const a = baseRecord({ id: '1', customerName: '郑连财', saleDate: '2026-08-01' })
+  const b = baseRecord({ id: '2', customerName: '郑连财', saleDate: '2026-03-01' })
+  const { sorted, meta } = sortAndGroupSaleRecords([a, noise, b], maps, 'similar')
+  const ids = sorted.map((r) => r.id)
+  assertEqual(Math.abs(ids.indexOf('1') - ids.indexOf('2')), 1, '同组记录应相邻')
+  assertEqual(meta.get('1')?.groupNo, meta.get('2')?.groupNo)
+  assertEqual(meta.get('1')?.size, 2)
 }
 
 {

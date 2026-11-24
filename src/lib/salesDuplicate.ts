@@ -261,3 +261,47 @@ export function collectSimilarRecordIds(
   })
   return set
 }
+
+export type SaleRecordGroupMode = 'duplicate' | 'similar'
+
+export type SaleRecordGroupMeta = {
+  groupNo: number
+  size: number
+}
+
+export function getSaleRecordGroupKey(
+  s: SalesRecord,
+  maps: SaleNameMaps,
+  mode: SaleRecordGroupMode,
+): string {
+  return mode === 'duplicate'
+    ? getSalesRecordFingerprint(s, maps)
+    : getSalesRecordSimilarityKey(s, maps)
+}
+
+/** 按组分在一起：组顺序按指纹字典序，组内成交日新在前 */
+export function sortAndGroupSaleRecords(
+  records: SalesRecord[],
+  maps: SaleNameMaps,
+  mode: SaleRecordGroupMode,
+): { sorted: SalesRecord[]; meta: Map<string, SaleRecordGroupMeta> } {
+  const buckets = new Map<string, SalesRecord[]>()
+  for (const s of records) {
+    const key = getSaleRecordGroupKey(s, maps, mode)
+    const list = buckets.get(key) || []
+    list.push(s)
+    buckets.set(key, list)
+  }
+  const keys = [...buckets.keys()].sort((a, b) => a.localeCompare(b, 'zh-CN'))
+  const sorted: SalesRecord[] = []
+  const meta = new Map<string, SaleRecordGroupMeta>()
+  keys.forEach((key, idx) => {
+    const group = [...(buckets.get(key) || [])].sort(compareSaleDateDesc)
+    const groupNo = idx + 1
+    group.forEach((s) => {
+      sorted.push(s)
+      meta.set(s.id, { groupNo, size: group.length })
+    })
+  })
+  return { sorted, meta }
+}
