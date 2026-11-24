@@ -1,12 +1,89 @@
 import { roundMoney } from '@/lib/format'
+import {
+  findProductById,
+  getPersonCommissionBaseAmount,
+  resolveOrderCostDeduction,
+} from '@/lib/orderCostBase'
 import { calcPersonalCommissionByTiers } from '@/lib/personalCommissionTiers'
+import { getPersonShareAmount } from '@/lib/saleCollaborators'
 import { findUnitProductSettlement, isSaleDateInRange, toDateOnly } from '@/lib/settlement'
 import type {
+  Product,
   ProductPersonCommission,
   SalesRecord,
   SalesUnit,
   UnitProductSettlement,
 } from '@/types'
+
+export type SaleCommissionPreviewInput = {
+  productId: string
+  salesUnitId: string
+  personnelId: string
+  quantity?: number
+  totalAmount?: number
+  saleDate?: string
+}
+
+/** 扣成本后的计佣基数预览入参（与工资汇总口径一致） */
+export function buildSaleCommissionPreviewInput(
+  sale: SalesRecord,
+  ppcList: ProductPersonCommission[],
+  product: Product | undefined,
+  partial: {
+    personnelId: string
+    salesUnitId: string
+    quantity?: number
+    shareAmount?: number
+  },
+): SaleCommissionPreviewInput {
+  const shareAmount =
+    partial.shareAmount ?? getPersonShareAmount(sale, partial.personnelId)
+  let billableBase = getPersonCommissionBaseAmount(sale, partial.personnelId, product)
+  if (billableBase <= 0 && shareAmount > 0) {
+    const cr = resolveOrderCostDeduction(sale, product)
+    const full = Number(sale.totalAmount) || 0
+    const ratio = full > 0 ? shareAmount / full : 1
+    billableBase = roundMoney(Math.max(0, shareAmount - cr.cost * ratio))
+  }
+  const ppc = findProductPersonCommission(
+    ppcList,
+    sale.productId,
+    partial.salesUnitId,
+    partial.personnelId,
+  )
+  let quantity = partial.quantity ?? sale.quantity
+  if (ppc?.personalCommissionType === 'fixed' && billableBase <= 0) {
+    quantity = 0
+  }
+  return {
+    productId: sale.productId,
+    salesUnitId: partial.salesUnitId,
+    personnelId: partial.personnelId,
+    quantity,
+    totalAmount: billableBase,
+    saleDate: sale.saleDate,
+  }
+}
+
+export function calcSalePersonCommissionPreviewFromRecord(
+  sale: SalesRecord,
+  ppcList: ProductPersonCommission[],
+  upsList: UnitProductSettlement[] = [],
+  options: {
+    product?: Product
+    products?: Product[]
+    personnelId: string
+    salesUnitId: string
+    quantity?: number
+    shareAmount?: number
+  },
+): number {
+  const product =
+    options.product
+    ?? (options.products ? findProductById(options.products, sale.productId) : undefined)
+  const input = buildSaleCommissionPreviewInput(sale, ppcList, product, options)
+  return calcSalePersonCommissionPreview(input, ppcList, upsList)
+}
 
 /** 查找单位×产品×人员提成配置 */
 export function findProductPersonCommission(

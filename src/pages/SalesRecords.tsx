@@ -5,7 +5,11 @@ import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, formatDate } from "@/lib/format";
-import { calcSalePersonCommissionPreview } from "@/lib/commissionReward";
+import {
+  calcSalePersonCommissionPreview,
+  calcSalePersonCommissionPreviewFromRecord,
+  findProductPersonCommission,
+} from "@/lib/commissionReward";
 import {
   findProductById,
   resolveOrderCostDeduction,
@@ -1369,8 +1373,9 @@ export default function SalesRecords() {
     return Number(s.totalAmount) || 0;
   }
 
-  /** 当前筛选下该单提成预估 */
+  /** 当前筛选下该单提成预估（扣成本后计佣基数，与工资核算一致） */
   function getFilteredCommission(s: SalesRecord): number {
+    const product = findProductById(products, s.productId);
     if (filterPerson !== "all") {
       const amount = getPersonShareAmount(s, filterPerson);
       if (!(amount > 0)) return 0;
@@ -1382,23 +1387,22 @@ export default function SalesRecords() {
         s.salesUnitId,
       ].filter(Boolean) as string[];
       for (const unitId of unitCandidates) {
-        const c = calcSalePersonCommissionPreview(
-          {
-            productId: s.productId,
-            salesUnitId: unitId,
-            personnelId: filterPerson,
-            quantity: getPersonShareQuantity(s, filterPerson),
-            totalAmount: amount,
-            saleDate: s.saleDate,
-          },
-          ppcList,
-        );
+        const c = calcSalePersonCommissionPreviewFromRecord(s, ppcList, [], {
+          product,
+          personnelId: filterPerson,
+          salesUnitId: unitId,
+          quantity: getPersonShareQuantity(s, filterPerson),
+          shareAmount: amount,
+        });
         if (c > 0) return c;
       }
-      // 无该人专属配置时：按份额比例缩放整单预估
-      const full = calcSalePersonCommissionPreview(s, ppcList);
-      const total = Number(s.totalAmount) || 0;
-      return total > 0 ? full * (amount / total) : 0;
+      return calcSalePersonCommissionPreviewFromRecord(s, ppcList, [], {
+        product,
+        personnelId: filterPerson,
+        salesUnitId: unitCandidates[0] || s.salesUnitId,
+        quantity: getPersonShareQuantity(s, filterPerson),
+        shareAmount: amount,
+      });
     }
     if (filterUnit !== "all") {
       const shares = getSaleShares(s);
@@ -1412,27 +1416,24 @@ export default function SalesRecords() {
             if (!(amount > 0)) return sum;
             const unitId = resolveCollaboratorUnitId(c, s.saleDate || "", personnel)
               || filterUnit;
-            let part = calcSalePersonCommissionPreview(
-              {
-                productId: s.productId,
-                salesUnitId: unitId,
-                personnelId: c.personnelId,
-                quantity: getPersonShareQuantity(s, c.personnelId),
-                totalAmount: amount,
-                saleDate: s.saleDate,
-              },
-              ppcList,
-            );
-            if (!(part > 0)) {
-              const full = calcSalePersonCommissionPreview(s, ppcList);
-              const total = Number(s.totalAmount) || 0;
-              part = total > 0 ? full * (amount / total) : 0;
-            }
+            const part = calcSalePersonCommissionPreviewFromRecord(s, ppcList, [], {
+              product,
+              personnelId: c.personnelId,
+              salesUnitId: unitId,
+              quantity: getPersonShareQuantity(s, c.personnelId),
+              shareAmount: amount,
+            });
             return sum + part;
           }, 0);
       }
     }
-    return calcSalePersonCommissionPreview(s, ppcList);
+    const primaryId = s.personnelId || getSaleShares(s)[0]?.personnelId || "";
+    if (!primaryId) return 0;
+    return calcSalePersonCommissionPreviewFromRecord(s, ppcList, [], {
+      product,
+      personnelId: primaryId,
+      salesUnitId: s.salesUnitId,
+    });
   }
 
   const totalRevenue = filteredRecords.reduce((sum, s) => sum + getFilteredShareAmount(s), 0);
@@ -3007,12 +3008,23 @@ export default function SalesRecords() {
                 <span className="text-lg font-bold text-primary">{formatCurrency(totalAmount)}</span>
               </div>
               {(() => {
+                const ppc = findProductPersonCommission(
+                  ppcList,
+                  form.productId,
+                  form.salesUnitId,
+                  form.personnelId,
+                );
+                const previewQty =
+                  ppc?.personalCommissionType === "fixed"
+                  && formCostResolved.netAmount <= 0
+                    ? 0
+                    : form.quantity;
                 const commission = calcSalePersonCommissionPreview(
                   {
                     productId: form.productId,
                     salesUnitId: form.salesUnitId,
                     personnelId: form.personnelId,
-                    quantity: form.quantity,
+                    quantity: previewQty,
                     totalAmount: formCostResolved.netAmount,
                     saleDate: form.saleDate,
                   },

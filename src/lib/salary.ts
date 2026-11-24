@@ -817,7 +817,11 @@ function calcCommissionForRecords(
       configuredProducts.add(productId);
       const fields = getPpcCommissionFields(ppc, kind);
       if (fields.type === "fixed") {
-        total += qty * (fields.amount || 0);
+        const billableQty = unitRecords.reduce(
+          (sum, r) => sum + ((Number(r.totalAmount) || 0) > 0 ? (r.quantity || 0) : 0),
+          0,
+        );
+        total += billableQty * (fields.amount || 0);
         return;
       }
       // 个人提成：有可选梯度则月度整段定档；按件/不计入业绩/未设置 → 原逻辑
@@ -861,6 +865,7 @@ function calcCommissionForRecords(
 
   if (kind === "personal") {
     for (const r of personRecords) {
+      if ((Number(r.totalAmount) || 0) <= 0) continue;
       const ppc = scopedPpc.find(
         (x) => x.productId === r.productId && x.salesUnitId === r.salesUnitId,
       ) || scopedPpc.find((x) => x.productId === r.productId);

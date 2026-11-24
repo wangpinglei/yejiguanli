@@ -10,9 +10,14 @@ import {
   hasPersonalCommissionTiers,
 } from '@/lib/personalCommissionTiers'
 import { filterByMonth } from '@/lib/salary'
+import {
+  applyCostNetToScaledSale,
+  findProductById,
+} from '@/lib/orderCostBase'
 import { getPersonShareAmount, getSaleShares, scaleSaleForPerson } from '@/lib/saleCollaborators'
 import type {
   Personnel,
+  Product,
   ProductPersonCommission,
   SalesRecord,
   SalesUnit,
@@ -76,15 +81,19 @@ function calcMonthCommissionEstimate(options: {
   personnelId: string
   ppcList: ProductPersonCommission[]
   upsList: UnitProductSettlement[]
+  products: Product[]
 }): number {
-  const { monthlySales, productId, unitId, personnelId, ppcList, upsList } = options
+  const { monthlySales, productId, unitId, personnelId, ppcList, upsList, products } = options
   return monthlySales
     .filter((s) => s.productId === productId && s.salesUnitId === unitId)
     .reduce((sum, sale) => {
       if (getPersonShareAmount(sale, personnelId) <= 0) return sum
       const scaled = scaleSaleForPerson(sale, personnelId)
       if (!scaled) return sum
-      return roundMoney(sum + calcSalePersonCommissionPreview(scaled, ppcList, upsList))
+      const product = findProductById(products, sale.productId)
+      const netScaled = applyCostNetToScaledSale(sale, scaled, product)
+      if ((Number(netScaled.totalAmount) || 0) <= 0) return sum
+      return roundMoney(sum + calcSalePersonCommissionPreview(netScaled, ppcList, upsList))
     }, 0)
 }
 
@@ -106,6 +115,7 @@ export function buildProductCommissionOverviewRows(options: {
   productId: string
   yearMonth: string
   salesRecords: SalesRecord[]
+  products: Product[]
   ppcList: ProductPersonCommission[]
   upsList: UnitProductSettlement[]
   personnel: Personnel[]
@@ -117,6 +127,7 @@ export function buildProductCommissionOverviewRows(options: {
     productId,
     yearMonth,
     salesRecords,
+    products,
     ppcList,
     upsList,
     personnel,
@@ -181,6 +192,7 @@ export function buildProductCommissionOverviewRows(options: {
       productId,
       unitId,
       personnelId,
+      products,
       ppcList,
       upsList,
     })
