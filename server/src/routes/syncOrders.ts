@@ -274,9 +274,14 @@ function upsertSyncedOrder(order: SyncOrderInput): {
   }
 
   if (existing?.id) {
-    const costDeductionOverride =
+    const lockedCost =
       existing.cost_deduction_override != null
         ? Number(existing.cost_deduction_override)
+        : null
+    // 仅 >0 视为手工锁定；0 多为历史占位，同步时按当前活动规则重算
+    const costDeductionOverride =
+      lockedCost != null && lockedCost > 0
+        ? lockedCost
         : resolveCostOverrideForNewSale({
           db,
           activityName: activityToSave,
