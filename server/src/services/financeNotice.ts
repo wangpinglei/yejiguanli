@@ -1,6 +1,7 @@
 import { getDb, generateId } from "../db";
 
 import {
+  filterFinanceNoticeTargetsForActiveUnits,
   getFinanceNoticeWebhookTargets,
   type FinanceNoticeWebhookTarget,
 } from "../config/financeNoticeWebhookTargets";
@@ -275,21 +276,38 @@ export function cancelFinanceNoticeSchedule(operator: string): FinanceNoticeConf
   return getFinanceNoticeConfig();
 }
 
-function getWebhookTargets(): FinanceNoticeWebhookTarget[] {
-  const targets = getFinanceNoticeWebhookTargets();
-  if (targets.length > 0) return targets;
+function resolveSalesUnitStatusByName(
+  unitName: string,
+): "active" | "inactive" | null {
+  const db = getDb();
+  const row = db
+    .prepare(
+      "SELECT status FROM sales_units WHERE name = ? COLLATE NOCASE LIMIT 1",
+    )
+    .get(unitName) as { status?: string } | undefined;
+  if (!row) return null;
+  return row.status === "inactive" ? "inactive" : "active";
+}
 
-  const multi = (process.env.FINANCE_NOTICE_WEBHOOK_URLS || "").trim();
-  const single = (process.env.FINANCE_NOTICE_WEBHOOK_URL || "").trim();
-  const urls = multi
-    ? multi.split(",").map((s) => s.trim()).filter(Boolean)
-    : single
-      ? [single]
-      : [];
-  return urls.map((webhook, index) => ({
-    unitName: `群${index + 1}`,
-    webhook,
-  }));
+function getWebhookTargets(): FinanceNoticeWebhookTarget[] {
+  let targets = getFinanceNoticeWebhookTargets();
+  if (targets.length === 0) {
+    const multi = (process.env.FINANCE_NOTICE_WEBHOOK_URLS || "").trim();
+    const single = (process.env.FINANCE_NOTICE_WEBHOOK_URL || "").trim();
+    const urls = multi
+      ? multi.split(",").map((s) => s.trim()).filter(Boolean)
+      : single
+        ? [single]
+        : [];
+    targets = urls.map((webhook, index) => ({
+      unitName: `群${index + 1}`,
+      webhook,
+    }));
+  }
+  return filterFinanceNoticeTargetsForActiveUnits(
+    targets,
+    resolveSalesUnitStatusByName,
+  );
 }
 
 export function buildNoticeMarkdown(content: FinanceNoticeContent): string {
@@ -673,14 +691,21 @@ export function startFinanceNoticeScheduler() {
 export function getFinanceNoticeWebhookMatchReport() {
   const db = getDb();
   const units = db
-    .prepare("SELECT id, name FROM sales_units ORDER BY name COLLATE NOCASE")
-    .all() as Array<{ id: string; name: string }>;
+    .prepare(
+      "SELECT id, name, status FROM sales_units ORDER BY name COLLATE NOCASE",
+    )
+    .all() as Array<{ id: string; name: string; status?: string }>;
   const targets = getFinanceNoticeWebhookTargets();
+  const pushTargets = filterFinanceNoticeTargetsForActiveUnits(
+    targets,
+    resolveSalesUnitStatusByName,
+  );
   const targetNameSet = new Set(targets.map((t) => t.unitName));
   const unitNameSet = new Set(units.map((u) => u.name));
 
   return {
     targetCount: targets.length,
+    pushTargetCount: pushTargets.length,
     salesUnitCount: units.length,
     matched: units
       .filter((u) => targetNameSet.has(u.name))
@@ -691,10 +716,20 @@ export function getFinanceNoticeWebhookMatchReport() {
     targetsWithoutSalesUnit: targets
       .filter((t) => !unitNameSet.has(t.unitName))
       .map((t) => t.unitName),
-    targets: targets.map((t) => ({
-      unitName: t.unitName,
-      hasSalesUnit: unitNameSet.has(t.unitName),
-    })),
+    targets: targets.map((t) => {
+      const unit = db
+        .prepare(
+          "SELECT id, status FROM sales_units WHERE name = ? COLLATE NOCASE LIMIT 1",
+        )
+        .get(t.unitName) as { id?: string; status?: string } | undefined;
+      const salesUnitInactive = unit?.status === "inactive";
+      return {
+        unitName: t.unitName,
+        hasSalesUnit: Boolean(unit?.id),
+        pushEnabled: !salesUnitInactive,
+        salesUnitInactive,
+      };
+    }),
   };
 }
 

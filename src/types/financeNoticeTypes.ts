@@ -73,10 +73,15 @@ export interface FinanceNoticeResponse {
 export interface FinanceNoticeWebhookTargetItem {
   unitName: string;
   hasSalesUnit: boolean;
+  /** 是否会实际推送（已停用单位对应群为 false） */
+  pushEnabled?: boolean;
+  salesUnitInactive?: boolean;
 }
 
 export interface FinanceNoticeWebhookMatchReport {
   targetCount: number;
+  /** 实际推送群数（排除已停用销售单位） */
+  pushTargetCount?: number;
   salesUnitCount: number;
   matched: Array<{ id: string; name: string }>;
   salesUnitsWithoutWebhook: Array<{ id: string; name: string }>;

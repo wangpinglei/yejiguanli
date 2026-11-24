@@ -290,14 +290,19 @@ export default function MFinanceNoticePushTaskPanel({
                   ) : (
                     <Users className="mr-1.5 h-3.5 w-3.5" />
                   )}
-                  已绑定 {webhookReport?.targetCount ?? '—'} 个群
+                  推送 {webhookReport?.pushTargetCount ?? webhookReport?.targetCount ?? '—'} 个群
+                  {webhookReport?.targetCount != null
+                    && webhookReport.pushTargetCount != null
+                    && webhookReport.pushTargetCount < webhookReport.targetCount
+                    ? `（共绑定 ${webhookReport.targetCount}）`
+                    : ''}
                 </Button>
               </PopoverTrigger>
               <PopoverContent align="end" className="w-[360px] p-0">
                 <div className="border-b px-3 py-2">
                   <p className="text-sm font-medium">已绑定财务通知钉钉群</p>
                   <p className="text-xs text-muted-foreground">
-                    立即推送会发给下列全部群；名称与销售单位一致的便于对照业务数据。
+                    立即推送会发给「推送中」的群；销售单位已停用的不再推送。
                   </p>
                 </div>
                 <div className="max-h-[320px] overflow-y-auto px-1 py-1">
@@ -313,12 +318,21 @@ export default function MFinanceNoticePushTaskPanel({
                           className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/60"
                         >
                           <span className="truncate">{item.unitName}</span>
-                          <Badge
-                            variant={item.hasSalesUnit ? 'secondary' : 'outline'}
-                            className="shrink-0 text-[10px] font-normal"
-                          >
-                            {item.hasSalesUnit ? '已匹配单位' : '对接群'}
-                          </Badge>
+                          {item.salesUnitInactive ? (
+                            <Badge
+                              variant="outline"
+                              className="shrink-0 border-amber-300 bg-amber-50 text-[10px] font-normal text-amber-800"
+                            >
+                              已停用·不推送
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant={item.hasSalesUnit ? 'secondary' : 'outline'}
+                              className="shrink-0 text-[10px] font-normal"
+                            >
+                              {item.hasSalesUnit ? '已匹配单位' : '对接群'}
+                            </Badge>
+                          )}
                         </li>
                       ))}
                     </ul>

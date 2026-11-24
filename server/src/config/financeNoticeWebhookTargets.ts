@@ -274,3 +274,18 @@ export function getFinanceNoticeWebhookTargets(): FinanceNoticeWebhookTarget[] {
   }
   return FINANCE_NOTICE_WEBHOOK_TARGETS;
 }
+
+/**
+ * 过滤推送目标：名称匹配且状态为「已停用」的销售单位不再推送。
+ * 无对应销售单位（对接群）不受影响。
+ */
+export function filterFinanceNoticeTargetsForActiveUnits(
+  targets: FinanceNoticeWebhookTarget[],
+  resolveSalesUnitStatus: (unitName: string) => "active" | "inactive" | null,
+): FinanceNoticeWebhookTarget[] {
+  return targets.filter((t) => {
+    const status = resolveSalesUnitStatus(t.unitName);
+    if (status === "inactive") return false;
+    return true;
+  });
+}
