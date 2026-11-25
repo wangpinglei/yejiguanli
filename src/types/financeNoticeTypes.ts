@@ -76,6 +76,8 @@ export interface FinanceNoticeWebhookTargetItem {
   /** 是否会实际推送（已停用单位对应群为 false） */
   pushEnabled?: boolean;
   salesUnitInactive?: boolean;
+  /** 配置层暂停（机器人停用等），webhook 保留 */
+  pushPaused?: boolean;
 }
 
 export interface FinanceNoticeWebhookMatchReport {

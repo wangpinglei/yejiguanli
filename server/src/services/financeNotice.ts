@@ -1,8 +1,10 @@
 import { getDb, generateId } from "../db";
 
 import {
+  filterFinanceNoticePushPausedTargets,
   filterFinanceNoticeTargetsForActiveUnits,
   getFinanceNoticeWebhookTargets,
+  isFinanceNoticePushPaused,
   type FinanceNoticeWebhookTarget,
 } from "../config/financeNoticeWebhookTargets";
 
@@ -304,9 +306,11 @@ function getWebhookTargets(): FinanceNoticeWebhookTarget[] {
       webhook,
     }));
   }
-  return filterFinanceNoticeTargetsForActiveUnits(
-    targets,
-    resolveSalesUnitStatusByName,
+  return filterFinanceNoticePushPausedTargets(
+    filterFinanceNoticeTargetsForActiveUnits(
+      targets,
+      resolveSalesUnitStatusByName,
+    ),
   );
 }
 
@@ -696,9 +700,11 @@ export function getFinanceNoticeWebhookMatchReport() {
     )
     .all() as Array<{ id: string; name: string; status?: string }>;
   const targets = getFinanceNoticeWebhookTargets();
-  const pushTargets = filterFinanceNoticeTargetsForActiveUnits(
-    targets,
-    resolveSalesUnitStatusByName,
+  const pushTargets = filterFinanceNoticePushPausedTargets(
+    filterFinanceNoticeTargetsForActiveUnits(
+      targets,
+      resolveSalesUnitStatusByName,
+    ),
   );
   const targetNameSet = new Set(targets.map((t) => t.unitName));
   const unitNameSet = new Set(units.map((u) => u.name));
@@ -723,11 +729,13 @@ export function getFinanceNoticeWebhookMatchReport() {
         )
         .get(t.unitName) as { id?: string; status?: string } | undefined;
       const salesUnitInactive = unit?.status === "inactive";
+      const pushPaused = isFinanceNoticePushPaused(t.unitName);
       return {
         unitName: t.unitName,
         hasSalesUnit: Boolean(unit?.id),
-        pushEnabled: !salesUnitInactive,
+        pushEnabled: !salesUnitInactive && !pushPaused,
         salesUnitInactive,
+        pushPaused,
       };
     }),
   };

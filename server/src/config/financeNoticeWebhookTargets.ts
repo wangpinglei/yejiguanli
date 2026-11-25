@@ -11,6 +11,22 @@ export interface FinanceNoticeWebhookTarget {
   webhook: string;
 }
 
+/** 钉钉机器人停用等：暂不推送，webhook 保留；恢复后从此数组移除单位名即可 */
+export const FINANCE_NOTICE_PUSH_PAUSED_UNIT_NAMES: readonly string[] = [
+  "青岛分仓",
+  "济南分仓",
+];
+
+export function isFinanceNoticePushPaused(unitName: string): boolean {
+  return FINANCE_NOTICE_PUSH_PAUSED_UNIT_NAMES.includes(unitName.trim());
+}
+
+export function filterFinanceNoticePushPausedTargets(
+  targets: FinanceNoticeWebhookTarget[],
+): FinanceNoticeWebhookTarget[] {
+  return targets.filter((t) => !isFinanceNoticePushPaused(t.unitName));
+}
+
 export const FINANCE_NOTICE_WEBHOOK_TARGETS: FinanceNoticeWebhookTarget[] = [
   {
     unitName: "南平分仓",
