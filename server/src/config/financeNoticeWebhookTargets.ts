@@ -13,7 +13,6 @@ export interface FinanceNoticeWebhookTarget {
 
 /** 钉钉机器人停用等：暂不推送，webhook 保留；恢复后从此数组移除单位名即可 */
 export const FINANCE_NOTICE_PUSH_PAUSED_UNIT_NAMES: readonly string[] = [
-  "青岛分仓",
   "济南分仓",
 ];
 
@@ -81,7 +80,7 @@ export const FINANCE_NOTICE_WEBHOOK_TARGETS: FinanceNoticeWebhookTarget[] = [
   {
     unitName: "青岛分仓",
     webhook:
-      "https://oapi.dingtalk.com/robot/send?access_token=d01773257dfc29d0fc3e8e08299c0a545eb707dca1ceb875153552edb5dcc340",
+      "https://oapi.dingtalk.com/robot/send?access_token=16628dd034b22656bbd512c7fd68a2ebb6ea0764e2fb88926544c761b70167a8",
   },
   {
     unitName: "济南分仓",
