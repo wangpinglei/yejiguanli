@@ -46,7 +46,8 @@ import {
   type SaleNameMaps,
   type SaleRecordGroupMeta,
 } from "@/lib/salesDuplicate";
-import { salesRecordsApi } from "@/lib/api";
+import { salesRecordsApi, syncOrdersApi } from "@/lib/api";
+import { SyncOrderFailuresDialog } from "@/components/SyncOrderFailuresDialog";
 import {
   buildSalesReconcileExportRows,
   buildSalesReconcilePersonSummary,
@@ -580,6 +581,8 @@ export default function SalesRecords() {
   // 批量删除
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
+  const [syncFailuresOpen, setSyncFailuresOpen] = useState(false);
+  const [syncFailureTotal, setSyncFailureTotal] = useState(0);
 
   // 批量导入状态
   const [importOpen, setImportOpen] = useState(false);
@@ -639,6 +642,17 @@ export default function SalesRecords() {
         if (!cancelled) setSimilarityDismissals([]);
       });
     return () => { cancelled = true; };
+  }, []);
+
+  const refreshSyncFailureCount = () => {
+    syncOrdersApi
+      .listFailures({ limit: 1, offset: 0 })
+      .then((r) => setSyncFailureTotal(r.total ?? 0))
+      .catch(() => setSyncFailureTotal(0));
+  };
+
+  useEffect(() => {
+    refreshSyncFailureCount();
   }, []);
 
   /** 系统中业务内容相同的销售记录 id（出现次数 > 1，忽略手动/生态圈来源） */
@@ -2077,6 +2091,22 @@ export default function SalesRecords() {
               {filterDuplicate === "similar" ? " · 已筛选" : " · 点击筛选"}
             </Button>
           )}
+          <div className="ml-auto flex shrink-0 items-center">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 border-rose-200 bg-white text-rose-900 hover:bg-rose-50"
+              onClick={() => setSyncFailuresOpen(true)}
+            >
+              <AlertCircle className="mr-1.5 h-4 w-4 text-rose-600" />
+              推送失败记录
+              {syncFailureTotal > 0 && (
+                <Badge className="ml-2 bg-rose-100 text-rose-800 hover:bg-rose-100">
+                  {syncFailureTotal}
+                </Badge>
+              )}
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -3441,6 +3471,14 @@ export default function SalesRecords() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <SyncOrderFailuresDialog
+        open={syncFailuresOpen}
+        onOpenChange={(open) => {
+          setSyncFailuresOpen(open);
+          if (!open) refreshSyncFailureCount();
+        }}
+      />
     </div>
   );
 }

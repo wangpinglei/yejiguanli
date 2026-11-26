@@ -328,6 +328,18 @@ export const activityCostRulesApi = {
     ),
 };
 
+export const syncOrdersApi = {
+  listFailures: (params?: { limit?: number; offset?: number }) => {
+    const query = new URLSearchParams();
+    if (params?.limit != null) query.set("limit", String(params.limit));
+    if (params?.offset != null) query.set("offset", String(params.offset));
+    const qs = query.toString();
+    return api.get<{ success: boolean; total: number; items: import("@/types").SyncOrderFailure[] }>(
+      `/sync-orders/failures${qs ? `?${qs}` : ""}`,
+    );
+  },
+};
+
 export const salesRecordsApi = {
   list: (params?: { salesUnitId?: string; personnelId?: string }) => {
     const query = new URLSearchParams();

@@ -232,7 +232,18 @@ curl -X POST 'https://isales.santi.ren/yeji/api/sync-orders/pull' \
 
 ---
 
-### 4.3 查询已同步记录
+### 4.3 推送失败记录（业绩系统内）
+
+| 项 | 值 |
+|----|-----|
+| Method | `GET` |
+| Path | `/sync-orders/failures` |
+| 鉴权 | 登录 + 销售记录查看权限 |
+| 说明 | 生态圈 `POST /sync-orders` 跳过/失败时写入 `sync_order_failures`；销售记录页「推送失败记录」查看 |
+
+---
+
+### 4.4 查询已同步记录
 
 | 项 | 值 |
 |----|-----|

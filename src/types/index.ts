@@ -405,6 +405,22 @@ export interface SalesRecord {
   costDeductionOverride?: number | null;
 }
 
+/** 生态圈推送本系统时跳过/失败的记录 */
+export interface SyncOrderFailure {
+  id: string;
+  createdAt: string;
+  source: "push" | "pull" | string;
+  failureCode: string;
+  reason: string;
+  externalOrderId: string;
+  customerName: string;
+  productName: string;
+  salesUnitName: string;
+  salesPersonName: string;
+  saleDate: string;
+  payloadJson: string;
+}
+
 // 生态圈同步的订单（后端存储格式 / GET synced-orders 返回）
 export interface SyncedOrder {
   id: string;

@@ -472,6 +472,23 @@ function initSchema() {
       total_amount REAL DEFAULT 0
     );
 
+    CREATE TABLE IF NOT EXISTS sync_order_failures (
+      id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      source TEXT NOT NULL DEFAULT 'push',
+      failure_code TEXT NOT NULL DEFAULT '',
+      reason TEXT NOT NULL DEFAULT '',
+      external_order_id TEXT DEFAULT '',
+      customer_name TEXT DEFAULT '',
+      product_name TEXT DEFAULT '',
+      sales_unit_name TEXT DEFAULT '',
+      sales_person_name TEXT DEFAULT '',
+      sale_date TEXT DEFAULT '',
+      payload_json TEXT DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_sync_order_failures_created
+      ON sync_order_failures(created_at DESC);
+
     CREATE TABLE IF NOT EXISTS sales_similarity_dismissals (
       fingerprint TEXT PRIMARY KEY,
       created_at TEXT NOT NULL,

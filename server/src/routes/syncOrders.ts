@@ -5,7 +5,12 @@ import { resolveCostOverrideForNewSale } from '../lib/activityCost'
 import { parsePerformanceSplitText } from '../lib/parsePerformanceSplit'
 import { normalizeSaleDate } from '../lib/saleDate'
 import { authMiddleware } from '../auth'
-import { getVisibleUnitIds, isSalesRowVisible } from '../middleware'
+import {
+  logSyncOrderFailure,
+  listSyncOrderFailures,
+  type SyncFailureSource,
+} from '../lib/syncOrderFailures'
+import { getVisibleUnitIds, isSalesRowVisible, requireModuleView } from '../middleware'
 
 const router = Router()
 
@@ -190,6 +195,8 @@ function findOrCreateProductId(
 function upsertSyncedOrder(order: SyncOrderInput): {
   action: 'added' | 'updated' | 'skipped'
   id: string
+  skipReason?: string
+  externalOrderId?: string
 } {
   const db = getDb()
   const externalOrderId = buildExternalOrderId(order)
@@ -200,7 +207,12 @@ function upsertSyncedOrder(order: SyncOrderInput): {
     )
     .get(externalOrderId) as { external_order_id?: string } | undefined
   if (deleted?.external_order_id) {
-    return { action: 'skipped', id: '' }
+    return {
+      action: 'skipped',
+      id: '',
+      skipReason: '本系统已删除该同步单，拒绝再次写入（黑名单）',
+      externalOrderId,
+    }
   }
 
   const unitId = findUnitId(db, order.salesUnitName)
@@ -362,6 +374,96 @@ function upsertSyncedOrder(order: SyncOrderInput): {
   return { action: 'added', id }
 }
 
+function orderFailureFields(order: SyncOrderInput): {
+  orderId?: string
+  customerName?: string
+  productName?: string
+  salesUnitName?: string
+  salesPersonName?: string
+  saleDate?: string
+} {
+  return {
+    orderId: order.orderId,
+    customerName: order.customerName,
+    productName: order.productName,
+    salesUnitName: order.salesUnitName,
+    salesPersonName: order.salesPersonName,
+    saleDate: order.saleDate,
+  }
+}
+
+function applySyncOrderBatch(
+  list: PlainObj[],
+  source: SyncFailureSource,
+): { added: number; updated: number; skipped: number; errors: string[] } {
+  let added = 0
+  let updated = 0
+  let skipped = 0
+  const errors: string[] = []
+
+  for (const raw of list) {
+    try {
+      const order = normalizeOrder(raw)
+      if (!order) {
+        skipped++
+        const reason = '无法识别的订单字段（缺少客户/产品/成交日等有效信息）'
+        errors.push(reason)
+        logSyncOrderFailure({
+          reason,
+          code: 'invalid_fields',
+          source,
+          raw,
+        })
+        continue
+      }
+      if (!order.productName && !order.customerName) {
+        skipped++
+        const reason = '缺少客户姓名或购买产品'
+        errors.push(reason)
+        logSyncOrderFailure({
+          reason,
+          code: 'missing_required',
+          source,
+          raw,
+          order: orderFailureFields(order),
+        })
+        continue
+      }
+      const result = upsertSyncedOrder(order)
+      if (result.action === 'added') added++
+      else if (result.action === 'updated') updated++
+      else {
+        skipped++
+        if (result.skipReason) {
+          errors.push(result.skipReason)
+          logSyncOrderFailure({
+            reason: result.skipReason,
+            code: 'deleted_blocklist',
+            source,
+            raw,
+            order: {
+              ...orderFailureFields(order),
+              orderId: result.externalOrderId || order.orderId,
+            },
+          })
+        }
+      }
+    } catch (err) {
+      skipped++
+      const reason = err instanceof Error ? err.message : String(err)
+      errors.push(reason)
+      logSyncOrderFailure({
+        reason,
+        code: 'db_error',
+        source,
+        raw,
+      })
+    }
+  }
+
+  return { added, updated, skipped, errors }
+}
+
 function parseOrderList(body: unknown): PlainObj[] {
   if (Array.isArray(body)) return body as PlainObj[]
   if (body && typeof body === 'object') {
@@ -390,33 +492,7 @@ router.post('/sync-orders', (req, res) => {
     return
   }
 
-  let added = 0
-  let updated = 0
-  let skipped = 0
-  const errors: string[] = []
-
-  for (const raw of list) {
-    try {
-      const order = normalizeOrder(raw)
-      if (!order) {
-        skipped++
-        errors.push('无法识别的订单字段')
-        continue
-      }
-      if (!order.productName && !order.customerName) {
-        skipped++
-        errors.push('缺少客户姓名或购买产品')
-        continue
-      }
-      const result = upsertSyncedOrder(order)
-      if (result.action === 'added') added++
-      else if (result.action === 'updated') updated++
-      else skipped++
-    } catch (err) {
-      skipped++
-      errors.push(err instanceof Error ? err.message : String(err))
-    }
-  }
+  const { added, updated, skipped, errors } = applySyncOrderBatch(list, 'push')
 
   res.json({
     success: true,
@@ -427,6 +503,22 @@ router.post('/sync-orders', (req, res) => {
     errors: errors.length ? errors : undefined,
   })
 })
+
+/**
+ * @description 生态圈推送失败记录（本系统入库，供销售记录页查看）
+ * @link GET /api/sync-orders/failures
+ */
+router.get(
+  '/sync-orders/failures',
+  authMiddleware,
+  requireModuleView('sales_records'),
+  (req, res) => {
+    const limit = Number(req.query.limit)
+    const offset = Number(req.query.offset)
+    const { total, items } = listSyncOrderFailures({ limit, offset })
+    res.json({ success: true, total, items })
+  },
+)
 
 /**
  * @description 查询已同步的销售记录（synced=1）
@@ -536,28 +628,7 @@ router.post('/sync-orders/pull', async (req, res) => {
     const data = (await upstream.json()) as unknown
     const list = parseOrderList(data)
 
-    // 复用 POST /sync-orders 逻辑
-    req.body = { orders: list }
-    // 直接调用处理
-    let added = 0
-    let updated = 0
-    let skipped = 0
-    const errors: string[] = []
-    for (const raw of list) {
-      try {
-        const order = normalizeOrder(raw as PlainObj)
-        if (!order) {
-          skipped++
-          continue
-        }
-        const result = upsertSyncedOrder(order)
-        if (result.action === 'added') added++
-        else updated++
-      } catch (err) {
-        skipped++
-        errors.push(err instanceof Error ? err.message : String(err))
-      }
-    }
+    const { added, updated, skipped, errors } = applySyncOrderBatch(list, 'pull')
     res.json({
       success: true,
       message: `拉取同步完成：新增 ${added} 笔，更新 ${updated} 笔，跳过 ${skipped} 笔`,
