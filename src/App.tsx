@@ -17,6 +17,7 @@ import SalesBattleReport from "@/pages/SalesBattleReport";
 import UserManagement from "@/pages/UserManagement";
 import ProductSettlement from "@/pages/ProductSettlement";
 import ProductCommissionOverview from "@/pages/ProductCommissionOverview";
+import ProductSettlementSales from "@/pages/ProductSettlement/ProductSettlementSales";
 import HrManagement from "@/pages/HrManagement";
 import FinanceNotice from "@/pages/FinanceNotice";
 import Payroll from "@/pages/Payroll";
@@ -79,6 +80,7 @@ export default function App() {
               <Route path="profit-analysis" element={<ProfitAnalysis />} />
               <Route path="sales-battle-report" element={<SalesBattleReport />} />
               <Route path="product-settlement" element={<ProductSettlement />} />
+              <Route path="product-settlement/settlement" element={<ProductSettlementSales />} />
               <Route path="product-settlement/commission-overview" element={<ProductCommissionOverview />} />
                   <Route
                 path="users"

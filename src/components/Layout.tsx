@@ -108,7 +108,28 @@ const navEntries: NavEntry[] = [
     },
   },
   { type: "item", item: { path: "/finance-notice", label: "财务通知", icon: Megaphone, moduleKey: "finance_notice" } },
-  { type: "item", item: { path: "/product-settlement", label: "业务域产品结算和分类", icon: Scale, moduleKey: "product_settlement" } },
+  {
+    type: "group",
+    group: {
+      id: "product-settlement",
+      label: "业务域结算",
+      icon: Scale,
+      children: [
+        {
+          path: "/product-settlement",
+          label: "产品结算金额设定",
+          icon: Scale,
+          moduleKey: "product_settlement",
+        },
+        {
+          path: "/product-settlement/settlement",
+          label: "产品结算",
+          icon: Calculator,
+          moduleKey: "product_settlement",
+        },
+      ],
+    },
+  },
   { type: "item", item: { path: "/users", label: "权限分配", icon: ShieldCheck, moduleKey: "users" } },
 ];
 
@@ -118,6 +139,12 @@ const flatNavItems: NavItem[] = navEntries.flatMap((entry) =>
 
 function isNavPathActive(pathname: string, path: string): boolean {
   if (path === "/") return pathname === "/" || pathname === "";
+  if (path === "/product-settlement") {
+    return (
+      pathname === "/product-settlement"
+      || pathname === "/product-settlement/commission-overview"
+    );
+  }
   return pathname === path || pathname.startsWith(`${path}/`);
 }
 

@@ -426,8 +426,8 @@ export default function ProductSettlement() {
   return (
     <div>
       <PageHeader
-        title="业务域产品结算和分类"
-        description="为产品设置业务域分类并查看汇总；同时配置单位×产品结算比例、生效期与特殊奖励。"
+        title="产品结算金额设定"
+        description="业务域分类；配置单位×产品结算比例、生效期与特殊奖励。"
         action={
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" size="sm" asChild>

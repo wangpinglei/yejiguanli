@@ -46,7 +46,7 @@ export const MODULE_DEFS: ModuleDef[] = [
   { key: "cost_management", label: "成本与收入录入", path: "/cost-management", canEdit: true },
   { key: "profit_analysis", label: "盈亏分析", path: "/profit-analysis", canEdit: true },
   { key: "finance_notice", label: "财务通知", path: "/finance-notice", canEdit: true },
-  { key: "product_settlement", label: "业务域产品结算和分类", path: "/product-settlement", canEdit: true },
+  { key: "product_settlement", label: "业务域结算", path: "/product-settlement", canEdit: true },
   { key: "users", label: "权限分配", path: "/users", canEdit: true },
 ];
 
@@ -92,7 +92,8 @@ export const MODULE_PERMISSION_GROUPS: ModulePermissionGroup[] = [
   },
   {
     id: "product-settlement",
-    label: "业务域产品结算和分类",
+    label: "业务域结算",
+    hint: "产品结算金额设定 · 产品结算（按记佣金额×比例核对）",
     moduleKeys: ["product_settlement"],
   },
   {
