@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { syncOrdersApi } from "@/lib/api";
+import {
+  downloadSyncOrderFailuresExcel,
+  fetchSyncOrderFailuresForExport,
+  SYNC_FAILURE_EXPORT_MAX,
+} from "@/lib/syncOrderFailuresExport";
 import type { SyncOrderFailure } from "@/types";
 import {
   Dialog,
@@ -18,7 +23,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { RefreshCw } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ChevronLeft, ChevronRight, Download, RefreshCw } from "lucide-react";
 
 const CODE_LABEL: Record<string, string> = {
   invalid_fields: "字段无法识别",
@@ -33,6 +45,8 @@ const SOURCE_LABEL: Record<string, string> = {
   pull: "主动拉取",
 };
 
+const PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
+
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -40,15 +54,22 @@ type Props = {
 
 export function SyncOrderFailuresDialog({ open, onOpenChange }: Props) {
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [items, setItems] = useState<SyncOrderFailure[]>([]);
   const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(50);
   const [detail, setDetail] = useState<SyncOrderFailure | null>(null);
-  const pageSize = 50;
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize) || 1);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await syncOrdersApi.listFailures({ limit: pageSize, offset: 0 });
+      const res = await syncOrdersApi.listFailures({
+        limit: pageSize,
+        offset: (page - 1) * pageSize,
+      });
       setItems(res.items || []);
       setTotal(res.total ?? 0);
     } catch {
@@ -57,7 +78,7 @@ export function SyncOrderFailuresDialog({ open, onOpenChange }: Props) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page, pageSize]);
 
   useEffect(() => {
     if (open) {
@@ -66,22 +87,95 @@ export function SyncOrderFailuresDialog({ open, onOpenChange }: Props) {
     }
   }, [open, load]);
 
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  const handleOpenChange = (next: boolean) => {
+    if (next) {
+      setPage(1);
+    }
+    onOpenChange(next);
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const { rows, truncated, total: exportTotal } =
+        await fetchSyncOrderFailuresForExport();
+      if (rows.length === 0) {
+        alert("暂无失败记录可导出");
+        return;
+      }
+      downloadSyncOrderFailuresExcel(rows);
+      if (truncated) {
+        alert(
+          `共 ${exportTotal} 条，已导出前 ${rows.length} 条（上限 ${SYNC_FAILURE_EXPORT_MAX} 条）`,
+        );
+      }
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "导出失败");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
   <>
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>生态圈推送失败记录</DialogTitle>
           <DialogDescription>
             同步被跳过或写入失败时在本系统留档（不含单位/人员名称对不上但仍入库的「软失败」）。
-            共 {total} 条，展示最近 {pageSize} 条。
+            共 {total} 条。
           </DialogDescription>
         </DialogHeader>
-        <div className="flex justify-end">
-          <Button type="button" variant="outline" size="sm" disabled={loading} onClick={() => void load()}>
-            <RefreshCw className={`mr-1.5 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            刷新
-          </Button>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span>每页</span>
+            <Select
+              value={String(pageSize)}
+              onValueChange={(v) => {
+                setPageSize(Number(v));
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="h-8 w-[5.5rem]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZE_OPTIONS.map((n) => (
+                  <SelectItem key={n} value={String(n)}>
+                    {n}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span>条</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={exporting || total === 0}
+              onClick={() => void handleExport()}
+            >
+              <Download className={`mr-1.5 h-4 w-4 ${exporting ? "opacity-50" : ""}`} />
+              {exporting ? "导出中…" : "导出 Excel"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={loading}
+              onClick={() => void load()}
+            >
+              <RefreshCw className={`mr-1.5 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+              刷新
+            </Button>
+          </div>
         </div>
         <div className="min-h-0 flex-1 overflow-auto rounded-md border">
           <Table>
@@ -146,6 +240,40 @@ export function SyncOrderFailuresDialog({ open, onOpenChange }: Props) {
               )}
             </TableBody>
           </Table>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+          <p className="text-sm text-muted-foreground">
+            第 {total === 0 ? 0 : page} / {totalPages} 页
+            {total > 0 && (
+              <span className="ml-2">
+                显示 {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} / {total}
+              </span>
+            )}
+          </p>
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8"
+              disabled={loading || page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              <ChevronLeft className="h-4 w-4" />
+              上一页
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8"
+              disabled={loading || page >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              下一页
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
