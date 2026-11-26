@@ -1,6 +1,118 @@
 import ExcelJS from 'exceljs'
 import type { UnitSettlementBlock } from '@/lib/saleSettlementReconcile'
 
+const DETAIL_HEADERS = [
+  '成交日期',
+  '销售人员',
+  '客户',
+  '产品',
+  '订单金额',
+  '实收金额',
+  '业绩扣除',
+  '扣除原因',
+  '记佣金额',
+  '结算比例',
+  '预估结算',
+  '实际结算',
+  '来源',
+  '订单号',
+] as const
+
+function uniqueWorksheetName(base: string, used: Set<string>): string {
+  const cleaned =
+    base.replace(/[*?:\\/[\]]/g, '_').trim().slice(0, 31) || '单位'
+  let name = cleaned
+  let n = 2
+  while (used.has(name)) {
+    const suffix = `(${n})`
+    name = `${cleaned.slice(0, Math.max(1, 31 - suffix.length))}${suffix}`
+    n += 1
+  }
+  used.add(name)
+  return name
+}
+
+function autoFitColumns(sheet: ExcelJS.Worksheet) {
+  sheet.columns.forEach((col) => {
+    let max = 10
+    col.eachCell?.({ includeEmpty: true }, (cell) => {
+      const len = String(cell.value ?? '').length
+      if (len > max) max = len
+    })
+    col.width = Math.min(36, Math.max(10, max + 2))
+  })
+}
+
+function addUnitDetailSheet(
+  workbook: ExcelJS.Workbook,
+  block: UnitSettlementBlock,
+  yearMonth: string,
+  usedNames: Set<string>,
+) {
+  const sheet = workbook.addWorksheet(
+    uniqueWorksheetName(block.unit.name, usedNames),
+    { views: [{ state: 'frozen', ySplit: 3 }] },
+  )
+
+  sheet.addRow(['销售单位', block.unit.name, '月份', yearMonth])
+  sheet.addRow([
+    '预估结算合计',
+    block.estimatedTotal,
+    '实际结算合计',
+    block.actualTotal,
+    '笔数',
+    block.lines.length,
+    '手工调整',
+    block.isAdjusted ? '是' : '否',
+  ])
+  sheet.getRow(1).font = { bold: true }
+  sheet.getRow(2).font = { bold: true }
+
+  const headerRow = sheet.addRow([...DETAIL_HEADERS])
+  headerRow.font = { bold: true }
+
+  for (const l of block.lines) {
+    sheet.addRow([
+      l.saleDate,
+      l.salesPersonName,
+      l.customerName,
+      l.productName,
+      l.orderAmount,
+      l.receivedAmount,
+      l.performanceDeduction,
+      l.performanceDeductionRemark,
+      l.commissionBase,
+      l.settlementRatioLabel,
+      l.estimatedSettlement,
+      l.actualSettlement,
+      l.synced ? '生态圈' : '手动',
+      l.orderNumber,
+    ])
+  }
+
+  if (block.lines.length > 0) {
+    sheet.addRow([
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '合计',
+      '',
+      block.estimatedTotal,
+      block.actualTotal,
+      '',
+      '',
+    ])
+    sheet.lastRow!.font = { bold: true }
+  }
+
+  autoFitColumns(sheet)
+}
+
 export async function downloadProductSettlementSalesExcel(
   blocks: UnitSettlementBlock[],
   yearMonth: string,
@@ -32,59 +144,12 @@ export async function downloadProductSettlementSalesExcel(
       b.isAdjusted ? '是' : '否',
     ])
   }
+  autoFitColumns(summary)
 
-  const detail = workbook.addWorksheet('订单明细', {
-    views: [{ state: 'frozen', ySplit: 1 }],
-  })
-  detail.addRow([
-    '月份',
-    '销售单位',
-    '成交日期',
-    '销售人员',
-    '客户',
-    '产品',
-    '订单金额',
-    '实收金额',
-    '业绩扣除',
-    '记佣金额',
-    '结算比例',
-    '预估结算',
-    '实际结算',
-    '来源',
-    '订单号',
-  ])
-  detail.getRow(1).font = { bold: true }
+  const usedNames = new Set<string>(['单位汇总'])
   for (const b of blocks) {
-    for (const l of b.lines) {
-      detail.addRow([
-        yearMonth,
-        b.unit.name,
-        l.saleDate,
-        l.salesPersonName,
-        l.customerName,
-        l.productName,
-        l.orderAmount,
-        l.receivedAmount,
-        l.performanceDeduction,
-        l.commissionBase,
-        l.settlementRatioLabel,
-        l.estimatedSettlement,
-        l.actualSettlement,
-        l.synced ? '生态圈' : '手动',
-        l.orderNumber,
-      ])
-    }
-  }
-
-  for (const sheet of [summary, detail]) {
-    sheet.columns.forEach((col) => {
-      let max = 10
-      col.eachCell?.({ includeEmpty: true }, (cell) => {
-        const len = String(cell.value ?? '').length
-        if (len > max) max = len
-      })
-      col.width = Math.min(36, Math.max(10, max + 2))
-    })
+    if (b.lines.length === 0) continue
+    addUnitDetailSheet(workbook, b, yearMonth, usedNames)
   }
 
   const buffer = await workbook.xlsx.writeBuffer()

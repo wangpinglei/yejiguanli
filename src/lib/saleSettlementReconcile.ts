@@ -3,7 +3,11 @@
  */
 import { filterByMonth } from '@/lib/salary'
 import { roundMoney } from '@/lib/format'
-import { findProductById, resolveOrderCostDeduction } from '@/lib/orderCostBase'
+import {
+  findProductById,
+  formatOrderCostDeductionRemark,
+  resolveOrderCostDeduction,
+} from '@/lib/orderCostBase'
 import { buildUnitScopedSalesRecords } from '@/lib/saleCollaborators'
 import {
   calcSaleSettlementIncome,
@@ -30,6 +34,7 @@ export type SaleSettlementLine = {
   orderAmount: number
   receivedAmount: number
   performanceDeduction: number
+  performanceDeductionRemark: string
   commissionBase: number
   settlementRatioLabel: string
   estimatedSettlement: number
@@ -66,7 +71,9 @@ function buildLine(
   upsList: UnitProductSettlement[],
 ): SaleSettlementLine {
   const product = findProductById(products, scaled.productId)
-  const { cost, netAmount } = resolveOrderCostDeduction(scaled, product)
+  const costResolved = resolveOrderCostDeduction(scaled, product)
+  const { cost, netAmount } = costResolved
+  const performanceDeductionRemark = formatOrderCostDeductionRemark(scaled, product)
   const received = Number(scaled.totalAmount) || 0
   const person = personnel.find((p) => p.id === scaled.personnelId)
   const ups = findUnitProductSettlement(
@@ -88,6 +95,7 @@ function buildLine(
     orderAmount: proportionalOrderAmount(full, scaled),
     receivedAmount: roundMoney(received),
     performanceDeduction: roundMoney(cost),
+    performanceDeductionRemark,
     commissionBase: roundMoney(netAmount),
     settlementRatioLabel: formatSaleSettlementRatioForSale(scaled, upsList),
     estimatedSettlement: roundMoney(estimated),

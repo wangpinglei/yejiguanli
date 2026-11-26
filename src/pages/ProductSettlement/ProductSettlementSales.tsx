@@ -106,12 +106,11 @@ export default function ProductSettlementSales() {
   async function handleExport() {
     setExporting(true);
     try {
-      const nonEmpty = blocks.filter((b) => b.lines.length > 0);
-      if (nonEmpty.length === 0) {
+      if (totals.count === 0) {
         alert("当前月份没有可导出的结算明细");
         return;
       }
-      await downloadProductSettlementSalesExcel(nonEmpty, selectedMonth);
+      await downloadProductSettlementSalesExcel(blocks, selectedMonth);
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : "导出失败");
     } finally {
@@ -270,6 +269,7 @@ export default function ProductSettlementSales() {
                                       <TableHead>产品</TableHead>
                                       <TableHead className="text-right">实收</TableHead>
                                       <TableHead className="text-right">业绩扣除</TableHead>
+                                      <TableHead className="min-w-[140px]">扣除原因</TableHead>
                                       <TableHead className="text-right">记佣金额</TableHead>
                                       <TableHead className="text-right">比例</TableHead>
                                       <TableHead className="text-right">预估结算</TableHead>
@@ -293,6 +293,12 @@ export default function ProductSettlementSales() {
                                         </TableCell>
                                         <TableCell className="text-right text-sm text-amber-800">
                                           {formatCurrency(l.performanceDeduction)}
+                                        </TableCell>
+                                        <TableCell
+                                          className="max-w-[220px] text-xs text-muted-foreground"
+                                          title={l.performanceDeductionRemark}
+                                        >
+                                          {l.performanceDeductionRemark}
                                         </TableCell>
                                         <TableCell className="text-right text-sm font-medium text-blue-700">
                                           {formatCurrency(l.commissionBase)}
@@ -320,7 +326,7 @@ export default function ProductSettlementSales() {
                                       </TableRow>
                                     ))}
                                     <TableRow className="bg-muted/40 font-medium">
-                                      <TableCell colSpan={8} className="text-right text-sm">
+                                      <TableCell colSpan={9} className="text-right text-sm">
                                         合计
                                       </TableCell>
                                       <TableCell className="text-right text-cyan-800">

@@ -3,6 +3,7 @@
 import {
   calcActivityCostDeduction,
   findActivityCostRuleForSale,
+  normalizeActivityName,
   type ActivityCostRule,
 } from '@/lib/activityCost'
 import { roundMoney } from '@/lib/format'
@@ -159,6 +160,85 @@ export function getPersonCommissionBaseAmount(
   if (total <= 0) return 0
   const { netAmount } = resolveOrderCostDeduction(sale, product)
   return roundMoney(share * (netAmount / total))
+}
+
+function formatProductCostDeductionRemark(
+  sale: Pick<SalesRecord, 'quantity'>,
+  product?: Product | null,
+): string {
+  if (!product) return '未关联产品，无自动成本规则'
+  if (product.costType === 'percentage') {
+    const rate = Number(product.costRate) || 0
+    if (rate <= 0) return '产品未配置成本比例'
+    return `产品成本：实收×${rate}%`
+  }
+  const unitCost = Number(product.unitCost) || 0
+  const qty = Number(sale.quantity) || 0
+  if (unitCost <= 0) return '产品未配置单位成本'
+  if (qty <= 0) return `产品成本：¥${unitCost}/件（本单数量0）`
+  return `产品成本：¥${unitCost}×${qty}件`
+}
+
+function formatActivityCostDeductionRemark(
+  rule: ActivityCostRule,
+  activityName: string | null | undefined,
+): string {
+  const name = normalizeActivityName(rule.activityName)
+    || normalizeActivityName(activityName)
+    || '活动'
+  if (rule.costType === 'percentage') {
+    return `活动「${name}」：实收×${rule.costValue}%`
+  }
+  return `活动「${name}」：固定扣除¥${rule.costValue}`
+}
+
+function formatAutoOrderCostDeductionRemark(
+  sale: Pick<
+    SalesRecord,
+    'totalAmount' | 'quantity' | 'activityName' | 'saleDate'
+  > & { unitPrice?: number },
+  product?: Product | null,
+  options?: OrderCostResolveOptions,
+): string {
+  const rules = resolveActivityRules(options)
+  const auto = calcAutoOrderCost(sale, product, options)
+  if (auto.fromActivityRule) {
+    const rule = findActivityCostRuleForSale(
+      rules,
+      sale.activityName,
+      sale.saleDate,
+    )
+    if (rule) return formatActivityCostDeductionRemark(rule, sale.activityName)
+    const act = normalizeActivityName(sale.activityName)
+    return act ? `活动「${act}」成本规则` : '活动成本规则'
+  }
+  return formatProductCostDeductionRemark(sale, product)
+}
+
+/** 业绩扣除原因说明（列表 / 结算 / 导出展示） */
+export function formatOrderCostDeductionRemark(
+  sale: Pick<
+    SalesRecord,
+    | 'totalAmount'
+    | 'quantity'
+    | 'costDeductionOverride'
+    | 'synced'
+    | 'activityName'
+    | 'saleDate'
+  > & { unitPrice?: number },
+  product?: Product | null,
+  options?: OrderCostResolveOptions,
+): string {
+  const resolved = resolveOrderCostDeduction(sale, product, options)
+  if (resolved.cost <= 0) return '无业绩扣除'
+  const autoReason = formatAutoOrderCostDeductionRemark(sale, product, options)
+  if (resolved.isManual) {
+    if (Math.abs(resolved.cost - resolved.systemCost) < 0.005) {
+      return `本单手工确认（${autoReason}）`
+    }
+    return `本单手工调整（系统建议：${autoReason}）`
+  }
+  return autoReason
 }
 
 export function findProductById(
