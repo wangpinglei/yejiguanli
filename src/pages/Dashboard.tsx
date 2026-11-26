@@ -1,26 +1,21 @@
 import { useMemo, useState } from "react";
-import { useData } from "@/context/DataContext";
 import { usePermissions } from "@/hooks/usePermissions";
-import { formatCurrency, formatPercent, getYearMonth } from "@/lib/format";
-import { getTotalSalaryCost, filterByMonth } from "@/lib/salary";
-import { findUnitForCost, getEffectiveManualCost } from "@/lib/confirmAmount";
-import { isSalesUnitOperatingInMonth } from "@/lib/salesUnitStatus";
+import { formatCurrency, formatPercent } from "@/lib/format";
 import {
-  listRecurringYearMonths,
-  matchesRecurringYearMonth,
-} from "@/utils/recurringRecord";
+  buildSalesReceiptDashboard,
+  buildUnitReceiptRanking,
+  type ReceiptGrain,
+} from "@/lib/salesReceiptAggregate";
+import { PageHeader } from "@/components/PageHeader";
 import {
-  TrendingUp,
-  TrendingDown,
-  Wallet,
-  Users,
-  Building2,
-  ShoppingCart,
-  ArrowUpRight,
   ArrowDownRight,
+  ArrowUpRight,
+  Building2,
   CalendarDays,
   ChevronsUpDown,
   Check,
+  ShoppingCart,
+  TrendingUp,
 } from "lucide-react";
 import {
   Card,
@@ -29,13 +24,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -43,40 +31,31 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Input } from "@/components/ui/input";
 import {
-  AreaChart,
-  Area,
-  BarChart,
   Bar,
-  PieChart,
-  Pie,
-  Cell,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
 } from "recharts";
 
-const COLORS = ["#3b82f6", "#60a5fa", "#93c5fd", "#1e40af", "#2563eb", "#1d4ed8"];
+const GRAIN_OPTIONS: { value: ReceiptGrain; label: string }[] = [
+  { value: "day", label: "日" },
+  { value: "week", label: "周" },
+  { value: "month", label: "月" },
+  { value: "year", label: "年" },
+];
 
 export default function Dashboard() {
-  const { products, monthlyAdjustments, productPersonCommissions, teamMgmtCommissionRules, performanceTargets, unitProductSettlements } = useData();
-  const teamMgmtContext = useMemo(() => ({
-    rules: teamMgmtCommissionRules,
-    targets: performanceTargets,
-    upsList: unitProductSettlements,
-  }), [teamMgmtCommissionRules, performanceTargets, unitProductSettlements]);
-  const {
-    visibleSalesUnits: salesUnits,
-    visiblePersonnel: personnel,
-    visibleSalesRecords: salesRecords,
-    visibleCostRecords: costRecords,
-    visibleCostSettlements: costSettlements,
-  } = usePermissions();
-  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
-  // null = 全部单位；[] = 全不选；非空 = 仅这些单位
+  const { visibleSalesUnits: salesUnits, visibleSalesRecords: salesRecords } =
+    usePermissions();
+  const [grain, setGrain] = useState<ReceiptGrain>("month");
+  const [referenceDate, setReferenceDate] = useState(
+    () => new Date().toISOString().slice(0, 10),
+  );
   const [selectedUnitIds, setSelectedUnitIds] = useState<string[] | null>(null);
   const [unitFilterOpen, setUnitFilterOpen] = useState(false);
 
@@ -85,24 +64,53 @@ export default function Dashboard() {
     return selectedUnitIds.filter((id) => salesUnits.some((u) => u.id === id));
   }, [selectedUnitIds, salesUnits]);
 
-  const filteredUnits = useMemo(
-    () => salesUnits.filter((u) => filterUnitIds.includes(u.id)),
-    [salesUnits, filterUnitIds]
-  );
-  const filteredPersonnel = useMemo(
-    () => personnel.filter((p) => filterUnitIds.includes(p.salesUnitId)),
-    [personnel, filterUnitIds]
-  );
   const filteredSalesRecords = useMemo(
     () => salesRecords.filter((s) => filterUnitIds.includes(s.salesUnitId)),
-    [salesRecords, filterUnitIds]
-  );
-  const filteredCostRecords = useMemo(
-    () => costRecords.filter((c) => filterUnitIds.includes(c.salesUnitId)),
-    [costRecords, filterUnitIds]
+    [salesRecords, filterUnitIds],
   );
 
-  const isAllUnits = selectedUnitIds === null
+  const unitNameMap = useMemo(
+    () => new Map(salesUnits.map((u) => [u.id, u.name])),
+    [salesUnits],
+  );
+
+  const dashboard = useMemo(
+    () =>
+      buildSalesReceiptDashboard(filteredSalesRecords, {
+        grain,
+        referenceDate,
+      }),
+    [filteredSalesRecords, grain, referenceDate],
+  );
+
+  const unitRanking = useMemo(
+    () =>
+      buildUnitReceiptRanking(
+        filteredSalesRecords,
+        unitNameMap,
+        dashboard.current.startDate,
+        dashboard.current.endDate,
+      ),
+    [
+      filteredSalesRecords,
+      unitNameMap,
+      dashboard.current.startDate,
+      dashboard.current.endDate,
+    ],
+  );
+
+  const chartData = useMemo(
+    () =>
+      dashboard.buckets.map((b) => ({
+        label: b.label,
+        amount: b.amount,
+        count: b.count,
+      })),
+    [dashboard.buckets],
+  );
+
+  const isAllUnits =
+    selectedUnitIds === null
     || (salesUnits.length > 0 && selectedUnitIds.length === salesUnits.length);
   const isNoUnits = selectedUnitIds !== null && selectedUnitIds.length === 0;
   const unitFilterLabel = useMemo(() => {
@@ -114,13 +122,17 @@ export default function Dashboard() {
     return `已选 ${selectedUnitIds!.length} 个单位`;
   }, [isAllUnits, isNoUnits, selectedUnitIds, salesUnits]);
 
+  const checkedUnitSet = useMemo(() => {
+    if (selectedUnitIds === null) return new Set(salesUnits.map((u) => u.id));
+    return new Set(selectedUnitIds);
+  }, [selectedUnitIds, salesUnits]);
+
   function handleToggleUnit(unitId: string, checked: boolean) {
     setSelectedUnitIds((prev) => {
       const base = prev === null ? salesUnits.map((u) => u.id) : [...prev];
       if (checked) {
         if (base.includes(unitId)) return base;
         const next = [...base, unitId];
-        // 勾满后折叠为「全部」
         if (salesUnits.length > 0 && next.length === salesUnits.length) return null;
         return next;
       }
@@ -128,307 +140,41 @@ export default function Dashboard() {
     });
   }
 
-  function handleSelectAllUnits() {
-    setSelectedUnitIds(null);
-  }
-
-  function handleDeselectAllUnits() {
-    setSelectedUnitIds([]);
-  }
-
-  function handleClearUnits() {
-    setSelectedUnitIds(null);
-  }
-
-  // 按月过滤的销售记录和成本记录
-  const monthlySales = useMemo(
-    () => filterByMonth(filteredSalesRecords, selectedMonth),
-    [filteredSalesRecords, selectedMonth]
-  );
-  const monthlyCosts = useMemo(
-    () => filteredCostRecords.filter((c) => {
-      if (!matchesRecurringYearMonth(c, selectedMonth)) return false
-      return isSalesUnitOperatingInMonth(
-        findUnitForCost(filteredUnits, c.salesUnitId),
-        selectedMonth,
-      )
-    }),
-    [filteredCostRecords, selectedMonth, filteredUnits],
-  );
-
-  // 计算统计（按月度）
-  const stats = useMemo(() => {
-    const totalRevenue = monthlySales.reduce((sum, s) => sum + s.totalAmount, 0);
-    const manualCost = filterUnitIds.reduce(
-      (sum, uid) =>
-        sum + getEffectiveManualCost(
-          costSettlements,
-          monthlyCosts,
-          uid,
-          selectedMonth,
-          findUnitForCost(filteredUnits, uid),
-        ),
-      0,
-    );
-    const salaryData = getTotalSalaryCost(
-filterUnitIds,
-      filteredPersonnel,
-      filteredSalesRecords,
-      products,
-      selectedMonth,
-      monthlyAdjustments,productPersonCommissions,
-      teamMgmtContext,
-    );
-    const salaryPayCost = salaryData.grandSalary;
-    const socialHousingFundCost = salaryData.grandSocialHousingFund;
-    const salaryCost = salaryData.grandTotal;
-    const productCommission = salaryData.grandSalesCommission;
-    const totalCost = manualCost + salaryCost;
-    const totalProfit = totalRevenue - totalCost;
-    const profitMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
-    const activePersonnel = filteredPersonnel.filter((p) => p.status === "active").length;
-    const productIds = new Set(
-      filteredSalesRecords.map((s) => s.productId).filter(Boolean)
-    );
-
-    return {
-      totalRevenue,
-      totalCost,
-      manualCost,
-      salaryCost,
-      salaryPayCost,
-      socialHousingFundCost,
-      productCommission,
-      totalProfit,
-      profitMargin,
-      totalUnits: filteredUnits.length,
-      totalPersonnel: filteredPersonnel.length,
-      totalSales: monthlySales.length,
-      activePersonnel,
-      productCount: productIds.size,
-    };
-  }, [
-    monthlySales, monthlyCosts, filterUnitIds, filteredUnits, filteredPersonnel,
-    filteredSalesRecords, products, selectedMonth, monthlyAdjustments, productPersonCommissions,
-    teamMgmtContext, costSettlements, filteredUnits,
-  ]);
-
-  // 月度趋势
-  const monthlyTrend = useMemo(() => {
-    const monthMap = new Map<string, { revenue: number; cost: number }>();
-
-    filteredSalesRecords.forEach((s) => {
-      const ym = getYearMonth(s.saleDate);
-      const existing = monthMap.get(ym) || { revenue: 0, cost: 0 };
-      existing.revenue += s.totalAmount;
-      monthMap.set(ym, existing);
-    });
-
-    filteredCostRecords.forEach((c) => {
-      const yearMonths = listRecurringYearMonths(c, selectedMonth);
-      yearMonths.forEach((ym) => {
-        const existing = monthMap.get(ym) || { revenue: 0, cost: 0 };
-        monthMap.set(ym, existing);
-      });
-    });
-
-    return Array.from(monthMap.entries())
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([month, data]) => {
-        const monthSalary = getTotalSalaryCost(
-filterUnitIds,
-          filteredPersonnel,
-          filteredSalesRecords,
-          products,
-          month,
-          monthlyAdjustments,productPersonCommissions,
-      teamMgmtContext,
-    ).grandTotal;
-        const manualCost = filterUnitIds.reduce(
-          (sum, uid) =>
-            sum + getEffectiveManualCost(
-              costSettlements,
-              filteredCostRecords,
-              uid,
-              month,
-              findUnitForCost(filteredUnits, uid),
-            ),
-          0,
-        );
-        return {
-          month: month.split("-")[1] + "月",
-          revenue: data.revenue,
-          cost: manualCost + monthSalary,
-          profit: data.revenue - manualCost - monthSalary,
-        };
-      });
-  }, [
-    filteredSalesRecords, filteredCostRecords, filterUnitIds,
-    filteredPersonnel, products, monthlyAdjustments, productPersonCommissions,
-    teamMgmtContext, costSettlements, selectedMonth,
-  ]);
-
-  // 各单位销售（按月度）
-  const unitSales = useMemo(() => {
-    return filteredUnits.map((unit) => {
-      const revenue = monthlySales
-        .filter((s) => s.salesUnitId === unit.id)
-        .reduce((sum, s) => sum + s.totalAmount, 0);
-      const manualCost = getEffectiveManualCost(
-        costSettlements,
-        monthlyCosts,
-        unit.id,
-        selectedMonth,
-        unit,
-      );
-      const salaryCost = getTotalSalaryCost(
-[unit.id],
-        filteredPersonnel,
-        filteredSalesRecords,
-        products,
-        selectedMonth,
-        monthlyAdjustments,productPersonCommissions,
-      teamMgmtContext,
-    ).grandTotal;
-      const cost = manualCost + salaryCost;
-      return {
-        name: unit.name.length > 6 ? unit.name.slice(0, 6) + "..." : unit.name,
-        revenue,
-        cost,
-        profit: revenue - cost,
-      };
-    });
-  }, [
-    filteredUnits, monthlySales, monthlyCosts, filteredPersonnel,
-    filteredSalesRecords, products, selectedMonth, monthlyAdjustments, productPersonCommissions,
-    teamMgmtContext, costSettlements,
-  ]);
-
-  // 成本分类（按月度）
-  const costByCategory = useMemo(() => {
-    const catMap = new Map<string, number>();
-    monthlyCosts.forEach((c) => {
-      (c.items || []).forEach((item) => {
-        catMap.set(item.category, (catMap.get(item.category) || 0) + item.amount);
-      });
-    });
-    const salaryData = getTotalSalaryCost(
-filterUnitIds,
-      filteredPersonnel,
-      filteredSalesRecords,
-      products,
-      selectedMonth,
-      monthlyAdjustments,productPersonCommissions,
-      teamMgmtContext,
-    );
-    if (salaryData.grandSalary > 0) {
-      catMap.set("薪酬成本", salaryData.grandSalary);
-    }
-    if (salaryData.grandSocialHousingFund > 0) {
-      catMap.set("社保公积金成本", salaryData.grandSocialHousingFund);
-    }
-    if (salaryData.grandSalesCommission > 0) {
-      catMap.set("销售提成（单位×人员）", salaryData.grandSalesCommission);
-    }
-    return Array.from(catMap.entries())
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value);
-  }, [
-    monthlyCosts, filterUnitIds, filteredPersonnel, filteredSalesRecords,
-    products, selectedMonth, monthlyAdjustments, productPersonCommissions,
-  , teamMgmtContext]);
-
-  // 最近销售记录（按月度）
-  const recentSales = useMemo(() => {
-    return [...monthlySales]
-      .sort((a, b) => (b.saleDate || "").localeCompare(a.saleDate || ""))
-      .slice(0, 6);
-  }, [monthlySales]);
-
-  const getUnitName = (id: string) => salesUnits.find((u) => u.id === id)?.name || "-";
-  const getPersonnelName = (id: string) => personnel.find((p) => p.id === id)?.name || "-";
-  const getProductName = (id: string) => products.find((p) => p.id === id)?.name || "-";
-
-  const statCards = [
-    {
-      title: "总营收",
-      value: formatCurrency(stats.totalRevenue),
-      icon: TrendingUp,
-      change: "+12.5%",
-      isUp: true,
-      color: "text-blue-600",
-      bg: "bg-blue-50",
-    },
-    {
-      title: "总成本",
-      value: formatCurrency(stats.totalCost),
-      icon: Wallet,
-      change: "+5.2%",
-      isUp: false,
-      color: "text-orange-600",
-      bg: "bg-orange-50",
-      hint:
-        `薪酬 ${formatCurrency(stats.salaryPayCost)}`
-        + ` · 社保公积金 ${formatCurrency(stats.socialHousingFundCost)}`,
-    },
-    {
-      title: "净利润",
-      value: formatCurrency(stats.totalProfit),
-      icon: TrendingDown,
-      change: "+18.3%",
-      isUp: true,
-      color: "text-emerald-600",
-      bg: "bg-emerald-50",
-    },
-    {
-      title: "利润率",
-      value: formatPercent(stats.profitMargin),
-      icon: ArrowUpRight,
-      change: "+3.1%",
-      isUp: true,
-      color: "text-violet-600",
-      bg: "bg-violet-50",
-    },
-  ];
-
-  const miniStats = [
-    { label: "销售单位", value: stats.totalUnits, icon: Building2 },
-    { label: "在岗人员", value: `${stats.activePersonnel}/${stats.totalPersonnel}`, icon: Users },
-    { label: "销售笔数", value: stats.totalSales, icon: ShoppingCart },
-    { label: "产品数量", value: stats.productCount, icon: TrendingUp },
-  ];
-
-  const monthOptions = useMemo(() => {
-    const options: { value: string; label: string }[] = [];
-    const now = new Date();
-    for (let i = 0; i < 12; i++) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      const label = `${d.getFullYear()}年${d.getMonth() + 1}月`;
-      options.push({ value, label });
-    }
-    return options;
-  }, []);
-
-  const checkedUnitSet = useMemo(() => {
-    if (selectedUnitIds === null) return new Set(salesUnits.map((u) => u.id));
-    return new Set(selectedUnitIds);
-  }, [selectedUnitIds, salesUnits]);
+  const mom = dashboard.momPct;
+  const momUp = mom != null && mom >= 0;
 
   return (
     <div className="space-y-6">
-      {/* Month + Unit Selector */}
+      <PageHeader
+        title="数据看板"
+        description="销售进款（按成交日实收金额汇总）；周统计以周一为一周起始。"
+      />
+
       <div className="flex flex-wrap items-center gap-3">
         <CalendarDays className="h-5 w-5 text-blue-600" />
-        <span className="text-sm font-medium">数据月份</span>
-        <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-          <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {monthOptions.map((m) => (
-              <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <span className="text-sm font-medium">统计粒度</span>
+        <div className="flex rounded-lg border bg-muted/40 p-0.5">
+          {GRAIN_OPTIONS.map((g) => (
+            <Button
+              key={g.value}
+              type="button"
+              size="sm"
+              variant={grain === g.value ? "default" : "ghost"}
+              className="h-8 px-4"
+              onClick={() => setGrain(g.value)}
+            >
+              {g.label}
+            </Button>
+          ))}
+        </div>
+
+        <span className="text-sm text-muted-foreground ml-1">基准日</span>
+        <Input
+          type="date"
+          className="w-40 h-9"
+          value={referenceDate}
+          onChange={(e) => setReferenceDate(e.target.value.slice(0, 10))}
+        />
 
         <Building2 className="ml-2 h-5 w-5 text-blue-600" />
         <span className="text-sm font-medium">销售单位</span>
@@ -451,11 +197,7 @@ filterUnitIds,
                   variant="outline"
                   size="sm"
                   className="h-7 flex-1 text-xs"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    handleSelectAllUnits();
-                  }}
+                  onClick={() => setSelectedUnitIds(null)}
                 >
                   全选
                 </Button>
@@ -464,243 +206,183 @@ filterUnitIds,
                   variant="outline"
                   size="sm"
                   className="h-7 flex-1 text-xs"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    handleDeselectAllUnits();
-                  }}
+                  onClick={() => setSelectedUnitIds([])}
                 >
                   全不选
                 </Button>
               </div>
             </div>
             <div className="max-h-64 overflow-y-auto p-2">
-              {salesUnits.length === 0 ? (
-                <p className="px-2 py-4 text-center text-xs text-muted-foreground">暂无可见单位</p>
-              ) : (
-                salesUnits.map((unit) => {
-                  const checked = checkedUnitSet.has(unit.id);
-                  return (
-                    <label
-                      key={unit.id}
-                      className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent"
-                    >
-                      <Checkbox
-                        checked={checked}
-                        onCheckedChange={(v) => handleToggleUnit(unit.id, v === true)}
-                      />
-                      <span className="flex-1 truncate text-sm">{unit.name}</span>
-                      {checked && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
-                    </label>
-                  );
-                })
-              )}
-            </div>
-            {!isAllUnits && (
-              <div className="border-t px-3 py-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full h-8 text-xs"
-                  onClick={handleClearUnits}
+              {salesUnits.map((unit) => (
+                <label
+                  key={unit.id}
+                  className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent"
                 >
-                  恢复全部单位
-                </Button>
-              </div>
-            )}
+                  <Checkbox
+                    checked={checkedUnitSet.has(unit.id)}
+                    onCheckedChange={(v) => handleToggleUnit(unit.id, v === true)}
+                  />
+                  <span className="flex-1 truncate text-sm">{unit.name}</span>
+                  {checkedUnitSet.has(unit.id) && (
+                    <Check className="h-3.5 w-3.5 text-primary shrink-0" />
+                  )}
+                </label>
+              ))}
+            </div>
           </PopoverContent>
         </Popover>
       </div>
 
-      {/* Stat Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {statCards.map((card) => {
-          const Icon = card.icon;
-          return (
-            <Card key={card.title} className="relative overflow-hidden">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  {card.title}
-                </CardTitle>
-                <div className={`rounded-lg ${card.bg} p-2`}>
-                  <Icon className={`h-4 w-4 ${card.color}`} />
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{card.value}</div>
-                {"hint" in card && card.hint ? (
-                  <p className="mt-1 text-xs text-muted-foreground">{card.hint}</p>
-                ) : (
-                  <div className="mt-1 flex items-center gap-1 text-xs">
-                    {card.isUp ? (
-                      <ArrowUpRight className="h-3 w-3 text-emerald-500" />
-                    ) : (
-                      <ArrowDownRight className="h-3 w-3 text-red-500" />
-                    )}
-                    <span className={card.isUp ? "text-emerald-600" : "text-red-500"}>
-                      {card.change}
-                    </span>
-                    <span className="text-muted-foreground">较上期</span>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
-
-      {/* Mini Stats */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {miniStats.map((stat) => {
-          const Icon = stat.icon;
-          return (
-            <div
-              key={stat.label}
-              className="flex items-center gap-3 rounded-xl border bg-card p-4"
-            >
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                <Icon className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">{stat.label}</p>
-                <p className="text-lg font-bold">{stat.value}</p>
-              </div>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              本期进款
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">{dashboard.current.label}</p>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600">
+              {formatCurrency(dashboard.current.amount)}
             </div>
-          );
-        })}
+            <p className="mt-1 text-xs text-muted-foreground">
+              {dashboard.current.count} 笔
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              上期进款
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">{dashboard.previous.label}</p>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {formatCurrency(dashboard.previous.amount)}
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {dashboard.previous.count} 笔
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              环比
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {mom == null ? (
+              <div className="text-2xl font-bold text-muted-foreground">—</div>
+            ) : (
+              <div className="flex items-center gap-1">
+                {momUp ? (
+                  <ArrowUpRight className="h-5 w-5 text-emerald-500" />
+                ) : (
+                  <ArrowDownRight className="h-5 w-5 text-red-500" />
+                )}
+                <span
+                  className={`text-2xl font-bold ${momUp ? "text-emerald-600" : "text-red-500"}`}
+                >
+                  {formatPercent(Math.abs(mom))}
+                </span>
+              </div>
+            )}
+            <p className="mt-1 text-xs text-muted-foreground">较上一同周期</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              笔均进款
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {dashboard.current.count > 0
+                ? formatCurrency(dashboard.current.amount / dashboard.current.count)
+                : "—"}
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Charts Row 1 */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        {/* Revenue Trend */}
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle className="text-base">营收与成本趋势</CardTitle>
-            <CardDescription>按月统计营收、成本和利润变化</CardDescription>
+            <CardTitle className="text-base flex items-center gap-2">
+              <TrendingUp className="h-4 w-4" />
+              进款趋势
+            </CardTitle>
+            <CardDescription>
+              {grain === "day" && "近 30 日"}
+              {grain === "week" && "近 12 周（周一至周日）"}
+              {grain === "month" && "近 12 个月"}
+              {grain === "year" && "近 5 年"}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={monthlyTrend}>
-                <defs>
-                  <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="colorCost" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#f97316" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
+              <BarChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${(v / 10000).toFixed(0)}万`} />
+                <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+                <YAxis
+                  tick={{ fontSize: 12 }}
+                  tickFormatter={(v) => `${(v / 10000).toFixed(0)}万`}
+                />
                 <Tooltip
                   formatter={(value: number) => formatCurrency(value)}
                   contentStyle={{ borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 12 }}
                 />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Area type="monotone" dataKey="revenue" name="营收" stroke="#3b82f6" fillOpacity={1} fill="url(#colorRevenue)" strokeWidth={2} />
-                <Area type="monotone" dataKey="cost" name="成本" stroke="#f97316" fillOpacity={1} fill="url(#colorCost)" strokeWidth={2} />
-                <Area type="monotone" dataKey="profit" name="利润" stroke="#10b981" fillOpacity={1} fill="url(#colorProfit)" strokeWidth={2} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-
-        {/* Cost Breakdown */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">成本分类占比</CardTitle>
-            <CardDescription>各成本类别分布</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={costByCategory}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={100}
-                  paddingAngle={2}
-                  dataKey="value"
-                >
-                  {costByCategory.map((_, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value: number) => formatCurrency(value)} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
-              </PieChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Charts Row 2 */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {/* Unit Performance */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">各单位业绩对比</CardTitle>
-            <CardDescription>各销售单位营收、成本与利润</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={unitSales}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${(v / 10000).toFixed(0)}万`} />
-                <Tooltip formatter={(value: number) => formatCurrency(value)} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="revenue" name="营收" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="cost" name="成本" fill="#f97316" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="profit" name="利润" fill="#10b981" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="amount" name="进款" fill="#3b82f6" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
 
-        {/* Recent Sales */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">最近销售记录</CardTitle>
-            <CardDescription>最新 6 笔销售交易</CardDescription>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Building2 className="h-4 w-4" />
+              本期各单位进款
+            </CardTitle>
+            <CardDescription>{dashboard.current.label}</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              {recentSales.map((sale) => (
-                <div
-                  key={sale.id}
-                  className="flex items-center justify-between rounded-lg border p-3 transition-colors hover:bg-accent/50"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50">
-                      <ShoppingCart className="h-4 w-4 text-blue-600" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">{getProductName(sale.productId)}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {getPersonnelName(sale.personnelId)} · {getUnitName(sale.salesUnitId)}
-                      </p>
-                    </div>
+            <div className="max-h-[300px] space-y-2 overflow-y-auto">
+              {unitRanking.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">暂无数据</p>
+              ) : (
+                unitRanking.slice(0, 12).map((row) => (
+                  <div
+                    key={row.unitId}
+                    className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm"
+                  >
+                    <span className="truncate font-medium">{row.name}</span>
+                    <span className="shrink-0 font-semibold text-blue-600">
+                      {formatCurrency(row.amount)}
+                    </span>
                   </div>
-                  <div className="text-right">
-                    <p className="text-sm font-semibold text-blue-600">
-                      {formatCurrency(sale.totalAmount)}
-                    </p>
-                    <p className="text-xs text-muted-foreground">{sale.saleDate}</p>
-                  </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <ShoppingCart className="h-4 w-4" />
+            说明
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm text-muted-foreground space-y-1">
+          <p>进款 = 销售记录「实收金额」，按成交日统计；不含其他收入、成本与利润。</p>
+          <p>整单归属订单上的销售单位（未按分业绩拆分到人）。</p>
+        </CardContent>
+      </Card>
     </div>
   );
 }
