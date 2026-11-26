@@ -289,6 +289,24 @@ export function resolveCollaboratorUnitId(
   return resolveUnitIdAt(person, saleDate) || person.salesUnitId || ''
 }
 
+/** 单笔订单在某单位上的进款/业绩份额（与销售记录页单位筛选一致） */
+export function getUnitShareAmount(
+  sale: Pick<SalesRecord, 'saleDate' | 'salesUnitId' | 'collaborators' | 'shareMode' | 'totalAmount' | 'personnelId'>,
+  unitId: string,
+  personnel: Personnel[],
+): number {
+  if (!unitId) return 0
+  const shares = getSaleShares(sale)
+  if (shares.length >= 2) {
+    return shares
+      .filter(
+        (c) => resolveCollaboratorUnitId(c, sale.saleDate || '', personnel) === unitId,
+      )
+      .reduce((sum, c) => sum + getPersonShareAmount(sale, c.personnelId), 0)
+  }
+  return sale.salesUnitId === unitId ? (Number(sale.totalAmount) || 0) : 0
+}
+
 /** 单笔订单在某单位上的分摊（分业绩按 collaborators.salesUnitId；否则看整单 salesUnitId） */
 export function getSaleSharesInUnit(
   sale: SalesRecord,

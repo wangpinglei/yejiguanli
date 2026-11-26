@@ -3,6 +3,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { formatCurrency, formatPercent } from "@/lib/format";
 import {
   buildSalesReceiptDashboard,
+  buildSalesReceiptRows,
   buildUnitReceiptRanking,
   type ReceiptGrain,
 } from "@/lib/salesReceiptAggregate";
@@ -50,8 +51,11 @@ const GRAIN_OPTIONS: { value: ReceiptGrain; label: string }[] = [
 ];
 
 export default function Dashboard() {
-  const { visibleSalesUnits: salesUnits, visibleSalesRecords: salesRecords } =
-    usePermissions();
+  const {
+    visibleSalesUnits: salesUnits,
+    visibleSalesRecords: salesRecords,
+    visiblePersonnel: personnel,
+  } = usePermissions();
   const [grain, setGrain] = useState<ReceiptGrain>("month");
   const [referenceDate, setReferenceDate] = useState(
     () => new Date().toISOString().slice(0, 10),
@@ -64,9 +68,19 @@ export default function Dashboard() {
     return selectedUnitIds.filter((id) => salesUnits.some((u) => u.id === id));
   }, [selectedUnitIds, salesUnits]);
 
-  const filteredSalesRecords = useMemo(
-    () => salesRecords.filter((s) => filterUnitIds.includes(s.salesUnitId)),
-    [salesRecords, filterUnitIds],
+  const allScopedUnitIds = useMemo(
+    () => salesUnits.map((u) => u.id),
+    [salesUnits],
+  );
+
+  const receiptRows = useMemo(
+    () =>
+      buildSalesReceiptRows(salesRecords, {
+        unitFilterIds: filterUnitIds,
+        allScopedUnitIds,
+        personnel,
+      }),
+    [salesRecords, filterUnitIds, allScopedUnitIds, personnel],
   );
 
   const unitNameMap = useMemo(
@@ -76,26 +90,30 @@ export default function Dashboard() {
 
   const dashboard = useMemo(
     () =>
-      buildSalesReceiptDashboard(filteredSalesRecords, {
+      buildSalesReceiptDashboard(receiptRows, {
         grain,
         referenceDate,
       }),
-    [filteredSalesRecords, grain, referenceDate],
+    [receiptRows, grain, referenceDate],
   );
 
   const unitRanking = useMemo(
     () =>
       buildUnitReceiptRanking(
-        filteredSalesRecords,
+        salesRecords,
+        filterUnitIds,
         unitNameMap,
         dashboard.current.startDate,
         dashboard.current.endDate,
+        personnel,
       ),
     [
-      filteredSalesRecords,
+      salesRecords,
+      filterUnitIds,
       unitNameMap,
       dashboard.current.startDate,
       dashboard.current.endDate,
+      personnel,
     ],
   );
 
@@ -380,7 +398,10 @@ export default function Dashboard() {
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground space-y-1">
           <p>进款 = 销售记录「实收金额」，按成交日统计；不含其他收入、成本与利润。</p>
-          <p>整单归属订单上的销售单位（未按分业绩拆分到人）。</p>
+          <p>
+            选全部单位时按整单实收汇总；选部分单位时与「销售记录」一致，按订单分业绩计入各单位份额（如
+            云拆单 分摊部分）。
+          </p>
         </CardContent>
       </Card>
     </div>

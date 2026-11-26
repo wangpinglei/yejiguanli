@@ -2,14 +2,15 @@
 
 import { roundMoney } from '@/lib/format'
 import { normalizeSaleDate } from '@/lib/salesDuplicate'
-import type { SalesRecord } from '@/types'
+import { getUnitShareAmount } from '@/lib/saleCollaborators'
+import type { Personnel, SalesRecord } from '@/types'
 
 export type ReceiptGrain = 'day' | 'week' | 'month' | 'year'
 
 export type SalesReceiptSalePick = Pick<
   SalesRecord,
   'saleDate' | 'totalAmount' | 'salesUnitId'
->
+> & { saleId?: string }
 
 export type ReceiptBucket = {
   key: string
@@ -85,16 +86,61 @@ function sumInRange(
   end: string,
 ): { amount: number; count: number } {
   let amount = 0
-  let count = 0
+  const orderIds = new Set<string>()
+  let lineCount = 0
   for (const r of records) {
     const day = normalizeSaleDate(r.saleDate)
     if (!day || day < start || day > end) continue
     const amt = Number(r.totalAmount) || 0
     if (amt === 0) continue
     amount += amt
-    count += 1
+    if (r.saleId) orderIds.add(r.saleId)
+    else lineCount += 1
   }
+  const count = orderIds.size > 0 ? orderIds.size : lineCount
   return { amount: roundMoney(amount), count }
+}
+
+/**
+ * 看板聚合行：选全部单位时按整单实收（不重复）；选部分单位时按分业绩计入本单位份额。
+ */
+export function buildSalesReceiptRows(
+  records: SalesRecord[],
+  options: {
+    unitFilterIds: string[]
+    allScopedUnitIds: string[]
+    personnel: Personnel[]
+  },
+): SalesReceiptSalePick[] {
+  const { unitFilterIds, allScopedUnitIds, personnel } = options
+  const isAllUnits =
+    allScopedUnitIds.length > 0
+    && unitFilterIds.length === allScopedUnitIds.length
+    && allScopedUnitIds.every((id) => unitFilterIds.includes(id))
+
+  if (isAllUnits) {
+    return records.map((r) => ({
+      saleId: r.id,
+      saleDate: r.saleDate,
+      totalAmount: Number(r.totalAmount) || 0,
+      salesUnitId: r.salesUnitId,
+    }))
+  }
+
+  const rows: SalesReceiptSalePick[] = []
+  for (const sale of records) {
+    for (const unitId of unitFilterIds) {
+      const amt = getUnitShareAmount(sale, unitId, personnel)
+      if (amt <= 0) continue
+      rows.push({
+        saleId: sale.id,
+        saleDate: sale.saleDate,
+        totalAmount: amt,
+        salesUnitId: unitId,
+      })
+    }
+  }
+  return rows
 }
 
 function momPct(current: number, previous: number): number | null {
@@ -290,31 +336,38 @@ export function buildSalesReceiptDashboard(
   }
 }
 
-/** 当前周期内各单位进款（整单归属 salesUnitId） */
+/** 当前周期内各单位进款（含分业绩按 collaborators 归属） */
 export function buildUnitReceiptRanking(
-  records: SalesReceiptSalePick[],
+  records: SalesRecord[],
+  unitFilterIds: string[],
   unitNames: Map<string, string>,
   startDate: string,
   endDate: string,
+  personnel: Personnel[],
 ): Array<{ unitId: string; name: string; amount: number; count: number }> {
-  const map = new Map<string, { amount: number; count: number }>()
-  for (const r of records) {
-    const day = normalizeSaleDate(r.saleDate)
+  const map = new Map<string, { amount: number; orderIds: Set<string> }>()
+  for (const unitId of unitFilterIds) {
+    map.set(unitId, { amount: 0, orderIds: new Set() })
+  }
+  for (const sale of records) {
+    const day = normalizeSaleDate(sale.saleDate)
     if (!day || day < startDate || day > endDate) continue
-    const uid = r.salesUnitId || ''
-    if (!uid) continue
-    const amt = Number(r.totalAmount) || 0
-    if (!map.has(uid)) map.set(uid, { amount: 0, count: 0 })
-    const row = map.get(uid)!
-    row.amount += amt
-    row.count += 1
+    for (const unitId of unitFilterIds) {
+      const amt = getUnitShareAmount(sale, unitId, personnel)
+      if (amt <= 0) continue
+      const row = map.get(unitId)
+      if (!row) continue
+      row.amount += amt
+      row.orderIds.add(sale.id)
+    }
   }
   return Array.from(map.entries())
-    .map(([unitId, { amount, count }]) => ({
+    .map(([unitId, { amount, orderIds }]) => ({
       unitId,
       name: unitNames.get(unitId) || unitId,
       amount: roundMoney(amount),
-      count,
+      count: orderIds.size,
     }))
+    .filter((r) => r.amount > 0 || r.count > 0)
     .sort((a, b) => b.amount - a.amount)
 }
