@@ -12,6 +12,7 @@ import {
 } from "@/lib/commissionReward";
 import {
   findProductById,
+  formatOrderCostDeductionRemark,
   resolveOrderCostDeduction,
 } from "@/lib/orderCostBase";
 import {
@@ -2197,6 +2198,7 @@ export default function SalesRecords() {
                   <TableHead className="h-14 min-w-[7rem] px-3 text-right text-base">订单金额</TableHead>
                   <TableHead className="h-14 min-w-[7rem] px-3 text-right text-base">实收金额</TableHead>
                   <TableHead className="h-14 min-w-[7rem] px-3 text-right text-base">成本扣除</TableHead>
+                  <TableHead className="h-14 min-w-[10rem] px-3 text-base">扣除原因</TableHead>
                   <TableHead className="h-14 min-w-[7rem] px-3 text-right text-base">计佣基数</TableHead>
                   <TableHead className="h-14 min-w-[7rem] px-3 text-base">订单类型</TableHead>
                   <TableHead className="h-14 min-w-[8rem] px-3 text-base">销售单位</TableHead>
@@ -2330,20 +2332,19 @@ export default function SalesRecords() {
                         )}
                     </TableCell>
                     {(() => {
-                      const costInfo = resolveOrderCostDeduction(
-                        record,
-                        findProductById(products, record.productId),
-                      );
+                      const product = findProductById(products, record.productId);
+                      const costInfo = resolveOrderCostDeduction(record, product);
+                      const costRemark = formatOrderCostDeductionRemark(record, product);
                       return (
                         <>
                           <TableCell className="px-3 py-3 text-right text-amber-800 whitespace-nowrap">
                             {formatCurrency(costInfo.cost)}
-                            {costInfo.isManual && (
-                              <div className="text-[10px] font-normal text-amber-700">手改</div>
-                            )}
-                            {!costInfo.isManual && costInfo.fromActivityRule && (
-                              <div className="text-[10px] font-normal text-violet-700">活动规则</div>
-                            )}
+                          </TableCell>
+                          <TableCell
+                            className="max-w-[200px] px-3 py-3 text-xs text-muted-foreground"
+                            title={costRemark}
+                          >
+                            {costRemark}
                           </TableCell>
                           <TableCell className="px-3 py-3 text-right font-medium text-sky-800 whitespace-nowrap">
                             {formatCurrency(costInfo.netAmount)}

@@ -267,6 +267,7 @@ export default function ProductSettlementSales() {
                                       <TableHead>销售</TableHead>
                                       <TableHead>客户</TableHead>
                                       <TableHead>产品</TableHead>
+                                      <TableHead className="text-right">订单金额</TableHead>
                                       <TableHead className="text-right">实收</TableHead>
                                       <TableHead className="text-right">业绩扣除</TableHead>
                                       <TableHead className="min-w-[140px]">扣除原因</TableHead>
@@ -275,6 +276,7 @@ export default function ProductSettlementSales() {
                                       <TableHead className="text-right">预估结算</TableHead>
                                       <TableHead className="text-right">实际结算</TableHead>
                                       <TableHead>来源</TableHead>
+                                      <TableHead className="min-w-[8rem]">订单号</TableHead>
                                     </TableRow>
                                   </TableHeader>
                                   <TableBody>
@@ -288,6 +290,11 @@ export default function ProductSettlementSales() {
                                           {l.customerName || "—"}
                                         </TableCell>
                                         <TableCell className="text-sm">{l.productName}</TableCell>
+                                        <TableCell className="text-right text-sm text-muted-foreground">
+                                          {l.orderAmount > 0
+                                            ? formatCurrency(l.orderAmount)
+                                            : "—"}
+                                        </TableCell>
                                         <TableCell className="text-right text-sm">
                                           {formatCurrency(l.receivedAmount)}
                                         </TableCell>
@@ -323,10 +330,13 @@ export default function ProductSettlementSales() {
                                             </Badge>
                                           )}
                                         </TableCell>
+                                        <TableCell className="text-sm text-muted-foreground">
+                                          {l.orderNumber || "—"}
+                                        </TableCell>
                                       </TableRow>
                                     ))}
                                     <TableRow className="bg-muted/40 font-medium">
-                                      <TableCell colSpan={9} className="text-right text-sm">
+                                      <TableCell colSpan={10} className="text-right text-sm">
                                         合计
                                       </TableCell>
                                       <TableCell className="text-right text-cyan-800">
