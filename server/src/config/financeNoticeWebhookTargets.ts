@@ -53,6 +53,11 @@ export const FINANCE_NOTICE_WEBHOOK_TARGETS: FinanceNoticeWebhookTarget[] = [
       "https://oapi.dingtalk.com/robot/send?access_token=f7ba1b2489bee901416e8e69207d05403f808fbe838681d0c55d48f5f7af4560",
   },
   {
+    unitName: "四合院",
+    webhook:
+      "https://oapi.dingtalk.com/robot/send?access_token=af88de84cdc83eb5ada13581717b55c047da8a05ed2f502c1e08ed60e8d09e61",
+  },
+  {
     unitName: "四合院资源项目组",
     webhook:
       "https://oapi.dingtalk.com/robot/send?access_token=391941938fc5b73a468f65f587bbfa6da286804e912425bd37c2a4925b7e9103",
