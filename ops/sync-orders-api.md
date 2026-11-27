@@ -186,6 +186,18 @@ curl -X POST 'https://isales.santi.ren/yeji/api/sync-orders' \
 
 由业绩系统请求外部接口，拿到订单列表后写入销售记录。
 
+**销售记录页「刷新同步」**（登录用户，需销售记录编辑权）：
+
+| 项 | 值 |
+|----|-----|
+| Method | `POST` |
+| Path | `/sync-orders/refresh` |
+| 完整 URL（生产） | `https://isales.santi.ren/yeji/api/sync-orders/refresh` |
+| 鉴权 | Bearer 登录令牌 + `sales_records` 编辑权 |
+| 数据源 | **仅**服务器环境变量 `SYNC_SOURCE_URL` / `SYNC_SOURCE_API_KEY`（不接受前端传 URL） |
+
+**脚本 / 外部系统拉取**（API Key）：
+
 | 项 | 值 |
 |----|-----|
 | Method | `POST` |

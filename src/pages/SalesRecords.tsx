@@ -545,6 +545,7 @@ export default function SalesRecords() {
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
   const [syncFailuresOpen, setSyncFailuresOpen] = useState(false);
   const [syncFailureTotal, setSyncFailureTotal] = useState(0);
+  const [pullingSync, setPullingSync] = useState(false);
 
   // 批量导入状态
   const [importOpen, setImportOpen] = useState(false);
@@ -1316,8 +1317,34 @@ export default function SalesRecords() {
     }
   };
 
+  const syncBusy = syncedLoading || pullingSync;
+
   const handleSyncRefresh = async () => {
-    await refreshSyncedOrders();
+    if (!canEditSales || isReadOnly) {
+      await refreshSyncedOrders();
+      return;
+    }
+    setPullingSync(true);
+    try {
+      const result = await syncOrdersApi.refreshFromSource();
+      await refreshSyncedOrders();
+      let msg = result.message || "同步完成";
+      if (result.errors?.length) {
+        const preview = result.errors.slice(0, 3).join("；");
+        msg += `\n部分失败：${preview}${result.errors.length > 3 ? "…" : ""}`;
+        msg += "\n可在「推送失败记录」查看详情。";
+      }
+      alert(msg);
+    } catch (error: unknown) {
+      await refreshSyncedOrders();
+      alert(
+        error instanceof Error
+          ? error.message
+          : "从生态圈拉取失败，已刷新本页已有数据",
+      );
+    } finally {
+      setPullingSync(false);
+    }
   };
 
   function saleMatchesUnitFilter(s: SalesRecord, unitId: string): boolean {
@@ -1783,9 +1810,18 @@ export default function SalesRecords() {
                 <Trash2 className="mr-2 h-4 w-4" />批量删除 ({selectedIds.size})
               </Button>
             )}
-            <Button variant="outline" onClick={handleSyncRefresh} disabled={syncedLoading}>
-              <RefreshCw className={`mr-2 h-4 w-4 ${syncedLoading ? "animate-spin" : ""}`} />
-              {syncedLoading ? "同步中..." : "刷新同步"}
+            <Button
+              variant="outline"
+              onClick={() => void handleSyncRefresh()}
+              disabled={syncBusy}
+              title={
+                canEditSales && !isReadOnly
+                  ? "从生态圈拉取最新订单并写入本系统"
+                  : "刷新本页已同步订单（只读账号不主动拉取）"
+              }
+            >
+              <RefreshCw className={`mr-2 h-4 w-4 ${syncBusy ? "animate-spin" : ""}`} />
+              {syncBusy ? "同步中..." : "刷新同步"}
             </Button>
             {canEditSales && !isReadOnly && (
               <>
@@ -1806,7 +1842,7 @@ export default function SalesRecords() {
         style={{ zoom: Number(uiScale) }}
       >
       {/* 同步状态卡片 */}
-      {(syncedCount > 0 || syncedLoading) && (
+      {(syncedCount > 0 || syncBusy) && (
         <div className="mb-4 flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50/50 px-4 py-2.5">
           <CloudDownload className="h-5 w-5 text-blue-500" />
           <div className="flex flex-1 items-center gap-4 text-sm">
@@ -1829,7 +1865,7 @@ export default function SalesRecords() {
               </Badge>
             </button>
             <Badge variant="secondary">{manualCount} 笔手动记录</Badge>
-            {syncedLoading && <span className="text-blue-500">正在拉取最新订单...</span>}
+            {syncBusy && <span className="text-blue-500">正在拉取最新订单...</span>}
           </div>
         </div>
       )}

@@ -328,6 +328,16 @@ export const activityCostRulesApi = {
     ),
 };
 
+export type SyncOrdersRefreshResult = {
+  success: boolean;
+  message: string;
+  added?: number;
+  updated?: number;
+  skipped?: number;
+  sourceUrl?: string;
+  errors?: string[];
+};
+
 export const syncOrdersApi = {
   listFailures: (params?: { limit?: number; offset?: number }) => {
     const query = new URLSearchParams();
@@ -338,6 +348,9 @@ export const syncOrdersApi = {
       `/sync-orders/failures${qs ? `?${qs}` : ""}`,
     );
   },
+  /** 登录用户主动从生态圈拉取并写入（需销售记录编辑权；服务端读 SYNC_SOURCE_URL） */
+  refreshFromSource: () =>
+    api.post<SyncOrdersRefreshResult>("/sync-orders/refresh"),
 };
 
 export const salesRecordsApi = {

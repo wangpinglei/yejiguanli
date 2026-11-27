@@ -10,7 +10,12 @@ import {
   listSyncOrderFailures,
   type SyncFailureSource,
 } from '../lib/syncOrderFailures'
-import { getVisibleUnitIds, isSalesRowVisible, requireModuleView } from '../middleware'
+import {
+  getVisibleUnitIds,
+  isSalesRowVisible,
+  requireModuleEdit,
+  requireModuleView,
+} from '../middleware'
 
 const router = Router()
 
@@ -587,6 +592,110 @@ router.get('/synced-orders', (req, res, next) => {
   res.json({ success: true, count: orders.length, orders })
 })
 
+type PullSyncResult =
+  | {
+      ok: true
+      added: number
+      updated: number
+      skipped: number
+      sourceUrl: string
+      errors?: string[]
+      message: string
+    }
+  | { ok: false; status: number; message: string }
+
+/**
+ * 从生态圈/外部订单源拉取并写入销售记录。
+ * UI 刷新仅允许环境变量中的源地址，避免前端任意 URL（SSRF）。
+ */
+async function runSyncOrdersPull(options: {
+  sourceUrl?: string
+  sourceApiKey?: string
+  allowBodySource: boolean
+}): Promise<PullSyncResult> {
+  const envUrl = (process.env.SYNC_SOURCE_URL || '').trim()
+  const bodyUrl = options.allowBodySource
+    ? (options.sourceUrl || '').trim()
+    : ''
+  const sourceUrl = envUrl || bodyUrl
+  if (!sourceUrl) {
+    return {
+      ok: false,
+      status: 400,
+      message:
+        '未配置 SYNC_SOURCE_URL。请在服务器环境变量中配置生态圈订单列表地址后，再点「刷新同步」。',
+    }
+  }
+
+  try {
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+    }
+    const sourceKey =
+      (process.env.SYNC_SOURCE_API_KEY || '').trim()
+      || (options.allowBodySource ? (options.sourceApiKey || '').trim() : '')
+    if (sourceKey) headers['X-API-Key'] = sourceKey
+
+    const upstream = await fetch(sourceUrl, { headers })
+    if (!upstream.ok) {
+      return {
+        ok: false,
+        status: 502,
+        message: `上游返回 HTTP ${upstream.status}`,
+      }
+    }
+    const data = (await upstream.json()) as unknown
+    const list = parseOrderList(data)
+    const { added, updated, skipped, errors } = applySyncOrderBatch(list, 'pull')
+    return {
+      ok: true,
+      added,
+      updated,
+      skipped,
+      sourceUrl,
+      errors: errors.length ? errors : undefined,
+      message: `拉取同步完成：新增 ${added} 笔，更新 ${updated} 笔，跳过 ${skipped} 笔`,
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      status: 500,
+      message: err instanceof Error ? err.message : String(err),
+    }
+  }
+}
+
+function sendPullSyncResult(res: Response, result: PullSyncResult): void {
+  if (!result.ok) {
+    res.status(result.status).json({ success: false, message: result.message })
+    return
+  }
+  res.json({
+    success: true,
+    message: result.message,
+    added: result.added,
+    updated: result.updated,
+    skipped: result.skipped,
+    sourceUrl: result.sourceUrl,
+    errors: result.errors,
+  })
+}
+
+/**
+ * @description 登录用户主动从生态圈拉取（销售记录「刷新同步」）
+ * @link POST /api/sync-orders/refresh  Bearer token + sales_records 编辑权
+ * 仅使用服务器 SYNC_SOURCE_URL / SYNC_SOURCE_API_KEY，不接受前端传源地址。
+ */
+router.post(
+  '/sync-orders/refresh',
+  authMiddleware,
+  requireModuleEdit('sales_records'),
+  async (_req, res) => {
+    const result = await runSyncOrdersPull({ allowBodySource: false })
+    sendPullSyncResult(res, result)
+  },
+)
+
 /**
  * @description 从外部系统主动拉取并同步到销售记录
  * @link POST /api/sync-orders/pull  Header: X-API-Key
@@ -595,55 +704,16 @@ router.get('/synced-orders', (req, res, next) => {
 router.post('/sync-orders/pull', async (req, res) => {
   if (!validateApiKey(req, res)) return
 
-  const sourceUrl = (
-    process.env.SYNC_SOURCE_URL ||
-    (typeof req.body?.sourceUrl === 'string' ? req.body.sourceUrl : '') ||
-    ''
-  ).trim()
-  if (!sourceUrl) {
-    res.status(400).json({
-      success: false,
-      message: '未配置 SYNC_SOURCE_URL，且请求未传 sourceUrl',
-    })
-    return
-  }
-
-  try {
-    const headers: Record<string, string> = {
-      Accept: 'application/json',
-    }
-    const sourceKey =
-      process.env.SYNC_SOURCE_API_KEY ||
-      (typeof req.body?.sourceApiKey === 'string' ? req.body.sourceApiKey : '')
-    if (sourceKey) headers['X-API-Key'] = sourceKey
-
-    const upstream = await fetch(sourceUrl, { headers })
-    if (!upstream.ok) {
-      res.status(502).json({
-        success: false,
-        message: `上游返回 HTTP ${upstream.status}`,
-      })
-      return
-    }
-    const data = (await upstream.json()) as unknown
-    const list = parseOrderList(data)
-
-    const { added, updated, skipped, errors } = applySyncOrderBatch(list, 'pull')
-    res.json({
-      success: true,
-      message: `拉取同步完成：新增 ${added} 笔，更新 ${updated} 笔，跳过 ${skipped} 笔`,
-      added,
-      updated,
-      skipped,
-      sourceUrl,
-      errors: errors.length ? errors : undefined,
-    })
-  } catch (err) {
-    res.status(500).json({
-      success: false,
-      message: err instanceof Error ? err.message : String(err),
-    })
-  }
+  const result = await runSyncOrdersPull({
+    allowBodySource: true,
+    sourceUrl:
+      typeof req.body?.sourceUrl === 'string' ? req.body.sourceUrl : undefined,
+    sourceApiKey:
+      typeof req.body?.sourceApiKey === 'string'
+        ? req.body.sourceApiKey
+        : undefined,
+  })
+  sendPullSyncResult(res, result)
 })
 
 export default router
