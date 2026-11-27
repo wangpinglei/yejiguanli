@@ -54,6 +54,21 @@ export function isBlankActivity(name: string | null | undefined): boolean {
   return !n || n === '无活动'
 }
 
+/** 列表「活动」列：去掉上游常见的「无活动,+活动名」拼接前缀 */
+export function formatSaleActivityDisplayName(
+  name: string | null | undefined,
+): string {
+  const n = normalizeActivityName(name)
+  if (isBlankActivity(n)) return ''
+  const stripped = n.replace(/^无活动[,，、]\s*/u, '').trim()
+  if (!stripped || stripped === '无活动') return ''
+  return stripped
+}
+
+export function saleRecordHasActivity(name: string | null | undefined): boolean {
+  return formatSaleActivityDisplayName(name).length > 0
+}
+
 function roundMoney(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100
 }

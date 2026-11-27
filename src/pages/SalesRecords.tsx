@@ -13,8 +13,13 @@ import {
 import {
   findProductById,
   formatOrderCostDeductionRemark,
+  formatOrderCostDeductionRemarkBrief,
   resolveOrderCostDeduction,
 } from "@/lib/orderCostBase";
+import {
+  formatSaleActivityDisplayName,
+  saleRecordHasActivity,
+} from "@/lib/activityCost";
 import {
   buildDefaultShares,
   formatShareLabel,
@@ -112,43 +117,63 @@ function readUiScale(): UiScale {
   return "1.2";
 }
 
-/** 长文本截断，点击展开查看全文 */
+function lineClampClass(lineClamp: number): string {
+  if (lineClamp >= 3) return "line-clamp-3";
+  if (lineClamp === 2) return "line-clamp-2";
+  if (lineClamp === 1) return "line-clamp-1";
+  return "truncate";
+}
+
+/** 长文本列内折行（line-clamp），超出或另有 detailText 时可点击查看全文 */
 function ExpandableCellText({
   text,
+  detailText,
   emptyText = "-",
   label = "完整内容",
   maxLen = 10,
-  className = "max-w-[11rem]",
+  lineClamp = 2,
+  className = "w-full min-w-0",
+  textClassName = "text-base",
+  align = "left",
 }: {
   text?: string;
+  /** 弹层全文（可与列内 brief 不同） */
+  detailText?: string;
   emptyText?: string;
   label?: string;
   maxLen?: number;
+  /** 0 = 单行省略；2/3 = 多行折行 */
+  lineClamp?: number;
   className?: string;
+  textClassName?: string;
+  align?: "left" | "center";
 }) {
   const value = (text || "").trim();
   if (!value) {
-    return <span className="text-base text-muted-foreground">{emptyText}</span>;
+    return <span className={`${textClassName} text-muted-foreground`}>{emptyText}</span>;
   }
-  if (value.length <= maxLen) {
-    return <span className="text-base">{value}</span>;
+  const full = (detailText || value).trim();
+  const hasDetail = full.length > 0 && full !== value;
+  const needPopover = hasDetail || value.length > maxLen;
+  const wrap = `box-border max-w-full block break-words whitespace-normal overflow-hidden ${lineClampClass(lineClamp)}`;
+  const alignCls = align === "center" ? "text-center" : "text-left";
+  if (!needPopover) {
+    return <span className={`${textClassName} ${wrap} ${alignCls} ${className}`}>{value}</span>;
   }
   return (
     <Popover>
       <PopoverTrigger asChild>
         <button
           type="button"
-          className={
-            `block w-full truncate text-left text-base text-primary hover:underline cursor-pointer ${className}`
-          }
+          className={`${textClassName} ${alignCls} text-primary hover:underline cursor-pointer ${wrap} ${className}`}
           title="点击查看完整内容"
         >
           {value}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-80 max-w-[min(20rem,90vw)] p-3">
+      <PopoverContent align="start" className="w-80 max-w-[min(24rem,92vw)] p-3">
         <p className="mb-1 text-sm text-muted-foreground">{label}</p>
-        <p className="text-base break-all whitespace-pre-wrap">{value}</p>
+        <p className="text-base break-words whitespace-pre-wrap">{full}</p>
       </PopoverContent>
     </Popover>
   );
@@ -2178,7 +2203,7 @@ export default function SalesRecords() {
 
       <Card ref={tableCardRef}>
         <CardContent className="p-0">
-          <Table className="min-w-[1860px] table-fixed text-base [&_th]:text-base [&_td]:text-base">
+          <Table className="min-w-[1920px] table-fixed text-base [&_th]:text-base [&_td]:overflow-hidden [&_th]:text-base [&_td]:text-base">
               <TableHeader>
                 <TableRow>
                   <TableHead className="h-14 w-14 px-3 text-center text-base">
@@ -2193,8 +2218,12 @@ export default function SalesRecords() {
                       }
                     />
                   </TableHead>
-                  <TableHead className="h-14 min-w-[10rem] px-3 text-base">客户姓名</TableHead>
-                  <TableHead className="h-14 min-w-[12rem] px-3 text-base">购买产品</TableHead>
+                  <TableHead className="h-14 w-[10rem] min-w-[10rem] max-w-[10rem] px-3 text-base">
+                    客户姓名
+                  </TableHead>
+                  <TableHead className="h-14 w-[12rem] min-w-[12rem] max-w-[12rem] px-3 text-base">
+                    购买产品
+                  </TableHead>
                   <TableHead className="h-14 min-w-[7rem] px-3 text-right text-base">订单金额</TableHead>
                   <TableHead className="h-14 min-w-[7rem] px-3 text-right text-base">实收金额</TableHead>
                   <TableHead className="h-14 min-w-[7rem] px-3 text-right text-base">成本扣除</TableHead>
@@ -2203,11 +2232,15 @@ export default function SalesRecords() {
                   </TableHead>
                   <TableHead className="h-14 min-w-[7rem] px-3 text-right text-base">计佣基数</TableHead>
                   <TableHead className="h-14 min-w-[7rem] px-3 text-base">订单类型</TableHead>
-                  <TableHead className="h-14 min-w-[8rem] px-3 text-base">销售单位</TableHead>
-                  <TableHead className="h-14 min-w-[10rem] px-3 text-base">销售人员</TableHead>
+                  <TableHead className="h-14 w-[8rem] min-w-[8rem] max-w-[8rem] px-3 text-base">
+                    销售单位
+                  </TableHead>
+                  <TableHead className="h-14 w-[10rem] min-w-[10rem] max-w-[10rem] px-3 text-base">
+                    销售人员
+                  </TableHead>
                   <TableHead className="h-14 min-w-[8rem] px-3 text-base">成交日期</TableHead>
                   <TableHead
-                    className="h-14 w-[4.5rem] max-w-[4.5rem] px-1.5 text-center text-base"
+                    className="h-14 w-[9.5rem] min-w-[9.5rem] max-w-[9.5rem] px-2 text-left text-base"
                     title="参加活动"
                   >
                     活动
@@ -2292,8 +2325,10 @@ export default function SalesRecords() {
                         aria-label="选择该行"
                       />
                     </TableCell>
-                    <TableCell className={`max-w-[11rem] px-3 py-3 ${borderAccent ? rowTone : ""}`}>
-                      <div className="flex flex-col gap-1">
+                    <TableCell
+                      className={`w-[10rem] min-w-[10rem] max-w-[10rem] px-3 py-3 align-top ${borderAccent ? rowTone : ""}`}
+                    >
+                      <div className="flex flex-col gap-1 min-w-0">
                         {groupInfo && groupInfo.size > 1 && (
                           <Badge
                             variant="outline"
@@ -2309,11 +2344,18 @@ export default function SalesRecords() {
                         <ExpandableCellText
                           text={record.customerName}
                           label="客户姓名"
+                          maxLen={14}
+                          lineClamp={2}
                         />
                       </div>
                     </TableCell>
-                    <TableCell className="whitespace-nowrap px-3 py-3">
-                      {getProductName(record)}
+                    <TableCell className="w-[12rem] min-w-[12rem] max-w-[12rem] px-3 py-3 align-top">
+                      <ExpandableCellText
+                        text={getProductName(record)}
+                        label="购买产品"
+                        maxLen={16}
+                        lineClamp={2}
+                      />
                     </TableCell>
                     <TableCell className="px-3 py-3 text-right text-muted-foreground whitespace-nowrap">
                       {record.orderAmount ? formatCurrency(record.orderAmount) : "-"}
@@ -2336,17 +2378,33 @@ export default function SalesRecords() {
                     {(() => {
                       const product = findProductById(products, record.productId);
                       const costInfo = resolveOrderCostDeduction(record, product);
-                      const costRemark = formatOrderCostDeductionRemark(record, product);
+                      const costRemarkFull = formatOrderCostDeductionRemark(
+                        record,
+                        product,
+                      );
+                      const costRemarkBrief = formatOrderCostDeductionRemarkBrief(
+                        record,
+                        product,
+                      );
                       return (
                         <>
                           <TableCell className="px-3 py-3 text-right text-amber-800 whitespace-nowrap">
                             {formatCurrency(costInfo.cost)}
                           </TableCell>
-                          <TableCell
-                            className="w-[11rem] min-w-[11rem] max-w-[11rem] px-3 py-3 align-top text-xs leading-snug text-muted-foreground whitespace-normal break-words"
-                            title={costRemark}
-                          >
-                            <span className="line-clamp-3 block">{costRemark}</span>
+                          <TableCell className="w-[11rem] min-w-[11rem] max-w-[11rem] px-3 py-3 align-top">
+                            <ExpandableCellText
+                              text={
+                                costInfo.cost <= 0 ? "无业绩扣除" : costRemarkBrief
+                              }
+                              detailText={
+                                costInfo.cost <= 0 ? undefined : costRemarkFull
+                              }
+                              label="扣除原因"
+                              emptyText="无业绩扣除"
+                              maxLen={48}
+                              lineClamp={2}
+                              textClassName="text-xs leading-snug text-muted-foreground"
+                            />
                           </TableCell>
                           <TableCell className="px-3 py-3 text-right font-medium text-sky-800 whitespace-nowrap">
                             {formatCurrency(costInfo.netAmount)}
@@ -2359,34 +2417,47 @@ export default function SalesRecords() {
                         <Badge variant="outline" className="text-sm">{record.orderType}</Badge>
                       ) : "-"}
                     </TableCell>
-                    <TableCell className="px-3 py-3">
-                      <Badge variant="outline" className="text-sm">{getUnitName(record)}</Badge>
+                    <TableCell className="w-[8rem] min-w-[8rem] max-w-[8rem] px-3 py-3 align-top">
+                      <ExpandableCellText
+                        text={getUnitName(record)}
+                        label="销售单位"
+                        maxLen={10}
+                        lineClamp={2}
+                        textClassName="text-sm"
+                      />
                     </TableCell>
-                    <TableCell className="px-3 py-3">
-                      <div className="flex items-center gap-2">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-sm font-medium text-primary">
+                    <TableCell className="w-[10rem] min-w-[10rem] max-w-[10rem] px-3 py-3 align-top">
+                      <div className="flex items-start gap-2 min-w-0">
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-medium text-primary">
                           {getPersonnelName(record)[0]}
                         </div>
-                        {getPersonnelName(record)}
+                        <ExpandableCellText
+                          text={getPersonnelName(record)}
+                          label="销售人员"
+                          maxLen={8}
+                          lineClamp={2}
+                          className="min-w-0 flex-1"
+                        />
                       </div>
                     </TableCell>
                     <TableCell className="px-3 py-3 font-medium whitespace-nowrap">
                       {formatDate(record.saleDate)}
                     </TableCell>
-                    <TableCell
-                      className="max-w-[4.5rem] px-1.5 py-3 text-center text-muted-foreground"
-                      title={
-                        record.activityName && record.activityName !== "无活动"
-                          ? record.activityName
-                          : undefined
-                      }
-                    >
-                      {record.activityName && record.activityName !== "无活动" ? (
-                        <Badge className="max-w-full truncate bg-amber-100 px-1.5 text-xs font-normal text-amber-700">
-                          {record.activityName}
-                        </Badge>
+                    <TableCell className="w-[9.5rem] min-w-[9.5rem] max-w-[9.5rem] px-2 py-3 align-top">
+                      {saleRecordHasActivity(record.activityName) ? (
+                        <span className="inline-flex w-full min-w-0 max-w-full rounded-md bg-amber-50 px-1.5 py-0.5 ring-1 ring-amber-200/80">
+                          <ExpandableCellText
+                            text={formatSaleActivityDisplayName(record.activityName)}
+                            detailText={(record.activityName || "").trim()}
+                            label="参加活动"
+                            maxLen={14}
+                            lineClamp={1}
+                            textClassName="text-xs font-normal text-amber-900"
+                            className="w-full min-w-0"
+                          />
+                        </span>
                       ) : (
-                        <span className="text-xs">-</span>
+                        <span className="text-xs text-muted-foreground">-</span>
                       )}
                     </TableCell>
                     <TableCell className="px-3 py-3 text-right text-violet-600 font-medium whitespace-nowrap">

@@ -215,6 +215,44 @@ function formatAutoOrderCostDeductionRemark(
   return formatProductCostDeductionRemark(sale, product)
 }
 
+/** 列表等紧凑展示：不写完整活动名（活动名单独列展示） */
+function formatAutoOrderCostDeductionRemarkBrief(
+  sale: Pick<
+    SalesRecord,
+    'totalAmount' | 'quantity' | 'activityName' | 'saleDate'
+  > & { unitPrice?: number },
+  product?: Product | null,
+  options?: OrderCostResolveOptions,
+): string {
+  const rules = resolveActivityRules(options)
+  const auto = calcAutoOrderCost(sale, product, options)
+  if (auto.fromActivityRule) {
+    const rule = findActivityCostRuleForSale(
+      rules,
+      sale.activityName,
+      sale.saleDate,
+    )
+    if (rule) {
+      if (rule.costType === 'percentage') {
+        return `活动成本：实收×${rule.costValue}%`
+      }
+      return `活动成本：固定¥${rule.costValue}`
+    }
+    return '活动成本规则'
+  }
+  if (!product) return '产品自动成本'
+  if (product.costType === 'percentage') {
+    const rate = Number(product.costRate) || 0
+    if (rate <= 0) return '产品未配置成本比例'
+    return `产品成本：实收×${rate}%`
+  }
+  const unitCost = Number(product.unitCost) || 0
+  const qty = Number(sale.quantity) || 0
+  if (unitCost <= 0) return '产品未配置单位成本'
+  if (qty <= 0) return '产品成本（按件）'
+  return `产品成本：¥${unitCost}×${qty}件`
+}
+
 /** 业绩扣除原因说明（列表 / 结算 / 导出展示） */
 export function formatOrderCostDeductionRemark(
   sale: Pick<
@@ -239,6 +277,34 @@ export function formatOrderCostDeductionRemark(
     return `本单手工调整（系统建议：${autoReason}）`
   }
   return autoReason
+}
+
+/**
+ * 销售列表「扣除原因」列：口径说明为主，不重复活动全称（见「活动」列；详情弹层用完整版）。
+ */
+export function formatOrderCostDeductionRemarkBrief(
+  sale: Pick<
+    SalesRecord,
+    | 'totalAmount'
+    | 'quantity'
+    | 'costDeductionOverride'
+    | 'synced'
+    | 'activityName'
+    | 'saleDate'
+  > & { unitPrice?: number },
+  product?: Product | null,
+  options?: OrderCostResolveOptions,
+): string {
+  const resolved = resolveOrderCostDeduction(sale, product, options)
+  if (resolved.cost <= 0) return '无业绩扣除'
+  const brief = formatAutoOrderCostDeductionRemarkBrief(sale, product, options)
+  if (resolved.isManual) {
+    if (Math.abs(resolved.cost - resolved.systemCost) < 0.005) {
+      return `已固化 · ${brief}`
+    }
+    return `手工调整 · 建议 ${brief}`
+  }
+  return brief
 }
 
 export function findProductById(
