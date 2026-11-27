@@ -6,6 +6,7 @@ import { roundMoney } from '@/lib/format'
 import {
   findProductById,
   formatOrderCostDeductionRemark,
+  formatOrderCostDeductionRemarkBrief,
   resolveOrderCostDeduction,
 } from '@/lib/orderCostBase'
 import { buildUnitScopedSalesRecords } from '@/lib/saleCollaborators'
@@ -35,6 +36,8 @@ export type SaleSettlementLine = {
   receivedAmount: number
   performanceDeduction: number
   performanceDeductionRemark: string
+  /** 列表展示用，不重复长活动名 */
+  performanceDeductionRemarkBrief: string
   commissionBase: number
   settlementRatioLabel: string
   estimatedSettlement: number
@@ -74,6 +77,10 @@ function buildLine(
   const costResolved = resolveOrderCostDeduction(scaled, product)
   const { cost, netAmount } = costResolved
   const performanceDeductionRemark = formatOrderCostDeductionRemark(scaled, product)
+  const performanceDeductionRemarkBrief = formatOrderCostDeductionRemarkBrief(
+    scaled,
+    product,
+  )
   const received = Number(scaled.totalAmount) || 0
   const person = personnel.find((p) => p.id === scaled.personnelId)
   const ups = findUnitProductSettlement(
@@ -96,6 +103,7 @@ function buildLine(
     receivedAmount: roundMoney(received),
     performanceDeduction: roundMoney(cost),
     performanceDeductionRemark,
+    performanceDeductionRemarkBrief,
     commissionBase: roundMoney(netAmount),
     settlementRatioLabel: formatSaleSettlementRatioForSale(scaled, upsList),
     estimatedSettlement: roundMoney(estimated),

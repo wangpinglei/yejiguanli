@@ -4,6 +4,7 @@ import { useData } from "@/context/DataContext";
 import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import type { UnitSettlementBlock } from "@/lib/saleSettlementReconcile";
+import { ExpandableCellText } from "@/components/ExpandableCellText";
 import { PageHeader } from "@/components/PageHeader";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
 import { buildUnitSettlementBlocks } from "@/lib/saleSettlementReconcile";
@@ -44,11 +45,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 
 function buildMonthOptions(): { value: string; label: string }[] {
   const out: { value: string; label: string }[] = [];
@@ -502,63 +498,99 @@ export default function ProductSettlementSales() {
                                 结算明细
                               </div>
                               <div className="overflow-x-auto rounded-md border bg-background">
-                                <Table>
+                                <Table className="min-w-[1180px] table-fixed text-sm [&_td]:overflow-hidden [&_th]:overflow-hidden">
                                   <TableHeader>
                                     <TableRow>
-                                      <TableHead>成交日</TableHead>
-                                      <TableHead>销售</TableHead>
-                                      <TableHead>客户</TableHead>
-                                      <TableHead>产品</TableHead>
-                                      <TableHead className="text-right">订单金额</TableHead>
-                                      <TableHead className="text-right">实收</TableHead>
-                                      <TableHead className="text-right">业绩扣除</TableHead>
-                                      <TableHead className="min-w-[140px]">扣除原因</TableHead>
-                                      <TableHead className="text-right">记佣金额</TableHead>
-                                      <TableHead className="text-right">比例</TableHead>
-                                      <TableHead className="text-right">预估结算</TableHead>
-                                      <TableHead className="text-right">实际结算</TableHead>
-                                      <TableHead>来源</TableHead>
-                                      <TableHead className="min-w-[8rem]">订单号</TableHead>
+                                      <TableHead className="w-[5.5rem]">成交日</TableHead>
+                                      <TableHead className="w-[4.5rem]">销售</TableHead>
+                                      <TableHead className="w-[5.5rem]">客户</TableHead>
+                                      <TableHead className="w-[7.5rem]">产品</TableHead>
+                                      <TableHead className="w-[5rem] text-right">订单金额</TableHead>
+                                      <TableHead className="w-[4.5rem] text-right">实收</TableHead>
+                                      <TableHead className="w-[5rem] text-right">业绩扣除</TableHead>
+                                      <TableHead className="w-[7.5rem]">扣除原因</TableHead>
+                                      <TableHead className="w-[5rem] text-right">记佣金额</TableHead>
+                                      <TableHead className="w-[3.5rem] text-right">比例</TableHead>
+                                      <TableHead className="w-[5rem] text-right">预估结算</TableHead>
+                                      <TableHead className="w-[5rem] text-right">实际结算</TableHead>
+                                      <TableHead className="w-[4rem]">来源</TableHead>
+                                      <TableHead className="w-[6.5rem]">订单号</TableHead>
                                     </TableRow>
                                   </TableHeader>
                                   <TableBody>
                                     {b.lines.map((l, idx) => (
                                       <TableRow key={`${l.saleId}-${idx}`}>
-                                        <TableCell className="text-sm">
+                                        <TableCell className="whitespace-nowrap text-sm">
                                           {formatDate(l.saleDate)}
                                         </TableCell>
-                                        <TableCell className="text-sm">{l.salesPersonName}</TableCell>
-                                        <TableCell className="text-sm text-muted-foreground">
-                                          {l.customerName || "—"}
+                                        <TableCell className="align-top text-sm">
+                                          <ExpandableCellText
+                                            text={l.salesPersonName}
+                                            label="销售"
+                                            maxLen={6}
+                                            lineClamp={1}
+                                            textClassName="text-sm"
+                                          />
                                         </TableCell>
-                                        <TableCell className="text-sm">{l.productName}</TableCell>
-                                        <TableCell className="text-right text-sm text-muted-foreground">
+                                        <TableCell className="align-top text-sm text-muted-foreground">
+                                          <ExpandableCellText
+                                            text={l.customerName || "—"}
+                                            label="客户"
+                                            emptyText="—"
+                                            maxLen={8}
+                                            lineClamp={1}
+                                            textClassName="text-sm text-muted-foreground"
+                                          />
+                                        </TableCell>
+                                        <TableCell className="align-top text-sm">
+                                          <ExpandableCellText
+                                            text={l.productName}
+                                            label="产品"
+                                            maxLen={12}
+                                            lineClamp={2}
+                                            textClassName="text-sm"
+                                          />
+                                        </TableCell>
+                                        <TableCell className="text-right text-sm text-muted-foreground whitespace-nowrap">
                                           {l.orderAmount > 0
                                             ? formatCurrency(l.orderAmount)
                                             : "—"}
                                         </TableCell>
-                                        <TableCell className="text-right text-sm">
+                                        <TableCell className="text-right text-sm whitespace-nowrap">
                                           {formatCurrency(l.receivedAmount)}
                                         </TableCell>
-                                        <TableCell className="text-right text-sm text-amber-800">
+                                        <TableCell className="text-right text-sm text-amber-800 whitespace-nowrap">
                                           {formatCurrency(l.performanceDeduction)}
                                         </TableCell>
-                                        <TableCell
-                                          className="max-w-[220px] text-xs text-muted-foreground"
-                                          title={l.performanceDeductionRemark}
-                                        >
-                                          {l.performanceDeductionRemark}
+                                        <TableCell className="align-top">
+                                          <ExpandableCellText
+                                            text={
+                                              l.performanceDeduction <= 0
+                                                ? "无业绩扣除"
+                                                : l.performanceDeductionRemarkBrief
+                                            }
+                                            detailText={
+                                              l.performanceDeduction <= 0
+                                                ? undefined
+                                                : l.performanceDeductionRemark
+                                            }
+                                            label="扣除原因"
+                                            emptyText="无业绩扣除"
+                                            maxLen={40}
+                                            lineClamp={2}
+                                            textClassName="text-xs leading-snug text-muted-foreground"
+                                          />
                                         </TableCell>
-                                        <TableCell className="text-right text-sm font-medium text-blue-700">
+                                        <TableCell className="text-right text-sm font-medium text-blue-700 whitespace-nowrap">
                                           {formatCurrency(l.commissionBase)}
                                         </TableCell>
-                                        <TableCell className="text-right text-sm text-muted-foreground">
+                                        <TableCell className="text-right text-sm text-muted-foreground whitespace-nowrap">
                                           {l.settlementRatioLabel}
                                         </TableCell>
-                                        <TableCell className="text-right text-sm font-medium text-cyan-700">
+                                        <TableCell className="text-right text-sm font-medium text-cyan-700 whitespace-nowrap">
                                           {formatCurrency(l.estimatedSettlement)}
                                         </TableCell>
-                                        <TableCell className="text-right text-sm font-medium">
+                                        <TableCell className="text-right text-sm font-medium whitespace-nowrap">
                                           {formatCurrency(l.actualSettlement)}
                                         </TableCell>
                                         <TableCell>
@@ -572,8 +604,15 @@ export default function ProductSettlementSales() {
                                             </Badge>
                                           )}
                                         </TableCell>
-                                        <TableCell className="text-sm text-muted-foreground">
-                                          {l.orderNumber || "—"}
+                                        <TableCell className="align-top text-sm text-muted-foreground">
+                                          <ExpandableCellText
+                                            text={l.orderNumber || "—"}
+                                            label="订单号"
+                                            emptyText="—"
+                                            maxLen={10}
+                                            lineClamp={1}
+                                            textClassName="text-sm text-muted-foreground"
+                                          />
                                         </TableCell>
                                       </TableRow>
                                     ))}
