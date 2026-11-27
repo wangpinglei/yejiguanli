@@ -41,6 +41,14 @@ function HrManageRoute({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+function ProductSettlementRoute({ children }: { children: ReactNode }) {
+  const { canView, isSuperadmin } = usePermissions();
+  if (!isSuperadmin && !canView("product_settlement")) {
+    return <Navigate to="/" replace />;
+  }
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <AuthProvider>
@@ -79,9 +87,30 @@ export default function App() {
               <Route path="payroll/commission-detail" element={<PayrollCommissionDetail />} />
               <Route path="profit-analysis" element={<ProfitAnalysis />} />
               <Route path="sales-battle-report" element={<SalesBattleReport />} />
-              <Route path="product-settlement" element={<ProductSettlement />} />
-              <Route path="product-settlement/settlement" element={<ProductSettlementSales />} />
-              <Route path="product-settlement/commission-overview" element={<ProductCommissionOverview />} />
+              <Route
+                path="product-settlement"
+                element={
+                  <ProductSettlementRoute>
+                    <ProductSettlement />
+                  </ProductSettlementRoute>
+                }
+              />
+              <Route
+                path="product-settlement/settlement"
+                element={
+                  <ProductSettlementRoute>
+                    <ProductSettlementSales />
+                  </ProductSettlementRoute>
+                }
+              />
+              <Route
+                path="product-settlement/commission-overview"
+                element={
+                  <ProductSettlementRoute>
+                    <ProductCommissionOverview />
+                  </ProductSettlementRoute>
+                }
+              />
                   <Route
                 path="users"
                 element={

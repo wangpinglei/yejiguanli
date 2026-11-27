@@ -15,8 +15,12 @@ export type ModuleKey =
   | "product_settlement"
   | "users";
 
-/** 机密模块：旧角色默认不开放，仅超管在权限分配中手动勾选 */
-const CONFIDENTIAL_MODULE_KEYS = new Set<ModuleKey>(["hr_management", "payroll"]);
+/** 敏感模块：旧角色默认不开放，须在权限分配中单独勾选 */
+const CONFIDENTIAL_MODULE_KEYS = new Set<ModuleKey>([
+  "hr_management",
+  "payroll",
+  "product_settlement",
+]);
 
 export interface ModulePermission {
   view: boolean;
@@ -93,7 +97,7 @@ export const MODULE_PERMISSION_GROUPS: ModulePermissionGroup[] = [
   {
     id: "product-settlement",
     label: "业务域结算",
-    hint: "产品结算金额设定 · 产品结算（按记佣金额×比例核对）",
+    hint: "产品结算金额设定 · 产品结算（须单独勾选，且受单位范围限制）",
     moduleKeys: ["product_settlement"],
   },
   {
@@ -165,8 +169,6 @@ export function permissionsFromLegacyRole(role: string): UserPermissions {
       MODULE_DEFS.forEach((m) => {
         if (m.key === "users" || CONFIDENTIAL_MODULE_KEYS.has(m.key)) {
           empty[m.key] = { view: false, edit: false };
-        } else if (m.key === "product_settlement") {
-          empty[m.key] = { view: true, edit: false };
         } else {
           empty[m.key] = { view: true, edit: m.canEdit };
         }
@@ -192,6 +194,8 @@ export function normalizePermissions(
       const view = Boolean(item.view || item.edit);
       const edit = def.canEdit ? Boolean(item.edit) : false;
       result[def.key] = { view: view || edit, edit };
+    } else if (CONFIDENTIAL_MODULE_KEYS.has(def.key)) {
+      result[def.key] = { view: false, edit: false };
     } else {
       result[def.key] = base[def.key];
     }
@@ -222,6 +226,7 @@ export function hasModuleEdit(perms: UserPermissions, key: ModuleKey, isSuperadm
 export function pathToModuleKey(pathname: string): ModuleKey | null {
   const normalized = pathname.replace(/\/+$/, "") || "/";
   if (normalized === "/products") return "product_settlement";
+  if (normalized.startsWith("/product-settlement")) return "product_settlement";
   const found = MODULE_DEFS.find((m) => m.path === normalized);
   return found?.key ?? null;
 }

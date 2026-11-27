@@ -116,6 +116,7 @@ function addUnitDetailSheet(
 export async function downloadProductSettlementSalesExcel(
   blocks: UnitSettlementBlock[],
   yearMonth: string,
+  fileNameSuffix?: string,
 ): Promise<void> {
   const workbook = new ExcelJS.Workbook()
   workbook.creator = 'yejiguanli'
@@ -159,7 +160,10 @@ export async function downloadProductSettlementSalesExcel(
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `产品结算_${yearMonth}.xlsx`.replace(/[\\/:*?"<>|]/g, '_')
+  const extra = fileNameSuffix
+    ? `_${fileNameSuffix}`.replace(/[\\/:*?"<>|]/g, '_')
+    : ''
+  a.download = `产品结算_${yearMonth}${extra}.xlsx`.replace(/[\\/:*?"<>|]/g, '_')
   a.click()
   URL.revokeObjectURL(url)
 }

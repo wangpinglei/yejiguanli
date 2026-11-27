@@ -41,8 +41,12 @@ const MODULE_KEYS: ModuleKey[] = [
   "users",
 ];
 
-/** 机密模块：旧角色默认映射一律关闭，仅超管手动授权 */
-const CONFIDENTIAL = new Set<ModuleKey>(["hr_management", "payroll"]);
+/** 敏感模块：旧角色默认关闭，须在权限分配中单独勾选 */
+const CONFIDENTIAL = new Set<ModuleKey>([
+  "hr_management",
+  "payroll",
+  "product_settlement",
+]);
 
 const EDITABLE = new Set<ModuleKey>([
   "sales_units",
@@ -109,8 +113,6 @@ export function permissionsFromLegacyRole(role: string): UserPermissions {
       MODULE_KEYS.forEach((key) => {
         if (key === "users" || CONFIDENTIAL.has(key)) {
           empty[key] = { view: false, edit: false };
-        } else if (key === "product_settlement") {
-          empty[key] = { view: true, edit: false };
         } else {
           empty[key] = { view: true, edit: EDITABLE.has(key) };
         }
@@ -136,6 +138,8 @@ export function normalizePermissions(
       const edit = EDITABLE.has(key) ? Boolean(item.edit) : false;
       const view = Boolean(item.view || edit);
       result[key] = { view, edit };
+    } else if (CONFIDENTIAL.has(key)) {
+      result[key] = { view: false, edit: false };
     } else {
       result[key] = base[key];
     }

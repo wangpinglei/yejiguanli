@@ -30,6 +30,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
 function buildMonthOptions(): { value: string; label: string }[] {
   const out: { value: string; label: string }[] = [];
@@ -59,9 +65,37 @@ export default function ProductSettlementSales() {
   const [selectedMonth, setSelectedMonth] = useState(
     () => new Date().toISOString().slice(0, 7),
   );
-  const [filterUnitId, setFilterUnitId] = useState<string>("all");
+  const [filterUnitIds, setFilterUnitIds] = useState<string[]>([]);
+  const [unitPickerOpen, setUnitPickerOpen] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
+
+  const isAllFilterUnits = filterUnitIds.length === 0;
+  const filterUnitLabel = useMemo(() => {
+    if (isAllFilterUnits) return "全部单位";
+    if (filterUnitIds.length === 1) {
+      return salesUnits.find((u) => u.id === filterUnitIds[0])?.name || "已选 1 个单位";
+    }
+    return `已选 ${filterUnitIds.length} 个单位`;
+  }, [isAllFilterUnits, filterUnitIds, salesUnits]);
+
+  function handleSelectAllFilterUnits() {
+    setFilterUnitIds([]);
+  }
+
+  function handleToggleFilterUnit(unitId: string, checked: boolean) {
+    if (isAllFilterUnits) {
+      if (checked) setFilterUnitIds([unitId]);
+      return;
+    }
+    let next = checked
+      ? Array.from(new Set([...filterUnitIds, unitId]))
+      : filterUnitIds.filter((id) => id !== unitId);
+    if (next.length === 0 || next.length === salesUnits.length) {
+      next = [];
+    }
+    setFilterUnitIds(next);
+  }
 
   const blocks = useMemo(
     () =>
@@ -73,7 +107,7 @@ export default function ProductSettlementSales() {
         upsList,
         revenueSettlements,
         yearMonth: selectedMonth,
-        unitFilterIds: filterUnitId === "all" ? null : [filterUnitId],
+        unitFilterIds: isAllFilterUnits ? null : filterUnitIds,
       }),
     [
       salesUnits,
@@ -83,7 +117,8 @@ export default function ProductSettlementSales() {
       upsList,
       revenueSettlements,
       selectedMonth,
-      filterUnitId,
+      isAllFilterUnits,
+      filterUnitIds,
     ],
   );
 
@@ -110,7 +145,16 @@ export default function ProductSettlementSales() {
         alert("当前月份没有可导出的结算明细");
         return;
       }
-      await downloadProductSettlementSalesExcel(blocks, selectedMonth);
+      const fileNameSuffix = isAllFilterUnits
+        ? undefined
+        : filterUnitIds.length === 1
+          ? salesUnits.find((u) => u.id === filterUnitIds[0])?.name
+          : `已选${filterUnitIds.length}个单位`;
+      await downloadProductSettlementSalesExcel(
+        blocks,
+        selectedMonth,
+        fileNameSuffix,
+      );
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : "导出失败");
     } finally {
@@ -137,24 +181,62 @@ export default function ProductSettlementSales() {
                 ))}
               </SelectContent>
             </Select>
-            <Select value={filterUnitId} onValueChange={setFilterUnitId}>
-              <SelectTrigger className="w-40">
-                <SelectValue placeholder="单位" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部单位</SelectItem>
-                {salesUnits.map((u) => (
-                  <SelectItem key={u.id} value={u.id}>
-                    {u.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Popover open={unitPickerOpen} onOpenChange={setUnitPickerOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 w-44 justify-between font-normal"
+                >
+                  <span className="truncate">{filterUnitLabel}</span>
+                  <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-72 p-2" align="end">
+                <div className="max-h-72 space-y-1 overflow-y-auto">
+                  <p className="px-2 pb-1 text-xs text-muted-foreground">
+                    勾选要查看/导出的单位；不选即为全部
+                  </p>
+                  <button
+                    type="button"
+                    className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
+                    onClick={handleSelectAllFilterUnits}
+                  >
+                    <Checkbox checked={isAllFilterUnits} />
+                    <span>全部单位</span>
+                  </button>
+                  <div className="my-1 border-t" />
+                  {salesUnits.map((u) => {
+                    const checked =
+                      !isAllFilterUnits && filterUnitIds.includes(u.id);
+                    return (
+                      <label
+                        key={u.id}
+                        className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted"
+                      >
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={(v) =>
+                            handleToggleFilterUnit(u.id, v === true)
+                          }
+                        />
+                        <span className="truncate">{u.name}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </PopoverContent>
+            </Popover>
             <Button
               type="button"
               variant="outline"
               disabled={exporting || totals.count === 0}
               onClick={() => void handleExport()}
+              title={
+                isAllFilterUnits
+                  ? "导出全部单位"
+                  : `仅导出：${filterUnitLabel}`
+              }
             >
               <Download className="mr-1.5 h-4 w-4" />
               {exporting ? "导出中…" : "导出 Excel"}

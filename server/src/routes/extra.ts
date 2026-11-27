@@ -9,6 +9,7 @@ import {
 import { authMiddleware } from "../auth";
 import {
   assertUnitAccess,
+  canAccessUnitId,
   getVisibleUnitIds,
   requireEditPermission,
   requireModuleEdit,
@@ -224,13 +225,14 @@ router.get("/unit-product-settlements", (req, res) => {
   res.json(rows.map(rowToUnitProductSettlement));
 });
 
-router.post("/unit-product-settlements/upsert", requireEditPermission, (req, res) => {
+router.post("/unit-product-settlements/upsert", requireModuleEdit("product_settlement"), (req, res) => {
   const {
     salesUnitId, productId, settlementType, settlementRate, settlementAmount, note,
     effectiveFrom, effectiveTo, rewardAmount, rewardFrom, rewardTo,
     excludeFromTeamMgmt, excludeFromPerformance,
   } = req.body;
   if (!salesUnitId || !productId) return res.status(400).json({ error: "单位和产品不能为空" });
+  if (!assertUnitAccess(req, res, salesUnitId)) return;
   const db = getDb();
   const existing = db.prepare(
     "SELECT * FROM unit_product_settlements WHERE sales_unit_id=? AND product_id=?"
@@ -276,8 +278,20 @@ router.post("/unit-product-settlements/upsert", requireEditPermission, (req, res
   res.json(rowToUnitProductSettlement(db.prepare("SELECT * FROM unit_product_settlements WHERE id=?").get(id)));
 });
 
-router.post("/unit-product-settlements/batch", requireEditPermission, (req, res) => {
+router.post("/unit-product-settlements/batch", requireModuleEdit("product_settlement"), (req, res) => {
   const items = Array.isArray(req.body) ? req.body : (req.body.items || []);
+  for (const item of items) {
+  const {
+      salesUnitId,
+      productId,
+    } = item || {};
+    if (!salesUnitId || !productId) {
+      return res.status(400).json({ error: "批量项缺少单位或产品" });
+    }
+    if (!canAccessUnitId(req.user!, salesUnitId)) {
+      return res.status(403).json({ error: "无权操作该销售单位的数据" });
+    }
+  }
   const db = getDb();
   const results: any[] = [];
   runInTransaction(() => {
@@ -327,10 +341,14 @@ router.post("/unit-product-settlements/batch", requireEditPermission, (req, res)
   res.json(results);
 });
 
-router.delete("/unit-product-settlements/:id", requireEditPermission, (req, res) => {
+router.delete("/unit-product-settlements/:id", requireModuleEdit("product_settlement"), (req, res) => {
   const db = getDb();
-  const result = db.prepare("DELETE FROM unit_product_settlements WHERE id=?").run(req.params.id);
-  if (result.changes === 0) return res.status(404).json({ error: "记录不存在" });
+  const existing = db.prepare(
+    "SELECT sales_unit_id FROM unit_product_settlements WHERE id=?",
+  ).get(req.params.id) as { sales_unit_id?: string } | undefined;
+  if (!existing) return res.status(404).json({ error: "记录不存在" });
+  if (!assertUnitAccess(req, res, existing.sales_unit_id)) return;
+  db.prepare("DELETE FROM unit_product_settlements WHERE id=?").run(req.params.id);
   res.json({ message: "删除成功" });
 });
 

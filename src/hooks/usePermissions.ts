@@ -136,6 +136,7 @@ export function usePermissions() {
   const canViewHr = canView("hr_management");
   const canEditSales = canEdit("sales_records");
   const canEditCost = canEdit("cost_management") || canEdit("profit_analysis");
+  const canViewProduct = canView("product_settlement");
   const canEditProduct = canEdit("product_settlement");
   const canEditBattleReport = canEdit("sales_battle_report");
   const canEditFinanceNotice = canEdit("finance_notice");
@@ -178,6 +179,7 @@ export function usePermissions() {
     canViewHr,
     canEditSales,
     canEditCost,
+    canViewProduct,
     canEditProduct,
     canEditBattleReport,
     canEditFinanceNotice,
