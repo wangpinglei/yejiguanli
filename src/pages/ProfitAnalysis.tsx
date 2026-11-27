@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, Fragment } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import ExcelJS from "exceljs";
 import { useData } from "@/context/DataContext";
@@ -66,7 +66,17 @@ import MCostConfirmDialog, {
 const COLORS = ["#3b82f6", "#f97316", "#10b981", "#8b5cf6", "#ef4444", "#06b6d4", "#eab308"];
 
 export default function ProfitAnalysis() {
-  const { products, monthlyAdjustments, upsertRevenueSettlement, upsertCostSettlement, updateCostRecord, productPersonCommissions, teamMgmtCommissionRules, performanceTargets } = useData();
+  const {
+    products,
+    monthlyAdjustments,
+    upsertRevenueSettlement,
+    deleteRevenueSettlement,
+    upsertCostSettlement,
+    updateCostRecord,
+    productPersonCommissions,
+    teamMgmtCommissionRules,
+    performanceTargets,
+  } = useData();
   const { user } = useAuth();
   const { visibleSalesUnits: salesUnits, visiblePersonnel: personnel, visibleSalesRecords: salesRecords, visibleCostRecords: costRecords, visibleIncomeRecords: incomeRecords, visibleRevenueSettlements: revenueSettlements, visibleCostSettlements: costSettlements, visibleUnitProductSettlements, canEditCost, isReadOnly } = usePermissions();
   const teamMgmtContext = useMemo(() => ({
@@ -575,6 +585,32 @@ unitIds,
     return { totalEstimated, totalActual, totalOther, grandTotal, adjustedCount };
   }, [incomeDetail]);
 
+  const confirmDialogOpenedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (searchParams.get("confirm") !== "1") return;
+    const unitId = searchParams.get("unit");
+    if (!unitId) return;
+    const key = `${selectedMonth}:${unitId}`;
+    if (confirmDialogOpenedRef.current === key) return;
+    const row = incomeDetail.find((d) => d.unit.id === unitId);
+    if (!row) return;
+    confirmDialogOpenedRef.current = key;
+    setExpandedIncomeRows((prev) => new Set(prev).add(unitId));
+    window.setTimeout(() => {
+      document.getElementById("section-profit-income")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+      openSettlement(
+        row.unit.id,
+        row.unit.name,
+        row.estimatedAmount,
+        row.settlement,
+      );
+    }, 200);
+  }, [searchParams, incomeDetail, selectedMonth]);
+
   // 展开/折叠收入明细行
   const toggleIncomeRow = (unitId: string) => {
     setExpandedIncomeRows((prev) => {
@@ -777,16 +813,34 @@ unitIds,
     });
   }
 
+  async function handleRevokeSettlement(
+    settlement: RevenueSettlement | undefined,
+    unitName: string,
+  ) {
+    if (!settlement?.id) return;
+    if (
+      !window.confirm(
+        `撤回「${unitName}」${selectedMonth} 的结算确认？撤回后可重新确认。`,
+      )
+    ) {
+      return;
+    }
+    await deleteRevenueSettlement(settlement.id);
+  }
+
   async function handleSettlementSubmit() {
     if (!settlementDialog) return;
-    const isAdjusted = settlementForm.actualAmount !== settlementDialog.estimated;
+    if (!settlementForm.remark.trim()) {
+      alert("请填写确认说明");
+      return;
+    }
     await upsertRevenueSettlement({
       salesUnitId: settlementDialog.unitId,
       yearMonth: selectedMonth,
       estimatedAmount: settlementDialog.estimated,
       actualAmount: settlementForm.actualAmount,
-      isAdjusted,
-      remark: settlementForm.remark || (isAdjusted ? "手动调整实际结算金额" : ""),
+      isAdjusted: true,
+      remark: settlementForm.remark.trim(),
       adjustedBy: user?.name,
       adjustedAt: new Date().toISOString(),
     });
@@ -1557,7 +1611,7 @@ unitIds,
                         <TableCell>
                           {d.isAdjusted ? (
                             <Badge className="bg-amber-100 text-amber-700 text-xs">
-                              <CheckCircle2 className="mr-1 h-3 w-3" />已调整
+                              <CheckCircle2 className="mr-1 h-3 w-3" />已确认
                             </Badge>
                           ) : (
                             <Badge variant="outline" className="text-xs">待确认</Badge>
@@ -1565,19 +1619,34 @@ unitIds,
                         </TableCell>
                         <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                           {canEditCost && !isReadOnly ? (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => openSettlement(
-                                d.unit.id,
-                                d.unit.name,
-                                d.estimatedAmount,
-                                d.settlement,
-                              )}
-                            >
-                              <Pencil className="mr-1 h-3.5 w-3.5" />
-                              {d.isAdjusted ? "重新调整" : "调整结算"}
-                            </Button>
+                            <div className="flex flex-col items-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => openSettlement(
+                                  d.unit.id,
+                                  d.unit.name,
+                                  d.estimatedAmount,
+                                  d.settlement,
+                                )}
+                              >
+                                <Pencil className="mr-1 h-3.5 w-3.5" />
+                                {d.isAdjusted ? "重新确认" : "确认结算"}
+                              </Button>
+                              {d.isAdjusted && d.settlement?.id ? (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 text-xs text-amber-800"
+                                  onClick={() => void handleRevokeSettlement(
+                                    d.settlement,
+                                    d.unit.name,
+                                  )}
+                                >
+                                  撤回确认
+                                </Button>
+                              ) : null}
+                            </div>
                           ) : (
                             <span className="text-xs text-muted-foreground">仅查看</span>
                           )}
@@ -2043,7 +2112,7 @@ unitIds,
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Receipt className="h-5 w-5 text-emerald-600" />
-              调整实际结算金额
+              确认实际结算金额
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -2074,13 +2143,13 @@ unitIds,
               />
             </div>
             <div className="space-y-2">
-              <Label>调整说明</Label>
+              <Label>确认说明（必填）</Label>
               <Textarea
                 value={settlementForm.remark}
                 onChange={(e) =>
                   setSettlementForm({ ...settlementForm, remark: e.target.value })
                 }
-                placeholder="如：退款扣除、折扣调整、补差等"
+                placeholder="例：与预估核对无误 / 退款扣除、补差说明"
                 rows={2}
               />
             </div>
@@ -2099,8 +2168,8 @@ unitIds,
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setSettlementDialog(null)}>取消</Button>
-            <Button onClick={handleSettlementSubmit}>
-              <Clock className="mr-1 h-4 w-4" />保存调整
+            <Button onClick={() => void handleSettlementSubmit()}>
+              <Clock className="mr-1 h-4 w-4" />保存确认
             </Button>
           </DialogFooter>
         </DialogContent>

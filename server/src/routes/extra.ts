@@ -117,6 +117,9 @@ router.get("/revenue-settlements", (req, res) => {
 router.post("/revenue-settlements/upsert", requireEditPermission, (req, res) => {
   const { salesUnitId, yearMonth, estimatedAmount, actualAmount, isAdjusted, remark, adjustedBy, adjustedAt } = req.body;
   if (!salesUnitId || !yearMonth) return res.status(400).json({ error: "单位和月份不能为空" });
+  if (!assertUnitAccess(req, res, salesUnitId)) return;
+  const actorName = req.user?.name || adjustedBy || null;
+  const actedAt = adjustedAt || new Date().toISOString();
   const db = getDb();
   const existing = db.prepare(
     "SELECT * FROM revenue_settlements WHERE sales_unit_id=? AND year_month=?"
@@ -130,8 +133,8 @@ router.post("/revenue-settlements/upsert", requireEditPermission, (req, res) => 
       actualAmount !== undefined ? actualAmount : existing.actual_amount,
       isAdjusted != null ? (isAdjusted ? 1 : 0) : existing.is_adjusted,
       remark ?? existing.remark,
-      adjustedBy ?? existing.adjusted_by,
-      adjustedAt ?? existing.adjusted_at,
+      actorName ?? existing.adjusted_by,
+      actedAt ?? existing.adjusted_at,
       existing.id
     );
     return res.json(rowToRevenueSettlement(db.prepare("SELECT * FROM revenue_settlements WHERE id=?").get(existing.id)));
@@ -143,15 +146,19 @@ router.post("/revenue-settlements/upsert", requireEditPermission, (req, res) => 
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id, salesUnitId, yearMonth, estimatedAmount || 0, actualAmount ?? null,
-    isAdjusted ? 1 : 0, remark || "", adjustedBy || null, adjustedAt || null
+    isAdjusted ? 1 : 0, remark || "", actorName, actedAt
   );
   res.json(rowToRevenueSettlement(db.prepare("SELECT * FROM revenue_settlements WHERE id=?").get(id)));
 });
 
 router.delete("/revenue-settlements/:id", requireEditPermission, (req, res) => {
   const db = getDb();
-  const result = db.prepare("DELETE FROM revenue_settlements WHERE id=?").run(req.params.id);
-  if (result.changes === 0) return res.status(404).json({ error: "记录不存在" });
+  const existing = db.prepare(
+    "SELECT sales_unit_id FROM revenue_settlements WHERE id=?",
+  ).get(req.params.id) as { sales_unit_id?: string } | undefined;
+  if (!existing) return res.status(404).json({ error: "记录不存在" });
+  if (!assertUnitAccess(req, res, existing.sales_unit_id)) return;
+  db.prepare("DELETE FROM revenue_settlements WHERE id=?").run(req.params.id);
   res.json({ message: "删除成功" });
 });
 

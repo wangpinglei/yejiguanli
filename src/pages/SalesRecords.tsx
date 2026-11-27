@@ -2178,7 +2178,7 @@ export default function SalesRecords() {
 
       <Card ref={tableCardRef}>
         <CardContent className="p-0">
-          <Table className="min-w-[1680px] text-base [&_th]:text-base [&_td]:text-base">
+          <Table className="min-w-[1860px] table-fixed text-base [&_th]:text-base [&_td]:text-base">
               <TableHeader>
                 <TableRow>
                   <TableHead className="h-14 w-14 px-3 text-center text-base">
@@ -2198,7 +2198,9 @@ export default function SalesRecords() {
                   <TableHead className="h-14 min-w-[7rem] px-3 text-right text-base">订单金额</TableHead>
                   <TableHead className="h-14 min-w-[7rem] px-3 text-right text-base">实收金额</TableHead>
                   <TableHead className="h-14 min-w-[7rem] px-3 text-right text-base">成本扣除</TableHead>
-                  <TableHead className="h-14 min-w-[10rem] px-3 text-base">扣除原因</TableHead>
+                  <TableHead className="h-14 w-[11rem] min-w-[11rem] max-w-[11rem] px-3 text-left text-base">
+                    扣除原因
+                  </TableHead>
                   <TableHead className="h-14 min-w-[7rem] px-3 text-right text-base">计佣基数</TableHead>
                   <TableHead className="h-14 min-w-[7rem] px-3 text-base">订单类型</TableHead>
                   <TableHead className="h-14 min-w-[8rem] px-3 text-base">销售单位</TableHead>
@@ -2341,10 +2343,10 @@ export default function SalesRecords() {
                             {formatCurrency(costInfo.cost)}
                           </TableCell>
                           <TableCell
-                            className="max-w-[200px] px-3 py-3 text-xs text-muted-foreground"
+                            className="w-[11rem] min-w-[11rem] max-w-[11rem] px-3 py-3 align-top text-xs leading-snug text-muted-foreground whitespace-normal break-words"
                             title={costRemark}
                           >
-                            {costRemark}
+                            <span className="line-clamp-3 block">{costRemark}</span>
                           </TableCell>
                           <TableCell className="px-3 py-3 text-right font-medium text-sky-800 whitespace-nowrap">
                             {formatCurrency(costInfo.netAmount)}

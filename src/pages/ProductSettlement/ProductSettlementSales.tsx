@@ -1,15 +1,18 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useState, type MouseEvent } from "react";
 import { Link } from "react-router-dom";
 import { useData } from "@/context/DataContext";
+import { useAuth } from "@/context/AuthContext";
 import { usePermissions } from "@/hooks/usePermissions";
+import type { UnitSettlementBlock } from "@/lib/saleSettlementReconcile";
 import { PageHeader } from "@/components/PageHeader";
-import { formatCurrency, formatDate } from "@/lib/format";
+import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
 import { buildUnitSettlementBlocks } from "@/lib/saleSettlementReconcile";
 import { downloadProductSettlementSalesExcel } from "@/lib/productSettlementSalesExport";
 import {
   ChevronDown,
   ChevronRight,
   Download,
+  ExternalLink,
   TrendingUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -30,6 +33,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Popover,
@@ -52,14 +65,21 @@ function buildMonthOptions(): { value: string; label: string }[] {
 }
 
 export default function ProductSettlementSales() {
-  const { products } = useData();
+  const { products, upsertRevenueSettlement, deleteRevenueSettlement } = useData();
+  const { user } = useAuth();
   const {
     visibleSalesUnits: salesUnits,
     visibleSalesRecords: salesRecords,
     visiblePersonnel: personnel,
     visibleRevenueSettlements: revenueSettlements,
     visibleUnitProductSettlements: upsList,
+    canEditCost,
+    canEditProduct,
+    isReadOnly,
   } = usePermissions();
+  /** 须盈亏分析或业务域结算的「编辑」权，查看权不能确认 */
+  const canConfirmSettlement =
+    !isReadOnly && (canEditCost || canEditProduct);
 
   const monthOptions = useMemo(() => buildMonthOptions(), []);
   const [selectedMonth, setSelectedMonth] = useState(
@@ -69,6 +89,14 @@ export default function ProductSettlementSales() {
   const [unitPickerOpen, setUnitPickerOpen] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
+  const [confirmDialogBlock, setConfirmDialogBlock] =
+    useState<UnitSettlementBlock | null>(null);
+  const [confirmForm, setConfirmForm] = useState({
+    actualAmount: 0,
+    remark: "",
+  });
+  const [confirmSubmitting, setConfirmSubmitting] = useState(false);
+  const [revokingUnitId, setRevokingUnitId] = useState<string | null>(null);
 
   const isAllFilterUnits = filterUnitIds.length === 0;
   const filterUnitLabel = useMemo(() => {
@@ -129,6 +157,90 @@ export default function ProductSettlementSales() {
     return { estimated, actual, count };
   }, [blocks]);
 
+  function profitConfirmHref(unitId: string) {
+    const q = new URLSearchParams({
+      month: selectedMonth,
+      unit: unitId,
+      confirm: "1",
+    });
+    return `/profit-analysis?${q.toString()}`;
+  }
+
+  function openConfirmDialog(block: UnitSettlementBlock, e: MouseEvent) {
+    e.stopPropagation();
+    if (block.lines.length === 0) {
+      alert("本月无销售明细，无需确认");
+      return;
+    }
+    setConfirmDialogBlock(block);
+    const actual =
+      block.isAdjusted && block.settlement?.actualAmount != null
+        ? Number(block.settlement.actualAmount)
+        : block.estimatedTotal;
+    setConfirmForm({
+      actualAmount: actual,
+      remark: block.settlement?.remark || "",
+    });
+  }
+
+  async function submitConfirmDialog() {
+    if (!confirmDialogBlock) return;
+    const est = confirmDialogBlock.estimatedTotal;
+    const actual = Number(confirmForm.actualAmount);
+    if (!Number.isFinite(actual) || actual < 0) {
+      alert("请填写有效的实际结算金额");
+      return;
+    }
+    if (!confirmForm.remark.trim()) {
+      alert("请填写确认说明（可与预估一致，注明核对无误即可）");
+      return;
+    }
+    setConfirmSubmitting(true);
+    try {
+      const same = Math.abs(actual - est) < 0.005;
+      await upsertRevenueSettlement({
+        salesUnitId: confirmDialogBlock.unit.id,
+        yearMonth: selectedMonth,
+        estimatedAmount: est,
+        actualAmount: actual,
+        isAdjusted: true,
+        remark: confirmForm.remark.trim()
+          || (same ? "与预估一致确认" : "产品结算页确认"),
+        adjustedBy: user?.name,
+        adjustedAt: new Date().toISOString(),
+      });
+      setConfirmDialogBlock(null);
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "确认失败");
+    } finally {
+      setConfirmSubmitting(false);
+    }
+  }
+
+  async function revokeUnitBlock(
+    block: UnitSettlementBlock,
+    e: MouseEvent,
+  ) {
+    e.stopPropagation();
+    const sid = block.settlement?.id;
+    if (!sid || !block.isAdjusted) return;
+    if (
+      !window.confirm(
+        `撤回「${block.unit.name}」${selectedMonth} 的结算确认？撤回后状态变为待确认，可重新核对后再确认。`,
+      )
+    ) {
+      return;
+    }
+    setRevokingUnitId(block.unit.id);
+    try {
+      await deleteRevenueSettlement(sid);
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "撤回失败");
+    } finally {
+      setRevokingUnitId(null);
+    }
+  }
+
   function toggleUnit(unitId: string) {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -166,7 +278,7 @@ export default function ProductSettlementSales() {
     <div>
       <PageHeader
         title="产品结算"
-        description="记佣金额（实收 − 业绩扣除）× 结算比例 = 预估结算；单位在盈亏分析手工改过实际结算时，按预估占比分摊到每单。"
+        description="各单位每月须确认一次实际结算（与盈亏分析收入结算同一记录）；确认后按预估占比分摊到订单。与预估一致时也可直接点「确认」。"
         action={
           <div className="flex flex-wrap items-center gap-2">
             <Select value={selectedMonth} onValueChange={setSelectedMonth}>
@@ -277,12 +389,13 @@ export default function ProductSettlementSales() {
               <TableHead className="text-right">差额</TableHead>
               <TableHead className="text-right">笔数</TableHead>
               <TableHead>状态</TableHead>
+              <TableHead className="text-right min-w-[8rem]">操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {blocks.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="py-12 text-center text-muted-foreground">
+                <TableCell colSpan={8} className="py-12 text-center text-muted-foreground">
                   暂无可见单位
                 </TableCell>
               </TableRow>
@@ -318,19 +431,66 @@ export default function ProductSettlementSales() {
                       <TableCell className="text-right">{b.lines.length}</TableCell>
                       <TableCell>
                         {b.isAdjusted ? (
-                          <Badge variant="secondary" className="text-xs">
-                            已调整
-                          </Badge>
+                          <div className="space-y-0.5">
+                            <Badge variant="secondary" className="text-xs">
+                              已确认
+                            </Badge>
+                            {b.settlement?.adjustedBy && (
+                              <p className="text-[10px] text-muted-foreground">
+                                {b.settlement.adjustedBy}
+                                {b.settlement.adjustedAt
+                                  ? ` · ${formatDateTime(b.settlement.adjustedAt)}`
+                                  : ""}
+                              </p>
+                            )}
+                          </div>
                         ) : (
                           <Badge variant="outline" className="text-xs">
                             待确认
                           </Badge>
                         )}
                       </TableCell>
+                      <TableCell
+                        className="text-right"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="flex flex-col items-end gap-1">
+                          {canConfirmSettlement && b.lines.length > 0 ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant={b.isAdjusted ? "outline" : "default"}
+                              className="h-7 text-xs"
+                              onClick={(e) => openConfirmDialog(b, e)}
+                            >
+                              {b.isAdjusted ? "重新确认" : "确认结算"}
+                            </Button>
+                          ) : null}
+                          {b.isAdjusted && canConfirmSettlement && b.settlement?.id ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs text-amber-800"
+                              disabled={revokingUnitId === b.unit.id}
+                              onClick={(e) => void revokeUnitBlock(b, e)}
+                            >
+                              {revokingUnitId === b.unit.id ? "撤回中…" : "撤回确认"}
+                            </Button>
+                          ) : null}
+                          <Link
+                            to={profitConfirmHref(b.unit.id)}
+                            className="inline-flex items-center gap-0.5 text-xs text-primary underline-offset-2 hover:underline"
+                          >
+                            盈亏分析
+                            <ExternalLink className="h-3 w-3" />
+                          </Link>
+                        </div>
+                      </TableCell>
                     </TableRow>
                     {isOpen && (
                       <TableRow className="bg-muted/20 hover:bg-muted/20">
-                        <TableCell colSpan={7} className="p-3">
+                        <TableCell colSpan={8} className="p-3">
                           {b.lines.length === 0 ? (
                             <p className="py-4 text-center text-sm text-muted-foreground">
                               本月无归属本单位的销售（含分业绩份额）
@@ -434,7 +594,11 @@ export default function ProductSettlementSales() {
                               </div>
                               {b.isAdjusted && (
                                 <p className="text-xs text-muted-foreground">
-                                  实际结算已在盈亏分析调整；明细按预估占比分摊。
+                                  已与盈亏分析「收入明细与结算」关联确认
+                                  {b.settlement?.adjustedBy
+                                    ? `（${b.settlement.adjustedBy}）`
+                                    : ""}
+                                  ；有差额时明细按预估占比分摊实际结算。
                                 </p>
                               )}
                             </div>
@@ -451,12 +615,108 @@ export default function ProductSettlementSales() {
       </div>
 
       <p className="mt-3 text-xs text-muted-foreground">
-        修改单位实际结算请至{" "}
+        各单位每月须在弹窗中核对实际金额并填写说明后确认，与{" "}
         <Link className="text-primary underline" to="/profit-analysis">
           盈亏分析 · 收入明细与结算
         </Link>
-        ；比例配置在「产品结算金额设定」。
+        共用同一条记录。比例配置在「产品结算金额设定」。
       </p>
+
+      <Dialog
+        open={!!confirmDialogBlock}
+        onOpenChange={(open) => {
+          if (!open) setConfirmDialogBlock(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>确认单位产品结算</DialogTitle>
+          </DialogHeader>
+          {confirmDialogBlock && (
+            <div className="space-y-4 py-1">
+              <div className="flex items-center justify-between rounded-lg bg-muted/50 px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium">
+                    {confirmDialogBlock.unit.name}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {selectedMonth}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-muted-foreground">预估结算</p>
+                  <p className="text-lg font-bold text-cyan-700">
+                    {formatCurrency(confirmDialogBlock.estimatedTotal)}
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="confirm-actual">实际结算金额（¥）</Label>
+                <Input
+                  id="confirm-actual"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={confirmForm.actualAmount}
+                  onChange={(e) =>
+                    setConfirmForm({
+                      ...confirmForm,
+                      actualAmount: Number(e.target.value),
+                    })
+                  }
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  与预估一致可保持默认金额，有差额请改为财务核定数。
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="confirm-remark">确认说明（必填）</Label>
+                <Textarea
+                  id="confirm-remark"
+                  value={confirmForm.remark}
+                  onChange={(e) =>
+                    setConfirmForm({
+                      ...confirmForm,
+                      remark: e.target.value,
+                    })
+                  }
+                  placeholder="例：与预估核对无误 / 退款扣除后调整"
+                  rows={2}
+                />
+              </div>
+              {Math.abs(
+                confirmForm.actualAmount - confirmDialogBlock.estimatedTotal,
+              ) > 0.005 && (
+                <p className="text-xs text-amber-800">
+                  差额：
+                  {formatCurrency(
+                    confirmForm.actualAmount
+                      - confirmDialogBlock.estimatedTotal,
+                  )}
+                  ；保存后订单明细将按预估占比分摊实际结算。
+                </p>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={confirmSubmitting}
+              onClick={() => setConfirmDialogBlock(null)}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              disabled={confirmSubmitting || !canConfirmSettlement}
+              onClick={() => void submitConfirmDialog()}
+            >
+              {confirmSubmitting ? "保存中…" : "保存确认"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

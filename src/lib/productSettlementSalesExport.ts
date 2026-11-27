@@ -62,7 +62,7 @@ function addUnitDetailSheet(
     block.actualTotal,
     '笔数',
     block.lines.length,
-    '手工调整',
+    '是否已确认',
     block.isAdjusted ? '是' : '否',
   ])
   sheet.getRow(1).font = { bold: true }
@@ -131,7 +131,9 @@ export async function downloadProductSettlementSalesExcel(
     '实际结算',
     '差额',
     '笔数',
-    '是否手工调整',
+    '是否已确认',
+    '确认人',
+    '确认时间',
   ])
   summary.getRow(1).font = { bold: true }
   for (const b of blocks) {
@@ -143,6 +145,10 @@ export async function downloadProductSettlementSalesExcel(
       b.actualTotal - b.estimatedTotal,
       b.lines.length,
       b.isAdjusted ? '是' : '否',
+      b.settlement?.adjustedBy || '',
+      b.settlement?.adjustedAt
+        ? String(b.settlement.adjustedAt).slice(0, 19).replace('T', ' ')
+        : '',
     ])
   }
   autoFitColumns(summary)
